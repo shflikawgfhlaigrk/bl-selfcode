@@ -54,7 +54,9 @@ def _real_claude(task: str, *, cwd: str, timeout: int = CODE_TIMEOUT_S) -> None:
 
 
 def _real_tests(*, cwd: str, timeout: int = CODE_TIMEOUT_S) -> tuple[bool, str]:
-    proc = subprocess.run(["python", "-m", "pytest", "-q"], cwd=cwd,
+    # Use THIS interpreter (the ~/.utah venv) — bare "python" isn't on PATH (the live
+    # proof failed with FileNotFoundError: 'python').
+    proc = subprocess.run([sys.executable, "-m", "pytest", "-q"], cwd=cwd,
                           capture_output=True, text=True, timeout=timeout)
     return proc.returncode == 0, (proc.stdout or "") + (proc.stderr or "")
 
