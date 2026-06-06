@@ -1,34 +1,38 @@
-"""Always-on mic loop: capture an utterance, transcribe (MLX Whisper), gate on
-the wake word "ace", run the turn through the brain, speak the reply. Resilient —
-a bad turn or a transient mic error is logged and the loop continues; it never
-fast-exits (so the supervisor doesn't restart-storm). The live "say ace" test is
-the human's; everything up to the mic is unit/round-trip proven.
+"""Always-on mic loop: Silero VAD segments real SPEECH out of a noisy/musical room,
+the segment is transcribed (Moonshine), gated on the wake word "ace", run through the
+brain, and the reply spoken (Piper). Resilient — a bad turn or a transient mic error is
+logged and the loop continues; it never fast-exits (so the supervisor doesn't
+restart-storm). The live "say ace" test is the human's; everything up to the mic is
+unit/round-trip proven.
+
+Two faults the live test exposed, both fixed here:
+  * energy VAD couldn't tell music from speech -> 15s garbage blobs, wake never fired.
+    Silero (utah.voice.vad) scores P(speech) per 32ms frame; only real speech is cut.
+  * the mic heard Utah's own TTS (and the room) DURING a turn -> self-triggering. While
+    we transcribe/think/speak, mic frames are dropped and the buffer is drained after.
 """
 from __future__ import annotations
 
 import logging
 import os
 import tempfile
+import threading
 import time
 import wave
 
-from utah.voice import agent, stt
+from utah.voice import agent, stt, vad
 
 log = logging.getLogger("utah.voice.loop")
 
-SAMPLE_RATE = 16_000
+SAMPLE_RATE = vad.SAMPLE_RATE   # 16 kHz
+FRAME = vad.FRAME               # 512 samples = 32 ms (Silero-native)
 CHANNELS = 1
-BLOCK = 1_600  # 100 ms
-SILENCE_RMS = float(os.environ.get("UTAH_VOICE_SILENCE", "0.02"))
-SILENCE_BLOCKS = int(os.environ.get("UTAH_VOICE_SILENCE_BLOCKS", "15"))  # 1.5 s
-MAX_BLOCKS = int(os.environ.get("UTAH_VOICE_MAX_BLOCKS", "150"))  # 15 s cap
-PREROLL = 2  # keep 200 ms before onset so the first word isn't clipped
-MONITOR_S = 5.0  # how often the level monitor logs the observed mic RMS
-SILENCE_ALERT_S = 30.0  # mic delivering TRUE silence (zeros) this long -> record a failure
-TRUE_SILENCE = 0.0008  # below this = mic delivering zeros (deaf); a quiet room is well above
+MONITOR_S = 5.0                 # how often the level monitor logs observed mic RMS
+SILENCE_ALERT_S = 30.0          # mic delivering TRUE silence (zeros) this long -> failure
+TRUE_SILENCE = 0.0008           # below this = mic delivering zeros (deaf); a room reads higher
 
 
-def _rms(pcm) -> float:
+def _rms(pcm: bytes) -> float:
     import numpy as np
 
     a = np.frombuffer(pcm, dtype="int16").astype("float32")
@@ -46,54 +50,6 @@ def _write_wav(pcm: bytes) -> str:
     return path
 
 
-def _ambient_floor(q, blocks: int = 15) -> float:
-    """Sample ~1.5 s to learn the room's noise floor (the max ambient RMS)."""
-    mx = 0.0
-    for _ in range(blocks):
-        mx = max(mx, _rms(q.get()))
-    return mx
-
-
-def _speech_threshold(floor: float) -> float:
-    """Speech must clearly exceed the (continuously-adapting) noise floor —
-    multiplier-based so it tracks the room rather than a one-shot snapshot; the
-    min catches normal speech (~0.05+) in a quiet room."""
-    return max(floor * 3.0, 0.015)
-
-
-def _capture_one(q, floor_ref: list) -> bytes:
-    """Block until a full utterance (speech → 1.5 s below threshold) is captured.
-    ``floor_ref`` is a 1-element list holding the noise floor, updated continuously
-    during quiet idle (NOT during speech) so the threshold adapts to ambient drift."""
-    from collections import deque
-
-    preroll: deque[bytes] = deque(maxlen=PREROLL)
-    buf = bytearray()
-    capturing = False
-    silent = 0
-    blocks = 0
-    onset = 0
-    while True:
-        pcm = q.get()
-        r = _rms(pcm)
-        loud = r > _speech_threshold(floor_ref[0])
-        if not capturing:
-            preroll.append(pcm)
-            if not loud:  # adapt the noise floor during quiet idle (never during speech)
-                floor_ref[0] = 0.92 * floor_ref[0] + 0.08 * r
-            onset = onset + 1 if loud else 0
-            if onset >= 2:  # 2 consecutive loud blocks = real onset (not a lone spike)
-                capturing = True
-                for p in preroll:
-                    buf += p
-            continue
-        buf += pcm
-        blocks += 1
-        silent = 0 if loud else silent + 1
-        if silent >= SILENCE_BLOCKS or blocks >= MAX_BLOCKS:
-            return bytes(buf)
-
-
 def run() -> None:
     """Run the mic loop forever. Degrades (logs + retries) instead of crashing."""
     try:
@@ -105,29 +61,35 @@ def run() -> None:
         while True:
             time.sleep(3600)
 
-    import threading
-
     from utah import failures
 
     q: "queue.Queue[bytes]" = queue.Queue()
+    # Set while transcribing / thinking / speaking: the mic callback drops frames so we
+    # never capture Utah's own TTS or the room during a turn (the feedback that turned
+    # one reply into an endless self-conversation).
+    processing = threading.Event()
     level = {"max": 0.0, "last_loud": time.monotonic(), "alerted": False}
 
     def _cb(indata, frames, t, status):  # noqa: ANN001
+        if processing.is_set():
+            return  # echo/feedback guard — ignore the world while we speak/think
         pcm = bytes(indata)
         r = _rms(pcm)
         if r > level["max"]:
             level["max"] = r
-        if r > TRUE_SILENCE:  # mic is ALIVE (hearing the room); only zeros = deaf
+        if r > TRUE_SILENCE:
             level["last_loud"] = time.monotonic()
             level["alerted"] = False
         q.put(pcm)
 
     def _monitor():
-        # Surfaces a DEAF mic (launchd has no Microphone TCC -> stream opens but
-        # delivers silence): logs the level and records ONE failure so it's never
-        # a silent failure. Also the Phase-1 diagnostic (is it silence or a bug?).
+        # Surfaces a DEAF mic (no Microphone TCC -> stream opens but delivers silence):
+        # logs the level and records ONE failure so it's never silent.
         while True:
             time.sleep(MONITOR_S)
+            if processing.is_set():
+                level["last_loud"] = time.monotonic()  # not deaf — we muted ourselves
+                continue
             mx = level["max"]; level["max"] = 0.0
             log.info("voice: audio level (max rms / %ds) = %.4f", MONITOR_S, mx)
             quiet_for = time.monotonic() - level["last_loud"]
@@ -142,46 +104,63 @@ def run() -> None:
 
     threading.Thread(target=_monitor, daemon=True).start()
 
+    detector = vad.get_vad()
     fail_n = 0
     while True:
         try:
-            with sd.RawInputStream(samplerate=SAMPLE_RATE, blocksize=BLOCK,
+            with sd.RawInputStream(samplerate=SAMPLE_RATE, blocksize=FRAME,
                                    channels=CHANNELS, dtype="int16", callback=_cb):
-                fail_n = 0  # mic opened cleanly
-                level["last_loud"] = time.monotonic()  # fresh silence countdown
-                floor_ref = [max(_ambient_floor(q), 0.003)]
-                log.info("voice loop: mic open — listening for 'ace' "
-                         "(floor %.4f, speech threshold %.4f, adapts live)",
-                         floor_ref[0], _speech_threshold(floor_ref[0]))
+                fail_n = 0
+                level["last_loud"] = time.monotonic()
+                seg = vad.Segmenter()
+                detector.reset()
+                log.info("voice loop: mic open — Silero VAD listening for 'ace' "
+                         "(speech threshold %.2f)", vad.SPEECH_THRESHOLD)
                 while True:
-                    pcm = _capture_one(q, floor_ref)
+                    frame = q.get()
+                    is_speech = detector.prob(frame) > vad.SPEECH_THRESHOLD
+                    pcm = seg.feed(frame, is_speech)
+                    if pcm is None:
+                        continue
                     secs = len(pcm) / 2 / SAMPLE_RATE
-                    log.info("voice: captured %.1fs clip (rms %.3f) → transcribing", secs, _rms(pcm))
-                    path = _write_wav(pcm)
+                    log.info("voice: speech segment %.1fs → transcribing", secs)
+                    processing.set()  # mute the mic for the whole turn (no self-capture)
                     try:
-                        text = stt.transcribe(path)
-                        log.info("voice: transcript=%r", text)
-                        if text:
-                            result = agent.handle_utterance(text)
-                            cmd = result.get("command") if result else None
-                            log.info("voice: wake_fired=%s command=%r", result is not None, cmd)
-                            if result and result.get("command"):
-                                log.info("voice turn: %r → %r", result["command"],
-                                         (result.get("answer") or "")[:60])
-                    finally:
+                        path = _write_wav(pcm)
                         try:
-                            os.remove(path)
-                        except OSError:
+                            text = stt.transcribe(path)
+                            log.info("voice: transcript=%r", text)
+                            if text:
+                                result = agent.handle_utterance(text)
+                                cmd = result.get("command") if result else None
+                                log.info("voice: wake_fired=%s command=%r",
+                                         result is not None, cmd)
+                                if result and result.get("command"):
+                                    log.info("voice turn: %r → %r", result["command"],
+                                             (result.get("answer") or "")[:60])
+                        finally:
+                            try:
+                                os.remove(path)
+                            except OSError:
+                                pass
+                    finally:
+                        detector.reset()
+                        try:  # drop everything the room/TTS queued during the turn
+                            while True:
+                                q.get_nowait()
+                        except queue.Empty:
                             pass
+                        level["last_loud"] = time.monotonic()
+                        processing.clear()
         except Exception as exc:  # noqa: BLE001 — mic unavailable / glitch / device change
             fail_n += 1
-            if fail_n == 1:  # log ONCE (no spam if mic permission is missing)
+            if fail_n == 1:
                 import sys as _sys
                 log.warning(
                     "voice loop: mic unavailable (%s) — retrying quietly; if this persists, "
                     "grant Microphone permission to %s", exc, _sys.executable,
                 )
-            time.sleep(min(2 * fail_n, 30))  # backoff to 30s — never a tight error loop
+            time.sleep(min(2 * fail_n, 30))
 
 
 def main() -> int:
