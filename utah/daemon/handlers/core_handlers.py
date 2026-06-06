@@ -218,6 +218,19 @@ async def research(ctx: Context, params: object) -> dict:
         return await ctx.pool.run(_research_blocking, query, k)
 
 
+def _brief_blocking() -> dict:
+    from utah.product import brief
+
+    return brief.run(speak_fn=None, can_email=False)   # compose from live state; email gated
+
+
+async def morning_brief(ctx: Context, params: object) -> dict:
+    """Capability (not an agent): compose a brief from live Utah state. Email delivery is
+    gated on Michael's Gmail creds (documented); the composed brief is returned + speakable."""
+    with ctx.governor.admission():
+        return await ctx.pool.run(_brief_blocking)
+
+
 def _busy(seconds: float) -> float:
     t = time.perf_counter()
     time.sleep(seconds)  # a real blocking unit of work, off the loop
@@ -252,6 +265,7 @@ REGISTRY = {
     "scout_probate": scout_probate,
     "queue_outreach": queue_outreach,
     "research": research,
+    "morning_brief": morning_brief,
     "publish": publish,
     "shutdown": shutdown,
 }
