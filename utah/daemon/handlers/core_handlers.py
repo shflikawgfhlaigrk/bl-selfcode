@@ -200,6 +200,24 @@ async def queue_outreach(ctx: Context, params: object) -> dict:
         return await ctx.pool.run(_queue_outreach_blocking, campaign)
 
 
+def _research_blocking(query: str, k: int) -> dict:
+    from utah.product import researcher
+
+    return researcher.research(query, k=k)
+
+
+async def research(ctx: Context, params: object) -> dict:
+    """Capability (not an agent): web search → fetch → extract durable facts (grounded) →
+    store in memory. Failures (block/empty/fetch) documented to the AUDIT log."""
+    p = _as_dict(params)
+    query = str(p.get("query", "")).strip()
+    if not query:
+        raise RpcError(INVALID_PARAMS, "research requires a 'query'")
+    k = max(1, min(int(p.get("k", 4)), 8))
+    with ctx.governor.admission():
+        return await ctx.pool.run(_research_blocking, query, k)
+
+
 def _busy(seconds: float) -> float:
     t = time.perf_counter()
     time.sleep(seconds)  # a real blocking unit of work, off the loop
@@ -233,6 +251,7 @@ REGISTRY = {
     "scout_leads": scout_leads,
     "scout_probate": scout_probate,
     "queue_outreach": queue_outreach,
+    "research": research,
     "publish": publish,
     "shutdown": shutdown,
 }
