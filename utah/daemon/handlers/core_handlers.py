@@ -149,6 +149,22 @@ async def ledger_snapshot(ctx: Context, params: object) -> dict:
         return await ctx.pool.run(_ledger_snapshot_blocking, limit)
 
 
+def _scout_leads_blocking() -> dict:
+    """Run the leads capability against live OSM, writing the ledger (which pushes the
+    deck). The daemon's ledger singleton was built with publish=bus.publish at boot."""
+    from utah.product import leads
+    from utah.product.ledger import get_ledger
+
+    return leads.scout(get_ledger())
+
+
+async def scout_leads(ctx: Context, params: object) -> dict:
+    """Capability (not an agent): find local no-website SMBs and write them to the
+    ledger. Triggerable on demand; each new lead lights the deck by push."""
+    with ctx.governor.admission():
+        return await ctx.pool.run(_scout_leads_blocking)
+
+
 def _busy(seconds: float) -> float:
     t = time.perf_counter()
     time.sleep(seconds)  # a real blocking unit of work, off the loop
@@ -179,6 +195,7 @@ REGISTRY = {
     "memory_list": memory_list,
     "memory_entities": memory_entities,
     "ledger_snapshot": ledger_snapshot,
+    "scout_leads": scout_leads,
     "publish": publish,
     "shutdown": shutdown,
 }
