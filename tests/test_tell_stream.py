@@ -84,6 +84,18 @@ def test_tell_stream_degrades_when_brain_unavailable(monkeypatch):
     assert ("source", "unavailable") in evs
 
 
+def test_tell_stream_memory_turn_answer_is_cleaned(monkeypatch):
+    """A confident memory answer recalled from a stored 'turn' row must surface
+    just the answer, not the raw 'Q: …\\nA: …' scaffold (like Claude would)."""
+    hit = Hit(id=1, content="Q: what is utah\nA: Utah is the rebuild.", source="turn",
+              score=1.0, sim=0.9)
+    monkeypatch.setattr(memory, "answer",
+                        lambda t, *a, **k: ("Q: what is utah\nA: Utah is the rebuild.", [hit]))
+    evs = list(core.tell_stream("what is utah"))
+    answer = "".join(t for k, t in evs if k == "answer")
+    assert answer == "Utah is the rebuild."
+
+
 def test_tell_stream_empty_input_is_handled():
     evs = list(core.tell_stream("   "))
     assert ("source", "unavailable") in evs

@@ -209,7 +209,17 @@ function addEvent(ch,data){const t=$("ticker"); if(t.firstChild&&t.firstChild.te
   const d=document.createElement("div"); d.innerHTML=`<span class="ch">${ch}</span> ${data}`; t.prepend(d);
   while(t.children.length>30) t.removeChild(t.lastChild);}
 ev.onmessage=e=>addEvent("event",e.data);
-["engine","trading","leads","probate","outreach","risk","memory","voice","agent"].forEach(c=>ev.addEventListener(c,e=>addEvent(c,e.data)));
+["engine","trading","leads","probate","outreach","risk","memory","agent"].forEach(c=>ev.addEventListener(c,e=>addEvent(c,e.data)));
+// a voice turn ("ace …") flows through the SAME brain and lands in the chat box
+ev.addEventListener("voice",e=>{
+  addEvent("voice",e.data);
+  try{ const v=JSON.parse(e.data); if(v&&v.q){
+    $("ans").innerHTML=
+      '<div style="color:#8a8470;font-size:10px;letter-spacing:2px;margin:8px 0 4px">[voice · '+esc(v.source||"brain")+']</div>'+
+      '<div style="color:#9a937c;font-size:12px;margin-bottom:6px">🎙 '+esc(v.q)+'</div>'+
+      '<div style="white-space:pre-wrap;line-height:1.55;color:#ece6d4;padding-bottom:12px">'+esc(v.answer||"")+'</div>';
+  }}catch(_){}
+});
 let _es=null;
 function ask(){
   const q=$("q").value.trim(); if(!q)return;

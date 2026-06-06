@@ -279,6 +279,13 @@ def main() -> int:
             [sys.executable, "-m", "utah.interface.web"],
             probe=http_probe("http://127.0.0.1:8766/", 5.0),
         ),
+        # Always-on voice: wake "ace" -> MLX Whisper -> brain -> Piper -> chat box.
+        # No health endpoint — supervised by liveness (the loop is resilient and
+        # never fast-exits, so it's only restarted if the process actually dies).
+        ChildSpec(
+            "voice",
+            [sys.executable, "-m", "utah.voice.loop"],
+        ),
     ]
     # Tolerant of a busy/cold-booting Mac: 8s post-spawn grace, 5s probe timeout,
     # and only wedge after 3 consecutive failed probes (~15s) — never kill a

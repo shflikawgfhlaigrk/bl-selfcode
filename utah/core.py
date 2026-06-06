@@ -13,6 +13,7 @@ never fabricates:
 from __future__ import annotations
 
 import logging
+import re
 import sys
 from typing import Iterator
 
@@ -23,6 +24,18 @@ from utah.memory import AdmissionDenied, MemoryUnavailable
 from utah.objects import Reply, ReplySource
 
 log = logging.getLogger("utah.core")
+
+_TURN_ANSWER = re.compile(r"\bA:\s*(.*)$", re.S)
+
+
+def _present_memory_answer(answer: str, hits: list) -> str:
+    """A turn is stored as ``Q: …\\nA: …``; when one is recalled as a confident
+    answer, surface just the answer (what Claude would say), not the scaffold."""
+    if hits and getattr(hits[0], "source", "") == "turn":
+        m = _TURN_ANSWER.search(answer)
+        if m and m.group(1).strip():
+            return m.group(1).strip()
+    return answer
 
 
 def tell(text: str) -> Reply:
@@ -40,7 +53,7 @@ def tell(text: str) -> Reply:
         failures.record("memory", "unavailable", str(exc))
         answer = None
     if answer is not None:
-        return Reply(text=answer, source=ReplySource.MEMORY, hits=hits)
+        return Reply(text=_present_memory_answer(answer, hits), source=ReplySource.MEMORY, hits=hits)
 
     # 2. REASON: Claude CLI brain, grounded in whatever context we recalled.
     context = "\n".join(f"- {h.content}" for h in hits)
@@ -89,6 +102,7 @@ def tell_stream(text: str) -> Iterator[tuple[str, str]]:
         failures.record("memory", "unavailable", str(exc))
         answer = None
     if answer is not None:
+        answer = _present_memory_answer(answer, hits)
         yield ("source", "memory")
         yield ("answer", answer)
         yield ("done", answer)
