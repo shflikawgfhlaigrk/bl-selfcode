@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import logging
 import sys
+from typing import Iterator
 
 from utah import brain, memory
 from utah.brain import BrainUnavailable
@@ -61,6 +62,60 @@ def tell(text: str) -> Reply:
             log.warning("could not remember the turn (reply still sent): %s", exc)
 
     return Reply(text=reply_text, source=ReplySource.BRAIN, hits=hits)
+
+
+def tell_stream(text: str) -> Iterator[tuple[str, str]]:
+    """Streaming turn: recall → ground → stream the brain's reasoning+answer →
+    remember. Same no-fabrication contract as :func:`tell`, but yields ordered
+    ``(channel, chunk)`` events so chat AND voice can show reasoning live like
+    Claude. Channels: ``source`` (memory|brain|unavailable), ``thinking``,
+    ``answer``, ``done`` (final answer text). Never raises into the caller.
+    """
+    text = (text or "").strip()
+    if not text:
+        yield ("source", "unavailable")
+        yield ("answer", "I didn't catch that.")
+        yield ("done", "I didn't catch that.")
+        return
+
+    # 1. RECALL + GROUND — answer straight from memory only if confident.
+    hits: list = []
+    try:
+        answer, hits = memory.answer(text)
+    except MemoryUnavailable as exc:
+        log.warning("memory unavailable during recall, degrading: %s", exc)
+        answer = None
+    if answer is not None:
+        yield ("source", "memory")
+        yield ("answer", answer)
+        yield ("done", answer)
+        return
+
+    # 2. REASON — stream the Claude CLI brain, grounded in the recalled hits.
+    context = "\n".join(f"- {h.content}" for h in hits)
+    yield ("source", "brain")
+    parts: list[str] = []
+    try:
+        for channel, chunk in brain.think_stream(text, context):
+            if channel == "answer":
+                parts.append(chunk)
+            yield (channel, chunk)
+    except BrainUnavailable as exc:
+        log.error("brain unavailable: %s", exc)
+        msg = f"I don't know — my reasoning brain is unavailable right now ({exc})."
+        yield ("source", "unavailable")
+        yield ("answer", msg)
+        yield ("done", msg)
+        return
+
+    # 3. REMEMBER (best-effort) — skip refusals (nothing durable).
+    reply_text = "".join(parts).strip()
+    if reply_text and not brain.is_refusal(reply_text):
+        try:
+            memory.store(f"Q: {text}\nA: {reply_text}", source="turn", confidence=0.5)
+        except (MemoryUnavailable, EmbedError, AdmissionDenied) as exc:
+            log.warning("could not remember the turn (reply still sent): %s", exc)
+    yield ("done", reply_text)
 
 
 _USAGE = """\
