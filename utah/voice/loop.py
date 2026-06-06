@@ -54,16 +54,17 @@ def _ambient_floor(q, blocks: int = 15) -> float:
     return mx
 
 
-def _speech_threshold(ambient: float) -> float:
-    """Speech must clearly exceed ambient — adaptive so a noisy room (high floor)
-    doesn't make every block read 'loud' (the 15 s-blob bug), but the floor is low
-    enough to catch normal speech in a quiet room (~0.05+)."""
-    return max(ambient * 1.8, ambient + 0.015, 0.02)
+def _speech_threshold(floor: float) -> float:
+    """Speech must clearly exceed the (continuously-adapting) noise floor —
+    multiplier-based so it tracks the room rather than a one-shot snapshot; the
+    min catches normal speech (~0.05+) in a quiet room."""
+    return max(floor * 3.0, 0.015)
 
 
-def _capture_one(q, threshold: float) -> bytes:
-    """Block until a full utterance (speech above *threshold* → 1.5 s below) is
-    captured. ``threshold`` is calibrated above the room's ambient floor."""
+def _capture_one(q, floor_ref: list) -> bytes:
+    """Block until a full utterance (speech → 1.5 s below threshold) is captured.
+    ``floor_ref`` is a 1-element list holding the noise floor, updated continuously
+    during quiet idle (NOT during speech) so the threshold adapts to ambient drift."""
     from collections import deque
 
     preroll: deque[bytes] = deque(maxlen=PREROLL)
@@ -74,11 +75,14 @@ def _capture_one(q, threshold: float) -> bytes:
     onset = 0
     while True:
         pcm = q.get()
-        loud = _rms(pcm) > threshold
+        r = _rms(pcm)
+        loud = r > _speech_threshold(floor_ref[0])
         if not capturing:
             preroll.append(pcm)
+            if not loud:  # adapt the noise floor during quiet idle (never during speech)
+                floor_ref[0] = 0.92 * floor_ref[0] + 0.08 * r
             onset = onset + 1 if loud else 0
-            if onset >= 2:  # 2 consecutive loud blocks = real speech onset (not a spike)
+            if onset >= 2:  # 2 consecutive loud blocks = real onset (not a lone spike)
                 capturing = True
                 for p in preroll:
                     buf += p
@@ -145,12 +149,12 @@ def run() -> None:
                                    channels=CHANNELS, dtype="int16", callback=_cb):
                 fail_n = 0  # mic opened cleanly
                 level["last_loud"] = time.monotonic()  # fresh silence countdown
-                ambient = _ambient_floor(q)
-                threshold = _speech_threshold(ambient)
-                log.info("voice loop: mic open — always listening for 'ace' "
-                         "(ambient %.4f, speech threshold %.4f)", ambient, threshold)
+                floor_ref = [max(_ambient_floor(q), 0.003)]
+                log.info("voice loop: mic open — listening for 'ace' "
+                         "(floor %.4f, speech threshold %.4f, adapts live)",
+                         floor_ref[0], _speech_threshold(floor_ref[0]))
                 while True:
-                    pcm = _capture_one(q, threshold)
+                    pcm = _capture_one(q, floor_ref)
                     secs = len(pcm) / 2 / SAMPLE_RATE
                     log.info("voice: captured %.1fs clip (rms %.3f) → transcribing", secs, _rms(pcm))
                     path = _write_wav(pcm)
