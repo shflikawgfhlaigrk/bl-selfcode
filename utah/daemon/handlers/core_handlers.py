@@ -165,6 +165,20 @@ async def scout_leads(ctx: Context, params: object) -> dict:
         return await ctx.pool.run(_scout_leads_blocking)
 
 
+def _scout_probate_blocking() -> dict:
+    from utah.product import probate
+    from utah.product.ledger import get_ledger
+
+    return probate.scout(get_ledger())
+
+
+async def scout_probate(ctx: Context, params: object) -> dict:
+    """Capability (not an agent): scrape GPN for ring estate/probate notices and write
+    them to the ledger. Fragile source — every failure is documented to the AUDIT log."""
+    with ctx.governor.admission():
+        return await ctx.pool.run(_scout_probate_blocking)
+
+
 def _busy(seconds: float) -> float:
     t = time.perf_counter()
     time.sleep(seconds)  # a real blocking unit of work, off the loop
@@ -196,6 +210,7 @@ REGISTRY = {
     "memory_entities": memory_entities,
     "ledger_snapshot": ledger_snapshot,
     "scout_leads": scout_leads,
+    "scout_probate": scout_probate,
     "publish": publish,
     "shutdown": shutdown,
 }
