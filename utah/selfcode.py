@@ -44,9 +44,13 @@ def _slug(task: str) -> str:
 def _real_claude(task: str, *, cwd: str, timeout: int = CODE_TIMEOUT_S) -> None:
     """Run Claude CLI WITH coding tools in *cwd* to perform *task*. (Tools are enabled
     here — unlike the grounded brain — because this IS the coding harness.)"""
+    # Prompt via STDIN, never as a positional arg: --allowedTools is variadic and would
+    # otherwise swallow a trailing prompt, leaving claude -p to hang on empty stdin until
+    # the timeout (the live proof's 600s/300s hangs). With the prompt on stdin there is no
+    # positional to swallow, so flag order can't break it. (Proven: pipe-in returns in ~2s.)
     proc = subprocess.run(
-        [config.BRAIN_CMD, "-p", "--allowedTools", "Edit Write Read Bash", task],
-        cwd=cwd, capture_output=True, text=True, timeout=timeout,
+        [config.BRAIN_CMD, "-p", "--allowedTools", "Edit", "Write", "Read", "Bash"],
+        input=task, cwd=cwd, capture_output=True, text=True, timeout=timeout,
     )
     if proc.returncode != 0:
         raise RuntimeError(f"claude coding run exited {proc.returncode}: "
