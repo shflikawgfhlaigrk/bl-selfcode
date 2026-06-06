@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  com.utah.supervisor — the ONE launchd job for Utah (doc 2-processes: one root
+  supervisor, not flat KeepAlive jobs). launchd keeps the SUPERVISOR alive
+  (RunAtLoad + throttled KeepAlive); the supervisor owns the long-lived children
+  (daemon + web deck) with health probes, bounded backoff, and circuit-break.
+
+  Install:
+    cp ops/launchd/com.utah.supervisor.plist ~/Library/LaunchAgents/
+    launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.utah.supervisor.plist
+  Reload:  launchctl kickstart -k gui/$(id -u)/com.utah.supervisor
+  Stop:    launchctl bootout  gui/$(id -u)/com.utah.supervisor
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.utah.supervisor</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/michaelbarber/.utah/venv/bin/python</string>
+    <string>-m</string>
+    <string>utah.daemon.supervisor</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>/Users/michaelbarber/Desktop/ProjectUtah</string>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PYTHONPATH</key>
+    <string>/Users/michaelbarber/Desktop/ProjectUtah</string>
+    <key>PYTHONUNBUFFERED</key>
+    <string>1</string>
+    <key>PATH</key>
+    <string>/Users/michaelbarber/.utah/venv/bin:/opt/homebrew/bin:/usr/local/bin:/Users/michaelbarber/.local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+  </dict>
+
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>ThrottleInterval</key>
+  <integer>10</integer>
+  <key>ProcessType</key>
+  <string>Background</string>
+
+  <key>StandardOutPath</key>
+  <string>/Users/michaelbarber/.utah/logs/launchd-sup.out.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/michaelbarber/.utah/logs/launchd-sup.err.log</string>
+</dict>
+</plist>

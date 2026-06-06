@@ -1,18 +1,20 @@
-"""Supervisor — one root parent, not 46 flat KeepAlive jobs.
+"""Supervisor — one root parent owning a SMALL SET of long-lived children.
 
 Ace had 46 independent launchd jobs with blind KeepAlive: a chronic crasher
 respawned forever (or launchd's backoff left it down for hours), and a
-wedged-but-alive process read as "up". Utah's supervisor owns the daemon as a
-child and:
+wedged-but-alive process read as "up". Utah's supervisor owns the long-lived
+core — the **daemon** and the **web deck** — as children and:
 
-* **probes liveness** (a real ``ping``, never pid-presence) — a wedged daemon is
-  killed and restarted;
-* **bounded backoff + circuit-break** — after too many restarts in a window it
-  stops and alerts once, instead of thrashing;
-* **reaps** the child (it is the parent — no zombies);
-* **drains** the daemon on its own SIGTERM (verified child exit), then exits.
+* **probes health** (a real ``ping`` / HTTP 200, never pid-presence) — a wedged
+  child is killed and restarted; death is detected intrinsically (proc exited);
+* **bounded backoff + per-child circuit-break** — after too many restarts in a
+  window it stops restarting that child and alerts once, instead of thrashing;
+* **reaps** children (it is the parent — no zombies);
+* **drains** each child on shutdown (the daemon gets a graceful ``shutdown``).
 
-The supervisor is itself an flock singleton.
+The supervisor is an flock singleton; launchd keeps the *supervisor* itself
+alive across crashes/reboots (RunAtLoad + throttled KeepAlive). Everything else
+is supervised here, not as a flat launchd job (doc 2-processes).
 """
 from __future__ import annotations
 
@@ -25,6 +27,9 @@ import subprocess
 import sys
 import threading
 import time
+import urllib.request
+from dataclasses import dataclass
+from typing import Callable, Sequence
 
 from utah.daemon import client as ctl, lifecycle, runtime
 
@@ -33,91 +38,185 @@ log = logging.getLogger("utah.supervisor")
 SUP_LOCK = runtime.RUN_DIR / "utah-sup.lock"
 SUP_PID = runtime.RUN_DIR / "utah-sup.pid"
 
+Probe = Callable[[], bool]
+
+
+def ping_probe(timeout: float = 2.0) -> Probe:
+    """Health probe for the daemon: a real control-socket ``ping``."""
+    def _p() -> bool:
+        try:
+            ctl.call_sync("ping", timeout=timeout)
+            return True
+        except Exception:
+            return False
+    return _p
+
+
+def http_probe(url: str, timeout: float = 2.0) -> Probe:
+    """Health probe for an HTTP service (the web deck): GET returns < 500."""
+    def _p() -> bool:
+        try:
+            with urllib.request.urlopen(url, timeout=timeout) as resp:
+                return 200 <= getattr(resp, "status", 200) < 500
+        except Exception:
+            return False
+    return _p
+
+
+def _daemon_drain() -> None:
+    ctl.call_sync("shutdown", timeout=3.0)
+
+
+@dataclass
+class ChildSpec:
+    """One supervised long-lived child: how to start it and how to health-check it."""
+
+    name: str
+    argv: Sequence[str]
+    probe: Probe = lambda: True
+    drain: Callable[[], None] | None = None
+
+
+class _ManagedChild:
+    def __init__(
+        self, spec: ChildSpec, *, ready_timeout: float, max_restarts: int,
+        window_s: float, probe_grace_s: float,
+    ) -> None:
+        self.spec = spec
+        self.proc: subprocess.Popen | None = None
+        self._ready_timeout = ready_timeout
+        self._max = max_restarts
+        self._window = window_s
+        self._grace = probe_grace_s
+        self._restarts: collections.deque[float] = collections.deque()
+        self._spawned_at = 0.0
+
+    def spawn(self) -> None:
+        self.proc = subprocess.Popen(list(self.spec.argv), env={**os.environ})
+        self._spawned_at = time.monotonic()
+        log.info("spawned %s pid=%d", self.spec.name, self.proc.pid)
+
+    def ready(self) -> bool:
+        deadline = time.monotonic() + self._ready_timeout
+        while time.monotonic() < deadline:
+            if self.proc and self.proc.poll() is not None:
+                return False  # died during boot
+            if self.spec.probe():
+                return True
+            time.sleep(0.2)
+        return False
+
+    def alive(self) -> bool:
+        return self.proc is not None and self.proc.poll() is None
+
+    def healthy(self) -> bool:
+        # within the post-spawn grace window, don't probe (let it come up)
+        if time.monotonic() - self._spawned_at < self._grace:
+            return True
+        return self.spec.probe()
+
+    def record_restart(self) -> None:
+        now = time.monotonic()
+        self._restarts.append(now)
+        while self._restarts and now - self._restarts[0] > self._window:
+            self._restarts.popleft()
+
+    def circuit_broken(self) -> bool:
+        return len(self._restarts) >= self._max
+
+    def kill(self) -> None:
+        if self.proc and self.proc.poll() is None:
+            self.proc.terminate()
+            try:
+                self.proc.wait(timeout=5.0)
+            except subprocess.TimeoutExpired:
+                self.proc.kill()
+                self.proc.wait()
+
+    def drain(self, drain_timeout: float = 12.0) -> None:
+        if not self.proc or self.proc.poll() is not None:
+            return
+        if self.spec.drain is not None:
+            try:
+                self.spec.drain()
+                self.proc.wait(timeout=drain_timeout)
+                return
+            except Exception:
+                pass
+        self.kill()
+
 
 class Supervisor:
     def __init__(
         self,
+        children: Sequence[ChildSpec],
         *,
         max_restarts: int = 5,
         window_s: float = 60.0,
         ready_timeout: float = 20.0,
         probe_interval: float = 5.0,
-        backoff_base: float = 0.5,
-        backoff_max: float = 30.0,
         drain_timeout: float = 12.0,
+        probe_grace_s: float = 3.0,
     ) -> None:
-        self._max_restarts = max_restarts
-        self._window_s = window_s
-        self._ready_timeout = ready_timeout
+        self._children = [
+            _ManagedChild(
+                s, ready_timeout=ready_timeout, max_restarts=max_restarts,
+                window_s=window_s, probe_grace_s=probe_grace_s,
+            )
+            for s in children
+        ]
         self._probe_interval = probe_interval
-        self._backoff_base = backoff_base
-        self._backoff_max = backoff_max
         self._drain_timeout = drain_timeout
         self._stop = threading.Event()
-        self._child: subprocess.Popen | None = None
-        self._restarts: collections.deque[float] = collections.deque()
 
-    # -- child management ----------------------------------------------------
-    def _spawn(self) -> None:
-        # Child inherits env (incl. PYTHONPATH for `python -m utah.daemon.daemon`).
-        self._child = subprocess.Popen(
-            [sys.executable, "-m", "utah.daemon.daemon"], env={**os.environ}
-        )
-        log.info("spawned daemon child pid=%d", self._child.pid)
+    # -- lifecycle ----------------------------------------------------------
+    def start_all(self) -> bool:
+        for child in self._children:
+            child.spawn()
+        ok = True
+        for child in self._children:
+            if not child.ready():
+                log.error("%s failed to become ready", child.spec.name)
+                ok = False
+            else:
+                log.info("%s healthy", child.spec.name)
+        return ok
 
-    def _ready(self) -> bool:
-        deadline = time.monotonic() + self._ready_timeout
-        while time.monotonic() < deadline and not self._stop.is_set():
-            if self._child and self._child.poll() is not None:
-                return False  # died during boot
-            try:
-                ctl.call_sync("ping", timeout=2.0)
-                return True
-            except Exception:
-                self._stop.wait(0.3)
-        return False
-
-    def _record_restart(self) -> None:
-        now = time.monotonic()
-        self._restarts.append(now)
-        while self._restarts and now - self._restarts[0] > self._window_s:
-            self._restarts.popleft()
-
-    def _circuit_broken(self) -> bool:
-        return len(self._restarts) >= self._max_restarts
-
-    def _drain_child(self) -> None:
-        child = self._child
-        if not child or child.poll() is not None:
-            return
-        try:
-            ctl.call_sync("shutdown", timeout=3.0)
-        except Exception:
-            pass
-        try:
-            child.wait(timeout=self._drain_timeout)
-            return
-        except subprocess.TimeoutExpired:
-            log.warning("daemon did not drain in %.0fs → SIGTERM", self._drain_timeout)
-        child.terminate()
-        try:
-            child.wait(timeout=5.0)
-        except subprocess.TimeoutExpired:
-            log.error("daemon ignored SIGTERM → SIGKILL")
-            child.kill()
-            child.wait()
-
-    def _kill_child(self) -> None:
-        child = self._child
-        if child and child.poll() is None:
-            child.terminate()
-            try:
-                child.wait(timeout=5.0)
-            except subprocess.TimeoutExpired:
+    def supervise_once(self) -> None:
+        for child in self._children:
+            if child.circuit_broken():
+                continue  # gave up on this child; already alerted
+            dead = not child.alive()
+            wedged = (not dead) and (not child.healthy())
+            if not (dead or wedged):
+                continue
+            log.warning("%s %s → restart", child.spec.name, "died" if dead else "wedged")
+            if wedged:
                 child.kill()
-                child.wait()
+            child.record_restart()
+            if child.circuit_broken():
+                log.error(
+                    "circuit-break: %s restarted %d× in %.0fs — leaving down (alert once)",
+                    child.spec.name, child._max, child._window,
+                )
+                continue
+            child.spawn()
 
-    # -- main loop -----------------------------------------------------------
+    def circuit_broken(self) -> bool:
+        return any(c.circuit_broken() for c in self._children)
+
+    def child_pids(self) -> dict[str, int]:
+        return {
+            c.spec.name: c.proc.pid
+            for c in self._children
+            if c.proc and c.proc.poll() is None
+        }
+
+    def drain_all(self) -> None:
+        for child in self._children:
+            child.drain(self._drain_timeout)
+
+    # -- main loop ----------------------------------------------------------
     def run(self) -> int:
         runtime.ensure_runtime()
         try:
@@ -129,48 +228,20 @@ class Supervisor:
         for sig in (signal.SIGINT, signal.SIGTERM):
             signal.signal(sig, lambda *_: self._stop.set())
 
-        backoff = self._backoff_base
+        if not self.start_all():
+            log.error("not all children became ready on boot")
+
         while not self._stop.is_set():
-            self._spawn()
-            if not self._ready():
-                log.error("daemon failed to become ready")
-                self._kill_child()
-                self._record_restart()
-                if self._circuit_broken():
-                    break
-                self._stop.wait(backoff)
-                backoff = min(backoff * 2, self._backoff_max)
-                continue
-            log.info("daemon healthy")
-            backoff = self._backoff_base  # reset on a good boot
-
-            # monitor until the child dies, a probe fails, or we're told to stop
-            while not self._stop.is_set():
-                rc = self._child.poll() if self._child else 0
-                if rc is not None:
-                    log.warning("daemon exited rc=%s → restart", rc)
-                    self._record_restart()
-                    break
-                try:
-                    ctl.call_sync("ping", timeout=3.0)
-                except Exception as exc:
-                    log.warning("liveness probe failed (%s) → killing wedged daemon", exc)
-                    self._kill_child()
-                    self._record_restart()
-                    break
-                self._stop.wait(self._probe_interval)
-
-            if self._stop.is_set():
-                break
-            if self._circuit_broken():
+            self.supervise_once()
+            if self._children and all(c.circuit_broken() for c in self._children):
                 log.error(
-                    "circuit-break: %d restarts in %.0fs — stopping (alert once)",
-                    len(self._restarts), self._window_s,
+                    "all children circuit-broken — supervisor exiting for launchd backoff"
                 )
                 break
+            self._stop.wait(self._probe_interval)
 
-        log.info("supervisor draining daemon and exiting")
-        self._drain_child()
+        log.info("supervisor draining children and exiting")
+        self.drain_all()
         return 0
 
 
@@ -185,7 +256,20 @@ def main() -> int:
             logging.StreamHandler(sys.stderr),
         ],
     )
-    return Supervisor().run()
+    children = [
+        ChildSpec(
+            "daemon",
+            [sys.executable, "-m", "utah.daemon.daemon"],
+            probe=ping_probe(2.0),
+            drain=_daemon_drain,
+        ),
+        ChildSpec(
+            "web",
+            [sys.executable, "-m", "utah.interface.web"],
+            probe=http_probe("http://127.0.0.1:8766/", 2.0),
+        ),
+    ]
+    return Supervisor(children).run()
 
 
 if __name__ == "__main__":
