@@ -1,0 +1,4 @@
+#!/bin/sh
+# utah — operator CLI shim. Runs the control CLI on the Utah venv.
+export PYTHONPATH="/Users/michaelbarber/Desktop/ProjectUtah${PYTHONPATH:+:$PYTHONPATH}"
+exec /Users/michaelbarber/.utah/venv/bin/python -m utah.daemon.cli "$@"

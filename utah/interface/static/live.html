@@ -1,0 +1,202 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>UTAH — Local Command Deck</title>
+<style>
+  :root{
+    --bg:#08080c;--bg2:#0c0c12;--panel:#111119;--panel2:#0d0d14;--line:#1c1c26;
+    --gold:#c9a24a;--gold2:#ecd08a;--goldglow:rgba(201,162,74,.35);
+    --txt:#e8e3d4;--mut:#5f5b4f;--dim:#34323c;--dormant:#26252e;
+    --ok:#33d17a;--okglow:rgba(51,209,122,.5);--warn:#e7a93b;--err:#e2554b;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{margin:0;background:
+      radial-gradient(1200px 600px at 50% -10%,#15130c 0%,transparent 60%),
+      radial-gradient(900px 500px at 100% 110%,#0e0d16 0%,transparent 60%),var(--bg);
+    color:var(--txt);font:12.5px/1.45 ui-monospace,"JetBrains Mono",Menlo,monospace;
+    letter-spacing:.2px}
+  .uc{text-transform:uppercase;letter-spacing:2px}
+  /* header */
+  header{display:flex;align-items:center;gap:18px;padding:11px 22px;border-bottom:1px solid var(--line);
+    background:linear-gradient(180deg,#0d0c08,transparent)}
+  .logo{display:flex;align-items:center;gap:10px}
+  .logo .mark{width:22px;height:22px;border:1.5px solid var(--gold);border-radius:5px;transform:rotate(45deg);
+    box-shadow:0 0 14px var(--goldglow)}
+  .logo b{color:var(--gold2);letter-spacing:3px;font-size:15px}
+  .logo span{color:var(--mut);font-size:10px;letter-spacing:3px}
+  .chips{display:flex;gap:8px;margin-left:8px}
+  .chip{display:flex;align-items:center;gap:7px;padding:4px 11px;border:1px solid var(--line);border-radius:20px;
+    color:var(--mut);font-size:10px;letter-spacing:1.5px}
+  .led{width:7px;height:7px;border-radius:50%;background:var(--dim)}
+  .led.ok{background:var(--ok);box-shadow:0 0 9px var(--okglow)}
+  .led.warn{background:var(--warn);box-shadow:0 0 9px rgba(231,169,59,.5)}
+  .led.off{background:var(--err);box-shadow:0 0 9px rgba(226,85,75,.5)}
+  .hstat{margin-left:auto;display:flex;gap:26px;align-items:center}
+  .hstat .m b{color:var(--gold2);font-size:15px} .hstat .m span{color:var(--mut);font-size:9px;display:block;letter-spacing:2px}
+  #clock{color:var(--gold2);font-size:13px}
+  /* layout */
+  main{display:grid;grid-template-columns:248px 1fr 300px;gap:14px;padding:16px 18px}
+  .col{display:flex;flex-direction:column;gap:14px}
+  .card{background:linear-gradient(180deg,var(--panel),var(--panel2));border:1px solid var(--line);
+    border-radius:9px;padding:13px 14px;position:relative;overflow:hidden}
+  .card::before{content:"";position:absolute;left:0;top:0;height:2px;width:38px;background:var(--gold);opacity:.5}
+  .card h2{margin:0 0 9px;font-size:10px;letter-spacing:2.5px;color:var(--gold);font-weight:600;display:flex;justify-content:space-between}
+  .card h2 .tag{color:var(--ok);font-size:9px}
+  .card.dormant{opacity:.62}
+  .card.dormant::before{background:var(--dim)}
+  .card.dormant h2{color:var(--mut)}
+  .row{display:flex;justify-content:space-between;align-items:baseline;padding:4px 0;border-bottom:1px dotted #1b1b24}
+  .row:last-child{border-bottom:0}
+  .row .k{color:var(--mut);font-size:11px} .row .v{color:var(--gold2);font-weight:600}
+  .sub{color:var(--mut);font-size:9px;letter-spacing:2px;margin-top:6px}
+  .dormbody{height:62px;display:flex;align-items:center;justify-content:center;color:var(--dim);
+    letter-spacing:3px;font-size:10px;border:1px dashed #1e1d27;border-radius:6px;background:#0a0a10}
+  /* center reasoning core */
+  .core-wrap{display:flex;flex-direction:column;align-items:center;justify-content:center;padding:6px 0 14px}
+  .core{position:relative;width:300px;height:300px;display:flex;align-items:center;justify-content:center}
+  .ring{position:absolute;border-radius:50%;border:1px solid #211c10}
+  .r1{width:300px;height:300px;border-color:#2a230f}
+  .r2{width:226px;height:226px;border-color:#332813;animation:spin 30s linear infinite}
+  .r3{width:152px;height:152px;border-color:#3d2f12}
+  .r2::after,.r1::after{content:"";position:absolute;top:-3px;left:50%;width:5px;height:5px;border-radius:50%;
+    background:var(--gold);box-shadow:0 0 10px var(--gold)}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  @keyframes pulse{0%,100%{box-shadow:0 0 40px 4px var(--goldglow)}50%{box-shadow:0 0 70px 10px var(--goldglow)}}
+  .orb{width:118px;height:118px;border-radius:50%;
+    background:radial-gradient(circle at 50% 40%,#f6e2a6,#caa24a 45%,#6e571f 80%,#241b0a);
+    display:flex;flex-direction:column;align-items:center;justify-content:center;animation:pulse 4s ease-in-out infinite}
+  .orb b{color:#1a1407;font-size:18px;letter-spacing:1px} .orb span{color:#2a2008;font-size:8px;letter-spacing:2px}
+  .orbit{position:absolute;color:var(--mut);font-size:9px;letter-spacing:2px;background:#0c0b10;padding:3px 7px;border:1px solid var(--line);border-radius:4px}
+  .o-top{top:6px} .o-bot{bottom:6px} .o-l{left:-6px;top:46%} .o-r{right:-6px;top:46%}
+  .tiles{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;width:100%;margin-top:6px}
+  .tile{background:var(--panel2);border:1px solid var(--line);border-radius:7px;padding:10px;text-align:center}
+  .tile b{color:var(--gold2);font-size:16px;display:block} .tile span{color:var(--mut);font-size:9px;letter-spacing:2px}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  .grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px}
+  /* event ticker */
+  .ticker{height:96px;overflow:auto;font-size:11px;margin-top:2px}
+  .ticker div{padding:2px 0;color:#a39c84;border-bottom:1px dotted #16161e}
+  .ticker .ch{color:var(--gold)}
+  /* ask bar */
+  .ask{display:flex;gap:10px;padding:4px 18px 8px}
+  .ask input{flex:1;background:var(--panel);border:1px solid var(--line);color:var(--txt);padding:11px 14px;border-radius:8px;font:inherit}
+  .ask input:focus{outline:0;border-color:var(--gold);box-shadow:0 0 0 1px var(--goldglow)}
+  .ask button{background:linear-gradient(180deg,var(--gold2),var(--gold));border:0;color:#1a1407;padding:0 22px;border-radius:8px;font-weight:700;cursor:pointer;letter-spacing:1px}
+  #ans{padding:0 20px 12px;color:#cfc8ad;white-space:pre-wrap;min-height:16px}
+  footer{padding:9px 22px;color:var(--mut);border-top:1px solid var(--line);font-size:10px;letter-spacing:1.5px}
+  ::-webkit-scrollbar{width:7px}::-webkit-scrollbar-thumb{background:#23222c;border-radius:4px}
+</style>
+</head>
+<body>
+<header>
+  <div class="logo"><div class="mark"></div><b>UTAH</b><span>LOCAL COMMAND DECK</span></div>
+  <div class="chips">
+    <span class="chip"><span class="led" id="led-core"></span>LOCAL CORE</span>
+    <span class="chip"><span class="led" id="led-brain"></span>BRAIN · CLAUDE CLI</span>
+    <span class="chip"><span class="led" id="led-bus"></span>EVENT BUS</span>
+  </div>
+  <div class="hstat">
+    <div class="m"><b id="h-load">—</b><span>CORE LOAD</span></div>
+    <div class="m"><b id="h-mem">—</b><span>MEMORY ROWS</span></div>
+    <div class="m" id="clock">—</div>
+  </div>
+</header>
+
+<main>
+  <!-- LEFT: system spine (real) -->
+  <div class="col">
+    <div class="card"><h2>SYSTEM SPINE <span class="tag" id="spine-tag">—</span></h2><div id="spine"></div></div>
+    <div class="card"><h2>WORKER POOL</h2><div id="pool"></div></div>
+    <div class="card"><h2>GOVERNOR</h2><div id="gov"></div></div>
+    <div class="card dormant"><h2>SYNC &amp; INGEST</h2><div class="dormbody">DORMANT</div></div>
+  </div>
+
+  <!-- CENTER: reasoning core + tiles + dormant domains -->
+  <div class="col">
+    <div class="card">
+      <h2>REASONING CORE <span class="tag" id="core-tag">—</span></h2>
+      <div class="core-wrap">
+        <div class="core">
+          <div class="ring r1"></div><div class="ring r2"></div><div class="ring r3"></div>
+          <span class="orbit o-top">MEM</span><span class="orbit o-bot">BUS</span>
+          <span class="orbit o-l">RISK</span><span class="orbit o-r">VOICE</span>
+          <div class="orb"><b id="core-state">ACE</b><span>GROUNDED · NO-FAB</span></div>
+        </div>
+        <div class="tiles">
+          <div class="tile"><b id="t-up">—</b><span>UPTIME s</span></div>
+          <div class="tile"><b id="t-bus">—</b><span>BUS EVENTS</span></div>
+          <div class="tile"><b>ON-DEVICE</b><span>EMBED+RERANK</span></div>
+        </div>
+      </div>
+    </div>
+    <div class="grid3">
+      <div class="card dormant"><h2>ENGINES</h2><div class="dormbody">DORMANT</div></div>
+      <div class="card dormant"><h2>RISK KERNEL</h2><div class="dormbody">DORMANT</div></div>
+      <div class="card dormant"><h2>TICK FLOW</h2><div class="dormbody">DORMANT</div></div>
+    </div>
+    <div class="grid3">
+      <div class="card dormant"><h2>LEADS</h2><div class="dormbody">DORMANT</div></div>
+      <div class="card dormant"><h2>PROBATE</h2><div class="dormbody">DORMANT</div></div>
+      <div class="card dormant"><h2>OUTREACH</h2><div class="dormbody">DORMANT</div></div>
+    </div>
+  </div>
+
+  <!-- RIGHT: daemon/socket + memory + bus + dormant functions -->
+  <div class="col">
+    <div class="card"><h2>LOCAL DAEMON &amp; SOCKET <span class="tag" id="dae-tag">—</span></h2><div id="daemon"></div></div>
+    <div class="card"><h2>MEMORY · BRAIN</h2><div id="memory"></div></div>
+    <div class="card"><h2>EVENT BUS · LIVE</h2><div class="ticker" id="ticker"><div>awaiting events…</div></div></div>
+    <div class="card dormant"><h2>VOICE PIPELINE</h2><div class="dormbody">DORMANT</div></div>
+    <div class="card dormant"><h2>AUDIT LEDGER</h2><div class="dormbody">DORMANT</div></div>
+  </div>
+</main>
+
+<div class="ask">
+  <input id="q" placeholder="Issue a command to UTAH…  (real reasoning · no fabrication)"/>
+  <button onclick="ask()">SEND</button>
+</div>
+<div id="ans"></div>
+<footer>LIVE · REAL DATA ONLY · DORMANT = NO PRODUCER WIRED YET (NEVER SIMULATED) · SOURCE: UTAH CONTROL PLANE</footer>
+
+<script>
+const $=id=>document.getElementById(id);
+const rows=o=>Object.entries(o).map(([k,v])=>`<div class="row"><span class="k">${k}</span><span class="v">${v}</span></div>`).join("");
+function led(id,on){$(id).className="led "+(on?"ok":"off");}
+async function poll(){
+  try{
+    const s=await (await fetch("/status")).json();
+    led("led-core",true); led("led-brain",true); led("led-bus",true);
+    $("spine-tag").textContent="ONLINE"; $("core-tag").textContent="ONLINE"; $("dae-tag").textContent="ONLINE";
+    $("spine").innerHTML=rows({version:s.version,uptime:s.uptime_s+"s",draining:s.draining});
+    $("pool").innerHTML=rows({limit:s.pool.limit,borrowed:s.pool.borrowed,available:s.pool.available});
+    $("gov").innerHTML=rows({load:s.governor.load1,"per core":s.governor.load_per_core,inflight:s.governor.inflight+"/"+s.governor.max_inflight,cores:s.governor.ncpu});
+    $("daemon").innerHTML=rows({socket:"~/.utah/run",control:"unix · len-prefix",peer:"owner-only",bus:s.bus.subscribers+" subs"});
+    $("h-load").textContent=s.governor.load_per_core;
+    $("t-up").textContent=Math.round(s.uptime_s); $("t-bus").textContent=s.bus.published;
+    const m=await (await fetch("/memory")).json();
+    if(m&&m.total!=null){$("memory").innerHTML=rows({total:m.total,live:m.live,entities:m.entities}); $("h-mem").textContent=m.live;}
+  }catch(e){
+    ["led-core","led-brain","led-bus"].forEach(i=>$(i).className="led off");
+    $("spine-tag").textContent="OFFLINE";
+    for(const id of ["spine","pool","gov","daemon","memory"]) $(id).innerHTML='<div class="dormbody">OFFLINE</div>';
+    $("h-load").textContent="—"; $("h-mem").textContent="—";
+  }
+}
+const ev=new EventSource("/events");
+function addEvent(ch,data){const t=$("ticker"); if(t.firstChild&&t.firstChild.textContent.startsWith("awaiting")) t.innerHTML="";
+  const d=document.createElement("div"); d.innerHTML=`<span class="ch">${ch}</span> ${data}`; t.prepend(d);
+  while(t.children.length>30) t.removeChild(t.lastChild);}
+ev.onmessage=e=>addEvent("event",e.data);
+["engine","trading","leads","probate","outreach","risk","memory","voice","agent"].forEach(c=>ev.addEventListener(c,e=>addEvent(c,e.data)));
+async function ask(){const q=$("q").value.trim(); if(!q)return; $("ans").textContent="…thinking";
+  try{const r=await (await fetch("/api/tell",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({text:q})})).json();
+    $("ans").textContent=`[${r.source||"?"}] ${r.text||r.error||""}`;}catch(e){$("ans").textContent="brain unreachable";}}
+$("q").addEventListener("keydown",e=>{if(e.key==="Enter")ask();});
+function clock(){$("clock").textContent=new Date().toLocaleTimeString([],{hour:"2-digit",minute:"2-digit",second:"2-digit"})+" · ET";}
+poll();setInterval(poll,2000);clock();setInterval(clock,1000);
+</script>
+</body>
+</html>

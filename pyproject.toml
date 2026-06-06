@@ -1,0 +1,19 @@
+[project]
+name = "utah"
+version = "1.0.0"
+description = "Utah baseline step 1: THE BRAIN (grounded compounding memory + Claude CLI reasoning)"
+requires-python = ">=3.12"
+dependencies = [
+    "msgspec>=0.18",
+    "psycopg[binary]>=3.1",
+    "pgvector>=0.2.5",
+    "fastembed>=0.3",   # production embedder + reranker (free, onnx, no torch)
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = "-q"
