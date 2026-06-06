@@ -16,8 +16,15 @@ DB_DSN: str = os.environ.get("UTAH_DSN", "host=/tmp port=5433 dbname=utah")
 #: The brain command — Claude CLI on PATH (subscription; the one paid lane).
 BRAIN_CMD: str = os.environ.get("UTAH_BRAIN", "claude")
 
+#: ``--tools ""`` disables ALL built-in tools and ``--strict-mcp-config`` (with no
+#: ``--mcp-config``) loads no MCP servers — so the brain runs as a pure LLM that
+#: ANSWERS, not as the Claude Code agent. Without these, ``claude -p`` goes
+#: agentic: it explores files / runs bash ("the paths") instead of answering, and
+#: a turn times out narrating tool steps. Subscription auth is unaffected.
+BRAIN_NO_AGENT: tuple[str, ...] = ("--tools", "", "--strict-mcp-config")
+
 #: Arguments for one-shot print mode.
-BRAIN_ARGS: tuple[str, ...] = ("-p",)
+BRAIN_ARGS: tuple[str, ...] = ("-p", *BRAIN_NO_AGENT)
 
 #: Arguments for one-shot STREAMING print mode (newline-delimited stream-json).
 #: ``--include-partial-messages`` emits incremental token deltas; ``--verbose``
@@ -30,6 +37,7 @@ BRAIN_STREAM_ARGS: tuple[str, ...] = (
     "--include-partial-messages",
     "--no-session-persistence",
     "--verbose",
+    *BRAIN_NO_AGENT,
 )
 
 #: Seconds to wait for one brain turn before declaring it unavailable.

@@ -130,6 +130,20 @@ def test_think_stream_uses_stream_json_flags():
     assert "--include-partial-messages" in argv
 
 
+def test_think_stream_disables_tools_so_it_cannot_go_agentic():
+    """The brain must ANSWER, not run as the Claude Code agent. Tools are disabled
+    (--tools "") and session MCP is off (--strict-mcp-config) so it can't go off
+    exploring files / running bash ('the paths') instead of answering — the bug
+    that made a turn time out after 120s narrating tool steps."""
+    runner = ScriptedStreamRunner(_stream_lines_for("x", "y"))
+    brain.set_stream_runner(runner)
+    list(brain.think_stream("q"))
+    argv = runner.last_argv
+    assert "--tools" in argv
+    assert argv[argv.index("--tools") + 1] == ""   # "" disables ALL built-in tools
+    assert "--strict-mcp-config" in argv
+
+
 def test_think_stream_raises_brain_unavailable_on_runner_failure():
     runner = ScriptedStreamRunner(brain.BrainUnavailable("cli gone"))
     brain.set_stream_runner(runner)

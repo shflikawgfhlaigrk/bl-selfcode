@@ -123,21 +123,18 @@ def tell_stream(text: str) -> Iterator[tuple[str, str]]:
         yield ("done", "I didn't catch that.")
         return
 
-    # 1. RECALL + GROUND — answer straight from memory only if confident.
+    # 1. RECALL — pull memory as GROUNDING for the brain. Memory feeds cognition;
+    #    it never short-circuits the stream. The interactive turn ALWAYS reasons so
+    #    the chat box (and voice) show the brain thinking live, like Claude — even
+    #    when the answer is "known". (The non-streaming tell() keeps the verbatim
+    #    fast-path for cheap programmatic callers.)
     hits: list = []
     try:
-        answer, hits = memory.answer(text)
+        hits = memory.recall(text)
     except MemoryUnavailable as exc:
         log.warning("memory unavailable during recall, degrading: %s", exc)
         failures.record("memory", "unavailable", str(exc))
-        answer = None
-    if answer is not None:
-        answer = _present_memory_answer(answer, hits)
-        _CONVO.append((text, answer))
-        yield ("source", "memory")
-        yield ("answer", answer)
-        yield ("done", answer)
-        return
+        hits = []
 
     # 2. REASON — stream the Claude CLI brain, grounded in the conversation + hits.
     context = _build_context(hits)

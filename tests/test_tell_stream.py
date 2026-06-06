@@ -32,7 +32,7 @@ def _hit(content: str) -> Hit:
 
 
 def test_tell_stream_streams_thinking_then_answer_via_brain(monkeypatch):
-    monkeypatch.setattr(memory, "answer", lambda t, *a, **k: (None, [_hit("Utah is the rebuild")]))
+    monkeypatch.setattr(memory, "recall", lambda t, *a, **k: [_hit("Utah is the rebuild")])
     monkeypatch.setattr(memory, "store", lambda *a, **k: None)
     brain.set_stream_runner(ScriptedStreamRunner(_brain_lines("recalled 1 hit", "Utah is the rebuild.")))
     evs = list(core.tell_stream("what is utah?"))
@@ -44,20 +44,29 @@ def test_tell_stream_streams_thinking_then_answer_via_brain(monkeypatch):
     assert any(k == "done" for k, _ in evs)
 
 
-def test_tell_stream_returns_memory_answer_without_calling_brain(monkeypatch):
-    monkeypatch.setattr(memory, "answer", lambda t, *a, **k: ("Newnan, Georgia", [_hit("Michael lives in Newnan, Georgia")]))
-    def _no_brain(*a, **k):
-        raise AssertionError("brain must not be called when memory answers")
-    monkeypatch.setattr(brain, "think_stream", _no_brain)
+def test_tell_stream_always_reasons_with_memory_as_context(monkeypatch):
+    """Memory FEEDS cognition — it never short-circuits the stream. Even with a
+    strong recall hit, the brain runs and reasoning is shown live (like Claude);
+    the recalled memory is handed to the brain as grounding context, not returned
+    verbatim. This is the fix for 'it showed the path instead of thinking'."""
+    monkeypatch.setattr(memory, "recall",
+                        lambda t, *a, **k: [_hit("Michael lives in Newnan, Georgia")])
+    monkeypatch.setattr(memory, "store", lambda *a, **k: None)
+    r = ScriptedStreamRunner(_brain_lines("the context says Newnan", "Newnan, Georgia."))
+    brain.set_stream_runner(r)
     evs = list(core.tell_stream("where does Michael live?"))
+    thinking = "".join(t for k, t in evs if k == "thinking")
     answer = "".join(t for k, t in evs if k == "answer")
-    assert "Newnan" in answer
-    assert ("source", "memory") in evs
+    assert ("source", "brain") in evs                       # brain ran — no short-circuit
+    assert ("source", "memory") not in evs
+    assert "the context says Newnan" in thinking            # reasoning IS shown
+    assert "Newnan, Georgia." in answer
+    assert "Michael lives in Newnan, Georgia" in r.last_prompt  # memory fed as context
 
 
 def test_tell_stream_remembers_the_turn_after_brain(monkeypatch):
     stored = {}
-    monkeypatch.setattr(memory, "answer", lambda t, *a, **k: (None, []))
+    monkeypatch.setattr(memory, "recall", lambda t, *a, **k: [])
     monkeypatch.setattr(memory, "store", lambda content, **k: stored.update(content=content, source=k.get("source")))
     brain.set_stream_runner(ScriptedStreamRunner(_brain_lines("reason", "The answer.")))
     list(core.tell_stream("q?"))
@@ -67,7 +76,7 @@ def test_tell_stream_remembers_the_turn_after_brain(monkeypatch):
 
 def test_tell_stream_does_not_remember_a_refusal(monkeypatch):
     calls = {"store": 0}
-    monkeypatch.setattr(memory, "answer", lambda t, *a, **k: (None, []))
+    monkeypatch.setattr(memory, "recall", lambda t, *a, **k: [])
     monkeypatch.setattr(memory, "store", lambda *a, **k: calls.__setitem__("store", calls["store"] + 1))
     brain.set_stream_runner(ScriptedStreamRunner(_brain_lines("hmm", "I don't know.")))
     list(core.tell_stream("q?"))
@@ -75,7 +84,7 @@ def test_tell_stream_does_not_remember_a_refusal(monkeypatch):
 
 
 def test_tell_stream_degrades_when_brain_unavailable(monkeypatch):
-    monkeypatch.setattr(memory, "answer", lambda t, *a, **k: (None, []))
+    monkeypatch.setattr(memory, "recall", lambda t, *a, **k: [])
     monkeypatch.setattr(memory, "store", lambda *a, **k: None)
     brain.set_stream_runner(ScriptedStreamRunner(brain.BrainUnavailable("cli gone")))
     evs = list(core.tell_stream("q?"))
@@ -84,23 +93,11 @@ def test_tell_stream_degrades_when_brain_unavailable(monkeypatch):
     assert ("source", "unavailable") in evs
 
 
-def test_tell_stream_memory_turn_answer_is_cleaned(monkeypatch):
-    """A confident memory answer recalled from a stored 'turn' row must surface
-    just the answer, not the raw 'Q: …\\nA: …' scaffold (like Claude would)."""
-    hit = Hit(id=1, content="Q: what is utah\nA: Utah is the rebuild.", source="turn",
-              score=1.0, sim=0.9)
-    monkeypatch.setattr(memory, "answer",
-                        lambda t, *a, **k: ("Q: what is utah\nA: Utah is the rebuild.", [hit]))
-    evs = list(core.tell_stream("what is utah"))
-    answer = "".join(t for k, t in evs if k == "answer")
-    assert answer == "Utah is the rebuild."
-
-
 def test_tell_stream_carries_recent_conversation(monkeypatch):
     """A follow-up turn must see the prior turn(s) — a real conversation thread,
     not isolated one-shots. The brain prompt for turn 2 includes turn 1's Q+A."""
     core.reset_conversation()
-    monkeypatch.setattr(memory, "answer", lambda t, *a, **k: (None, []))
+    monkeypatch.setattr(memory, "recall", lambda t, *a, **k: [])
     monkeypatch.setattr(memory, "store", lambda *a, **k: None)
 
     brain.set_stream_runner(ScriptedStreamRunner(_brain_lines("t", "Utah is the rebuild of AceOS.")))
@@ -118,7 +115,7 @@ def test_tell_stream_carries_recent_conversation(monkeypatch):
 
 def test_reset_conversation_clears_the_thread(monkeypatch):
     core.reset_conversation()
-    monkeypatch.setattr(memory, "answer", lambda t, *a, **k: (None, []))
+    monkeypatch.setattr(memory, "recall", lambda t, *a, **k: [])
     monkeypatch.setattr(memory, "store", lambda *a, **k: None)
     brain.set_stream_runner(ScriptedStreamRunner(_brain_lines("t", "A1.")))
     list(core.tell_stream("first question here"))
