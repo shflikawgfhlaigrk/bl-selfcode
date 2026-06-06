@@ -16,7 +16,7 @@ from pathlib import Path
 import anyio
 from anyio.abc import SocketAttribute
 
-from utah import UtahError
+from utah import UtahError, failures
 from utah.daemon import frame, rpc
 from utah.daemon.dispatch import Dispatcher
 from utah.daemon.peercred import PeerAuthError, authorize
@@ -167,9 +167,11 @@ class ControlServer:
             return None if req.is_notification else rpc.err(req.id, exc.code, str(exc), exc.data)
         except UtahError as exc:  # a live dependency (memory/brain/embed) is down
             log.warning("handler dependency unavailable: %s", exc)
+            failures.record("daemon", "dependency_unavailable", f"{req.method}: {exc}")
             return None if req.is_notification else rpc.err(req.id, UNAVAILABLE, str(exc))
         except Exception as exc:  # never leak a traceback to the peer or crash
             log.exception("handler crashed: %s", req.method)
+            failures.record("daemon", "handler_crash", f"{req.method}: {exc}")
             return None if req.is_notification else rpc.err(
                 req.id, INTERNAL_ERROR, f"internal error in {req.method}"
             )

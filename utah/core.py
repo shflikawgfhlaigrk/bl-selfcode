@@ -16,7 +16,7 @@ import logging
 import sys
 from typing import Iterator
 
-from utah import brain, memory
+from utah import brain, failures, memory
 from utah.brain import BrainUnavailable
 from utah.embed import EmbedError
 from utah.memory import AdmissionDenied, MemoryUnavailable
@@ -37,6 +37,7 @@ def tell(text: str) -> Reply:
         answer, hits = memory.answer(text)
     except MemoryUnavailable as exc:
         log.warning("memory unavailable during recall, degrading: %s", exc)
+        failures.record("memory", "unavailable", str(exc))
         answer = None
     if answer is not None:
         return Reply(text=answer, source=ReplySource.MEMORY, hits=hits)
@@ -47,6 +48,7 @@ def tell(text: str) -> Reply:
         reply_text = brain.think(text, context)
     except BrainUnavailable as exc:
         log.error("brain unavailable: %s", exc)
+        failures.record("brain", "unavailable", str(exc))
         return Reply(
             text=f"I don't know — my reasoning brain is unavailable right now ({exc}).",
             source=ReplySource.UNAVAILABLE,
@@ -84,6 +86,7 @@ def tell_stream(text: str) -> Iterator[tuple[str, str]]:
         answer, hits = memory.answer(text)
     except MemoryUnavailable as exc:
         log.warning("memory unavailable during recall, degrading: %s", exc)
+        failures.record("memory", "unavailable", str(exc))
         answer = None
     if answer is not None:
         yield ("source", "memory")
@@ -102,6 +105,7 @@ def tell_stream(text: str) -> Iterator[tuple[str, str]]:
             yield (channel, chunk)
     except BrainUnavailable as exc:
         log.error("brain unavailable: %s", exc)
+        failures.record("brain", "unavailable", str(exc))
         msg = f"I don't know — my reasoning brain is unavailable right now ({exc})."
         yield ("source", "unavailable")
         yield ("answer", msg)

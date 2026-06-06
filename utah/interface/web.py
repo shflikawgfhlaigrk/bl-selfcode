@@ -15,11 +15,13 @@ import logging
 import pathlib
 
 from starlette.applications import Starlette
+from starlette.concurrency import run_in_threadpool
 from starlette.responses import FileResponse, JSONResponse
 from starlette.routing import Mount, Route
 from starlette.staticfiles import StaticFiles
 from sse_starlette.sse import EventSourceResponse
 
+from utah import failures
 from utah.daemon import client as ctl
 
 log = logging.getLogger("utah.interface.web")
@@ -130,6 +132,14 @@ def _deck_state(st: dict | None) -> dict:
     return state
 
 
+def _audit_rows() -> list[str]:
+    """Recent failures formatted for the AUDIT LEDGER panel (real-or-empty)."""
+    return [
+        f"{r.ts} {r.source}/{r.kind}: {r.detail}"[:140]
+        for r in failures.recent(20)
+    ]
+
+
 async def deck_data(request):
     """Every deck data route, served from the single live ``_deck_state`` feed.
     Always 200 (the SPA throws on non-200); ``/state`` returns the whole feed,
@@ -138,6 +148,8 @@ async def deck_data(request):
     st = await _daemon_status()
     log.info("deck GET /%s (daemon=%s)", route, "up" if st is not None else "down")
     state = _deck_state(st)
+    # AUDIT LEDGER panel — live from the durable failure log (off-loop; empty on error)
+    state["audit"] = await run_in_threadpool(_audit_rows)
 
     if route in ("status", "state"):
         return JSONResponse(state)

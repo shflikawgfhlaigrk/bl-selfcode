@@ -362,3 +362,38 @@ class FakeStore:
 
     def close(self) -> None:
         self.closed = True
+
+
+# --- failure log -----------------------------------------------------------------
+
+class FakeFailureStore:
+    """In-memory FailureStore for tests. ``fail=True`` makes insert raise so we
+    can prove record()/record_silent() never propagate (de-silencing must never
+    itself fail)."""
+
+    def __init__(self) -> None:
+        self.rows: list = []
+        self.fail = False
+        self.schema_inits = 0
+        self._seq = 0
+
+    def init_schema(self) -> None:
+        self.schema_inits += 1
+
+    def insert(self, source: str, kind: str, detail: str) -> None:
+        if self.fail:
+            raise RuntimeError("fake failure store down")
+        self._seq += 1
+        self.rows.append((self._seq, source, kind, detail))
+
+    def recent(self, limit: int) -> list:
+        from utah.failures import FailureRow
+        out = [FailureRow(source=s, kind=k, detail=d) for _, s, k, d in self.rows]
+        out.reverse()  # most recent first
+        return out[:limit]
+
+    def count(self) -> int:
+        return len(self.rows)
+
+    def close(self) -> None:
+        pass

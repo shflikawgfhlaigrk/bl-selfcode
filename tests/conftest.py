@@ -8,20 +8,25 @@ import pytest
 
 from utah import brain as brain_mod
 from utah import embed as embed_mod
+from utah import failures as failures_mod
 from utah import memory as memory_mod
 from utah import rerank as rerank_mod
-from tests.fakes import FakeEmbedder, FakeStore, ScriptedRunner, ZeroReranker
+from tests.fakes import FakeEmbedder, FakeFailureStore, FakeStore, ScriptedRunner, ZeroReranker
 
 
 @pytest.fixture(autouse=True)
 def _restore_boundaries():
-    """Restore all injectable boundaries after every test."""
+    """Restore all injectable boundaries after every test. Also pin a fake failure
+    store for EVERY test so code paths that record failures (core.tell_stream etc.)
+    never write to the real Postgres failures table (no test pollution)."""
+    failures_mod.set_store(FakeFailureStore())
     yield
     embed_mod.set_embedder(None)
     rerank_mod.set_reranker(None)
     brain_mod.set_runner(None)
     brain_mod.set_stream_runner(None)
     memory_mod.set_backend(None)
+    failures_mod.set_store(None)
 
 
 @pytest.fixture
