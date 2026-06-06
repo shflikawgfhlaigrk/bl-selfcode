@@ -15,6 +15,7 @@ from __future__ import annotations
 import logging
 import re
 import sys
+from collections import deque
 from typing import Iterator
 
 from utah import brain, failures, memory
@@ -24,6 +25,31 @@ from utah.memory import AdmissionDenied, MemoryUnavailable
 from utah.objects import Reply, ReplySource
 
 log = logging.getLogger("utah.core")
+
+#: Recent (question, answer) turns — the live conversation thread shared by chat
+#: AND voice, so follow-ups ("why?", "prove it") have context. Small + in-memory.
+_CONVO: "deque[tuple[str, str]]" = deque(maxlen=6)
+
+
+def reset_conversation() -> None:
+    """Clear the conversation thread (new conversation / tests)."""
+    _CONVO.clear()
+
+
+def _conversation_context() -> str:
+    return "\n".join(f"Michael: {q}\nUtah: {a}" for q, a in _CONVO)
+
+
+def _build_context(hits: list) -> str:
+    """Brain context = recent conversation thread + recalled memory (real-or-empty)."""
+    parts: list[str] = []
+    convo = _conversation_context()
+    if convo:
+        parts.append("RECENT CONVERSATION:\n" + convo)
+    if hits:
+        parts.append("RECALLED MEMORY:\n" + "\n".join(f"- {h.content}" for h in hits))
+    return "\n\n".join(parts)
+
 
 _TURN_ANSWER = re.compile(r"\bA:\s*(.*)$", re.S)
 
@@ -53,10 +79,12 @@ def tell(text: str) -> Reply:
         failures.record("memory", "unavailable", str(exc))
         answer = None
     if answer is not None:
-        return Reply(text=_present_memory_answer(answer, hits), source=ReplySource.MEMORY, hits=hits)
+        clean = _present_memory_answer(answer, hits)
+        _CONVO.append((text, clean))
+        return Reply(text=clean, source=ReplySource.MEMORY, hits=hits)
 
-    # 2. REASON: Claude CLI brain, grounded in whatever context we recalled.
-    context = "\n".join(f"- {h.content}" for h in hits)
+    # 2. REASON: Claude CLI brain, grounded in the conversation thread + recall.
+    context = _build_context(hits)
     try:
         reply_text = brain.think(text, context)
     except BrainUnavailable as exc:
@@ -70,6 +98,8 @@ def tell(text: str) -> Reply:
 
     # 3. REMEMBER (best-effort): store the exchange so future recall compounds.
     #    Refusals ("I don't know…", verbose or not) carry nothing durable → skip.
+    if reply_text:
+        _CONVO.append((text, reply_text))
     if not brain.is_refusal(reply_text):
         try:
             memory.store(f"Q: {text}\nA: {reply_text}", source="turn", confidence=0.5)
@@ -103,13 +133,14 @@ def tell_stream(text: str) -> Iterator[tuple[str, str]]:
         answer = None
     if answer is not None:
         answer = _present_memory_answer(answer, hits)
+        _CONVO.append((text, answer))
         yield ("source", "memory")
         yield ("answer", answer)
         yield ("done", answer)
         return
 
-    # 2. REASON — stream the Claude CLI brain, grounded in the recalled hits.
-    context = "\n".join(f"- {h.content}" for h in hits)
+    # 2. REASON — stream the Claude CLI brain, grounded in the conversation + hits.
+    context = _build_context(hits)
     yield ("source", "brain")
     parts: list[str] = []
     try:
@@ -128,6 +159,8 @@ def tell_stream(text: str) -> Iterator[tuple[str, str]]:
 
     # 3. REMEMBER (best-effort) — skip refusals (nothing durable).
     reply_text = "".join(parts).strip()
+    if reply_text:
+        _CONVO.append((text, reply_text))  # conversation thread (incl. honest refusals)
     if reply_text and not brain.is_refusal(reply_text):
         try:
             memory.store(f"Q: {text}\nA: {reply_text}", source="turn", confidence=0.5)

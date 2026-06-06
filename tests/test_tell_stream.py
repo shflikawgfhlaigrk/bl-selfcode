@@ -96,6 +96,39 @@ def test_tell_stream_memory_turn_answer_is_cleaned(monkeypatch):
     assert answer == "Utah is the rebuild."
 
 
+def test_tell_stream_carries_recent_conversation(monkeypatch):
+    """A follow-up turn must see the prior turn(s) — a real conversation thread,
+    not isolated one-shots. The brain prompt for turn 2 includes turn 1's Q+A."""
+    core.reset_conversation()
+    monkeypatch.setattr(memory, "answer", lambda t, *a, **k: (None, []))
+    monkeypatch.setattr(memory, "store", lambda *a, **k: None)
+
+    brain.set_stream_runner(ScriptedStreamRunner(_brain_lines("t", "Utah is the rebuild of AceOS.")))
+    list(core.tell_stream("what is utah"))
+
+    r2 = ScriptedStreamRunner(_brain_lines("t", "Because the base was unproven."))
+    brain.set_stream_runner(r2)
+    list(core.tell_stream("why does that matter"))
+
+    prompt2 = r2.last_prompt
+    assert "what is utah" in prompt2
+    assert "Utah is the rebuild of AceOS." in prompt2
+    core.reset_conversation()
+
+
+def test_reset_conversation_clears_the_thread(monkeypatch):
+    core.reset_conversation()
+    monkeypatch.setattr(memory, "answer", lambda t, *a, **k: (None, []))
+    monkeypatch.setattr(memory, "store", lambda *a, **k: None)
+    brain.set_stream_runner(ScriptedStreamRunner(_brain_lines("t", "A1.")))
+    list(core.tell_stream("first question here"))
+    core.reset_conversation()
+    r2 = ScriptedStreamRunner(_brain_lines("t", "A2."))
+    brain.set_stream_runner(r2)
+    list(core.tell_stream("second"))
+    assert "first question here" not in r2.last_prompt
+
+
 def test_tell_stream_empty_input_is_handled():
     evs = list(core.tell_stream("   "))
     assert ("source", "unavailable") in evs

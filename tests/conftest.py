@@ -7,6 +7,7 @@ from types import SimpleNamespace
 import pytest
 
 from utah import brain as brain_mod
+from utah import core as core_mod
 from utah import embed as embed_mod
 from utah import failures as failures_mod
 from utah import memory as memory_mod
@@ -18,9 +19,12 @@ from tests.fakes import FakeEmbedder, FakeFailureStore, FakeStore, ScriptedRunne
 def _restore_boundaries():
     """Restore all injectable boundaries after every test. Also pin a fake failure
     store for EVERY test so code paths that record failures (core.tell_stream etc.)
-    never write to the real Postgres failures table (no test pollution)."""
+    never write to the real Postgres failures table (no test pollution), and clear
+    the in-memory conversation thread so it never bleeds across tests."""
     failures_mod.set_store(FakeFailureStore())
+    core_mod.reset_conversation()
     yield
+    core_mod.reset_conversation()
     embed_mod.set_embedder(None)
     rerank_mod.set_reranker(None)
     brain_mod.set_runner(None)

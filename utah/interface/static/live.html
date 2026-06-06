@@ -158,7 +158,7 @@
   <input id="q" placeholder="Issue a command to UTAH…  (real reasoning · no fabrication)"/>
   <button onclick="ask()">SEND</button>
 </div>
-<div id="ans"></div>
+<div id="ans" style="max-height:40vh;overflow-y:auto;padding:0 22px"></div>
 <footer>LIVE · REAL DATA ONLY · DORMANT = NO PRODUCER WIRED YET (NEVER SIMULATED) · SOURCE: UTAH CONTROL PLANE</footer>
 
 <script>
@@ -214,31 +214,45 @@ ev.onmessage=e=>addEvent("event",e.data);
 ev.addEventListener("voice",e=>{
   addEvent("voice",e.data);
   try{ const v=JSON.parse(e.data); if(v&&v.q){
-    $("ans").innerHTML=
-      '<div style="color:#8a8470;font-size:10px;letter-spacing:2px;margin:8px 0 4px">[voice · '+esc(v.source||"brain")+']</div>'+
-      '<div style="color:#9a937c;font-size:12px;margin-bottom:6px">🎙 '+esc(v.q)+'</div>'+
-      '<div style="white-space:pre-wrap;line-height:1.55;color:#ece6d4;padding-bottom:12px">'+esc(v.answer||"")+'</div>';
+    addUser("🎙 "+v.q);
+    const t=addAssistant(); t.src.textContent="[voice · "+esc(v.source||"brain")+"]";
+    t.ab.textContent=v.answer||""; scrollAns();
   }}catch(_){}
 });
 let _es=null;
+function scrollAns(){ const a=$("ans"); a.scrollTop=a.scrollHeight; }
+function addUser(text){
+  const d=document.createElement("div");
+  d.style.cssText="margin:10px 0 3px;color:#cfc9b6;font-size:13px";
+  d.innerHTML='<span style="color:#8a8470">▸ </span>'+esc(text);
+  $("ans").appendChild(d);
+}
+function addAssistant(){
+  const w=document.createElement("div"); w.style.cssText="margin:0 0 12px";
+  w.innerHTML=
+    '<div class="t-src" style="color:#8a8470;font-size:10px;letter-spacing:2px;margin:1px 0 4px">…</div>'+
+    '<div class="t-think" style="display:none;background:#15130d;border:1px solid #2a2620;border-radius:7px;padding:6px 9px;margin-bottom:6px;font-size:12px;color:#9a937c">'+
+      '<div class="t-think-h" style="cursor:pointer;font-size:10px;letter-spacing:2px;margin-bottom:3px">▼ THINKING</div>'+
+      '<div class="t-think-b" style="white-space:pre-wrap;line-height:1.4"></div></div>'+
+    '<div class="t-ans" style="white-space:pre-wrap;line-height:1.55;color:#ece6d4"></div>';
+  $("ans").appendChild(w);
+  const th=w.querySelector(".t-think"), hh=w.querySelector(".t-think-h"), tb=w.querySelector(".t-think-b");
+  hh.onclick=()=>{ tb.style.display = tb.style.display==="none"?"":"none"; };
+  return {src:w.querySelector(".t-src"), th, hh, tb, ab:w.querySelector(".t-ans")};
+}
 function ask(){
   const q=$("q").value.trim(); if(!q)return;
-  if(_es){_es.close(); _es=null;}
-  $("ans").innerHTML=
-    '<div id="ans-src" style="color:#8a8470;font-size:10px;letter-spacing:2px;margin:8px 0 4px">…thinking</div>'+
-    '<div id="ans-think" style="background:#15130d;border:1px solid #2a2620;border-radius:7px;padding:8px 10px;margin-bottom:8px;font-size:12px;color:#9a937c">'+
-      '<div id="ans-think-h" style="cursor:pointer;letter-spacing:2px;font-size:10px;margin-bottom:4px">▼ THINKING</div>'+
-      '<div id="ans-think-body" style="white-space:pre-wrap;line-height:1.45"></div></div>'+
-    '<div id="ans-answer" style="white-space:pre-wrap;line-height:1.55;color:#ece6d4;padding-bottom:12px"></div>';
-  const tb=$("ans-think-body"), ab=$("ans-answer"), th=$("ans-think"), hh=$("ans-think-h");
-  hh.onclick=()=>{ tb.style.display = tb.style.display==="none" ? "" : "none"; };
+  $("q").value="";                 // clear so the next message can be typed right away
+  if(_es){_es.close(); _es=null;}  // stop any still-streaming prior turn
+  addUser(q);
+  const t=addAssistant(); scrollAns();
   let gotThinking=false, gotAnswer=false;
   _es=new EventSource("/api/tell/stream?q="+encodeURIComponent(q));
-  _es.addEventListener("source",e=>{ $("ans-src").textContent="["+e.data+"]"; if(e.data!=="brain"){ th.style.display="none"; } });
-  _es.addEventListener("thinking",e=>{ gotThinking=true; th.style.display=""; tb.textContent+=e.data; });
-  _es.addEventListener("answer",e=>{ gotAnswer=true; ab.textContent+=e.data; });
-  _es.addEventListener("done",e=>{ if(!gotThinking) th.style.display="none"; else { tb.style.display="none"; hh.textContent="▶ THINKING"; } if(_es){_es.close(); _es=null;} });
-  _es.onerror=()=>{ if(!gotAnswer) ab.textContent="[brain unreachable]"; if(_es){_es.close(); _es=null;} };
+  _es.addEventListener("source",e=>{ t.src.textContent="["+esc(e.data)+"]"; if(e.data!=="brain") t.th.style.display="none"; });
+  _es.addEventListener("thinking",e=>{ gotThinking=true; t.th.style.display=""; t.tb.textContent+=e.data; scrollAns(); });
+  _es.addEventListener("answer",e=>{ gotAnswer=true; t.ab.textContent+=e.data; scrollAns(); });
+  _es.addEventListener("done",e=>{ if(gotThinking){t.tb.style.display="none"; t.hh.textContent="▶ THINKING";} if(_es){_es.close(); _es=null;} scrollAns(); });
+  _es.onerror=()=>{ if(!gotAnswer) t.ab.textContent="[brain unreachable]"; if(_es){_es.close(); _es=null;} };
 }
 $("q").addEventListener("keydown",e=>{if(e.key==="Enter")ask();});
 function clock(){$("clock").textContent=new Date().toLocaleTimeString([],{hour:"2-digit",minute:"2-digit",second:"2-digit"})+" · ET";}

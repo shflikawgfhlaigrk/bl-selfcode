@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 import logging
 import pathlib
+import threading
 
 from starlette.applications import Starlette
 from starlette.concurrency import run_in_threadpool
@@ -73,22 +74,43 @@ async def api_tell(request):
         return JSONResponse({"error": str(exc)}, status_code=503)
 
 
+def _speak_answer(text: str) -> None:
+    """Speak a chat answer aloud with the REAL Piper voice (same engine as voice)."""
+    try:
+        from utah.voice import tts
+
+        tts.speak(text)
+    except Exception as exc:  # noqa: BLE001 — never let TTS break a chat turn
+        log.warning("chat TTS failed: %s", exc)
+
+
 async def api_tell_stream(request):
     """Stream a turn to the browser as SSE: one event per (channel, chunk) so the
     chat box shows the brain's reasoning live like Claude. GET ?q=<text> (EventSource
-    is GET-only). Relays the daemon's ``tell_stream`` RPC; nothing fabricated."""
+    is GET-only). Relays the daemon's ``tell_stream`` RPC; nothing fabricated. Every
+    chat answer is ALSO spoken (real Piper) on a detached thread — all paths reply by voice."""
     text = request.query_params.get("q", "").strip()
 
     async def gen():
         if not text:
             yield {"event": "done", "data": ""}
             return
+        parts: list[str] = []
         try:
             async for ev in ctl.tell_stream(text):
-                yield {"event": ev.get("channel", "answer"), "data": ev.get("chunk", "")}
-        except Exception as exc:  # daemon unreachable etc. — honest, no fabrication
+                channel = ev.get("channel", "answer")
+                chunk = ev.get("chunk", "")
+                if channel == "answer":
+                    parts.append(chunk)
+                yield {"event": channel, "data": chunk}
+        except Exception as exc:  # daemon unreachable etc. — honest, logged, no fabrication
+            failures.record("chat", "stream_failed", f"{text[:60]}: {exc}")
             yield {"event": "answer", "data": f"[brain unreachable: {exc}]"}
             yield {"event": "done", "data": ""}
+            return
+        answer = "".join(parts).strip()
+        if answer:  # speak it (detached so a browser close can't cut it off)
+            threading.Thread(target=_speak_answer, args=(answer,), daemon=True).start()
 
     return EventSourceResponse(gen())
 

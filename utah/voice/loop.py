@@ -23,6 +23,9 @@ SILENCE_RMS = float(os.environ.get("UTAH_VOICE_SILENCE", "0.02"))
 SILENCE_BLOCKS = int(os.environ.get("UTAH_VOICE_SILENCE_BLOCKS", "15"))  # 1.5 s
 MAX_BLOCKS = int(os.environ.get("UTAH_VOICE_MAX_BLOCKS", "150"))  # 15 s cap
 PREROLL = 2  # keep 200 ms before onset so the first word isn't clipped
+MONITOR_S = 5.0  # how often the level monitor logs the observed mic RMS
+SILENCE_ALERT_S = 30.0  # mic delivering TRUE silence (zeros) this long -> record a failure
+TRUE_SILENCE = 0.0008  # below this = mic delivering zeros (deaf); a quiet room is well above
 
 
 def _rms(pcm) -> float:
@@ -43,8 +46,24 @@ def _write_wav(pcm: bytes) -> str:
     return path
 
 
-def _capture_one(q) -> bytes:
-    """Block until a full utterance (speech → 1.5 s silence) is captured."""
+def _ambient_floor(q, blocks: int = 15) -> float:
+    """Sample ~1.5 s to learn the room's noise floor (the max ambient RMS)."""
+    mx = 0.0
+    for _ in range(blocks):
+        mx = max(mx, _rms(q.get()))
+    return mx
+
+
+def _speech_threshold(ambient: float) -> float:
+    """Speech must clearly exceed ambient — adaptive so a noisy room (high floor)
+    doesn't make every block read 'loud' (the 15 s-blob bug), but the floor is low
+    enough to catch normal speech in a quiet room (~0.05+)."""
+    return max(ambient * 1.8, ambient + 0.015, 0.02)
+
+
+def _capture_one(q, threshold: float) -> bytes:
+    """Block until a full utterance (speech above *threshold* → 1.5 s below) is
+    captured. ``threshold`` is calibrated above the room's ambient floor."""
     from collections import deque
 
     preroll: deque[bytes] = deque(maxlen=PREROLL)
@@ -52,12 +71,14 @@ def _capture_one(q) -> bytes:
     capturing = False
     silent = 0
     blocks = 0
+    onset = 0
     while True:
         pcm = q.get()
-        loud = _rms(pcm) > SILENCE_RMS
+        loud = _rms(pcm) > threshold
         if not capturing:
             preroll.append(pcm)
-            if loud:
+            onset = onset + 1 if loud else 0
+            if onset >= 2:  # 2 consecutive loud blocks = real speech onset (not a spike)
                 capturing = True
                 for p in preroll:
                     buf += p
@@ -80,10 +101,42 @@ def run() -> None:
         while True:
             time.sleep(3600)
 
+    import threading
+
+    from utah import failures
+
     q: "queue.Queue[bytes]" = queue.Queue()
+    level = {"max": 0.0, "last_loud": time.monotonic(), "alerted": False}
 
     def _cb(indata, frames, t, status):  # noqa: ANN001
-        q.put(bytes(indata))
+        pcm = bytes(indata)
+        r = _rms(pcm)
+        if r > level["max"]:
+            level["max"] = r
+        if r > TRUE_SILENCE:  # mic is ALIVE (hearing the room); only zeros = deaf
+            level["last_loud"] = time.monotonic()
+            level["alerted"] = False
+        q.put(pcm)
+
+    def _monitor():
+        # Surfaces a DEAF mic (launchd has no Microphone TCC -> stream opens but
+        # delivers silence): logs the level and records ONE failure so it's never
+        # a silent failure. Also the Phase-1 diagnostic (is it silence or a bug?).
+        while True:
+            time.sleep(MONITOR_S)
+            mx = level["max"]; level["max"] = 0.0
+            log.info("voice: audio level (max rms / %ds) = %.4f", MONITOR_S, mx)
+            quiet_for = time.monotonic() - level["last_loud"]
+            if quiet_for > SILENCE_ALERT_S and not level["alerted"]:
+                level["alerted"] = True
+                failures.record(
+                    "voice", "mic_silent",
+                    f"mic delivering pure silence (zeros) for {int(quiet_for)}s — audio "
+                    "device unavailable (not a quiet room — that reads well above zero)",
+                )
+                log.warning("voice: TRUE silence (zeros) for %ds — recorded mic_silent", int(quiet_for))
+
+    threading.Thread(target=_monitor, daemon=True).start()
 
     fail_n = 0
     while True:
@@ -91,14 +144,23 @@ def run() -> None:
             with sd.RawInputStream(samplerate=SAMPLE_RATE, blocksize=BLOCK,
                                    channels=CHANNELS, dtype="int16", callback=_cb):
                 fail_n = 0  # mic opened cleanly
-                log.info("voice loop: mic open — always listening for 'ace'")
+                level["last_loud"] = time.monotonic()  # fresh silence countdown
+                ambient = _ambient_floor(q)
+                threshold = _speech_threshold(ambient)
+                log.info("voice loop: mic open — always listening for 'ace' "
+                         "(ambient %.4f, speech threshold %.4f)", ambient, threshold)
                 while True:
-                    pcm = _capture_one(q)
+                    pcm = _capture_one(q, threshold)
+                    secs = len(pcm) / 2 / SAMPLE_RATE
+                    log.info("voice: captured %.1fs clip (rms %.3f) → transcribing", secs, _rms(pcm))
                     path = _write_wav(pcm)
                     try:
                         text = stt.transcribe(path)
+                        log.info("voice: transcript=%r", text)
                         if text:
                             result = agent.handle_utterance(text)
+                            cmd = result.get("command") if result else None
+                            log.info("voice: wake_fired=%s command=%r", result is not None, cmd)
                             if result and result.get("command"):
                                 log.info("voice turn: %r → %r", result["command"],
                                          (result.get("answer") or "")[:60])
