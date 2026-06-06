@@ -507,6 +507,34 @@ class PostgresStore:
             entities = conn.execute("SELECT count(*) FROM entity").fetchone()[0]
         return {"total": int(total), "live": int(live), "entities": int(entities)}
 
+    def list_memories(self, limit: int = 50, offset: int = 0) -> list[dict]:
+        """Live memory rows (newest first) behind the gauge — the deck drill-down."""
+        with self._tx() as conn:
+            rows = conn.execute(
+                "SELECT id, content, source, confidence, reinforcement, decay_score, "
+                "to_char(ts, 'YYYY-MM-DD HH24:MI') "
+                "FROM memory WHERE superseded_by IS NULL AND NOT archived "
+                "ORDER BY ts DESC, id DESC LIMIT %s OFFSET %s",
+                (limit, offset),
+            ).fetchall()
+        return [
+            {"id": int(r[0]), "content": r[1], "source": r[2],
+             "confidence": round(float(r[3]), 2), "reinforcement": int(r[4]),
+             "decay": round(float(r[5]), 2), "ts": r[6]}
+            for r in rows
+        ]
+
+    def list_entities(self, limit: int = 100) -> list[dict]:
+        """Entities by live-link count — the deck drill-down for the entity gauge."""
+        with self._tx() as conn:
+            rows = conn.execute(
+                "SELECT e.name, count(me.mem_id) FROM entity e "
+                "LEFT JOIN mem_entity me ON me.ent_id = e.id "
+                "GROUP BY e.id, e.name ORDER BY count(me.mem_id) DESC, e.name LIMIT %s",
+                (limit,),
+            ).fetchall()
+        return [{"name": r[0], "mentions": int(r[1])} for r in rows]
+
 
 class _PgTransaction:
     """One locked transaction on a PostgresStore's managed connection.
@@ -725,6 +753,16 @@ def answer(query: str, k: int = config.RECALL_K) -> tuple[str | None, list[Hit]]
     if passes_gate(best.sim, lexical_overlap(query, best.content)):
         return best.content, hits
     return None, hits
+
+
+def list_memories(limit: int = 50, offset: int = 0) -> list[dict]:
+    """Live memory rows behind the gauge (deck drill-down). Raises MemoryUnavailable."""
+    return get_backend().list_memories(limit, offset)
+
+
+def list_entities(limit: int = 100) -> list[dict]:
+    """Entities behind the gauge (deck drill-down). Raises MemoryUnavailable."""
+    return get_backend().list_entities(limit)
 
 
 def decay() -> int:

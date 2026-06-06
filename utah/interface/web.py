@@ -64,6 +64,27 @@ async def api_memory(request):
         return JSONResponse({"error": str(exc)}, status_code=503)
 
 
+async def api_memory_list(request):
+    """The actual live memory rows behind the gauge — deck drill-down (transparency)."""
+    try:
+        limit = int(request.query_params.get("limit", "60"))
+        offset = int(request.query_params.get("offset", "0"))
+    except ValueError:
+        return JSONResponse({"error": "limit/offset must be integers"}, status_code=400)
+    try:
+        return JSONResponse(await ctl.call("memory_list", {"limit": limit, "offset": offset}, timeout=8.0))
+    except Exception as exc:
+        return JSONResponse({"error": str(exc)}, status_code=503)
+
+
+async def api_memory_entities(request):
+    """The actual entities behind the gauge — deck drill-down (transparency)."""
+    try:
+        return JSONResponse(await ctl.call("memory_entities", {"limit": 300}, timeout=8.0))
+    except Exception as exc:
+        return JSONResponse({"error": str(exc)}, status_code=503)
+
+
 async def api_tell(request):
     body = await request.json()
     text = str(body.get("text", "")).strip()
@@ -190,6 +211,8 @@ def build_app() -> Starlette:
         Route("/favicon.svg", favicon),
         Route("/status", api_status),
         Route("/memory", api_memory),
+        Route("/memory/list", api_memory_list),
+        Route("/memory/entities", api_memory_entities),
         Route("/api/tell", api_tell, methods=["POST"]),
         Route("/api/tell/stream", api_tell_stream),
         Route("/events", events),

@@ -360,6 +360,24 @@ class FakeStore:
         if "promoted" not in row.tags:
             row.tags.append("promoted")
 
+    def list_memories(self, limit: int = 50, offset: int = 0) -> list[dict]:
+        live = sorted(self._live(), key=lambda r: (r.ts, r.id), reverse=True)
+        return [
+            {"id": r.id, "content": r.content, "source": r.source,
+             "confidence": round(r.confidence, 2), "reinforcement": r.reinforcement,
+             "decay": round(r.decay_score, 2), "ts": r.ts.strftime("%Y-%m-%d %H:%M")}
+            for r in live[offset:offset + limit]
+        ]
+
+    def list_entities(self, limit: int = 100) -> list[dict]:
+        from collections import Counter
+
+        reverse = {v: k for k, v in self.entity_ids.items()}
+        counts = Counter(ent_id for _, ent_id in self.links)
+        items = [{"name": reverse[eid], "mentions": n} for eid, n in counts.items()]
+        items.sort(key=lambda e: (-e["mentions"], e["name"]))
+        return items[:limit]
+
     def close(self) -> None:
         self.closed = True
 

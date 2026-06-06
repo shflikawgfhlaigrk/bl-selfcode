@@ -98,6 +98,28 @@
   #ans{padding:0 20px 12px;color:#cfc8ad;white-space:pre-wrap;min-height:16px}
   footer{padding:9px 22px;color:var(--mut);border-top:1px solid var(--line);font-size:10px;letter-spacing:1.5px}
   ::-webkit-scrollbar{width:7px}::-webkit-scrollbar-thumb{background:#23222c;border-radius:4px}
+  /* TRANSPARENCY drill-down: any panel marked .drillable opens a drawer of the REAL
+     underlying detail (the groundwork pattern every Ace panel must follow). */
+  .drillable{cursor:pointer} .drillable h2::after{content:" ⤢";color:var(--mut);font-size:9px}
+  .drillable:hover{box-shadow:0 0 0 1px var(--goldglow)}
+  #drill{position:fixed;inset:0;background:rgba(4,4,8,.72);display:none;z-index:60;
+    align-items:center;justify-content:center}
+  #drill.open{display:flex}
+  .drill-box{width:min(860px,92vw);max-height:84vh;display:flex;flex-direction:column;
+    background:var(--panel);border:1px solid var(--gold);border-radius:11px;overflow:hidden;
+    box-shadow:0 18px 70px rgba(0,0,0,.7)}
+  .drill-head{display:flex;justify-content:space-between;align-items:center;padding:13px 16px;
+    border-bottom:1px solid var(--line);color:var(--gold);letter-spacing:2px;font-size:12px}
+  .drill-x{cursor:pointer;color:var(--mut);border:1px solid var(--line);border-radius:6px;padding:2px 9px}
+  .drill-body{padding:12px 16px;overflow:auto}
+  .drill-sec{color:var(--gold2);font-size:10px;letter-spacing:2px;margin:12px 0 6px;font-weight:600}
+  .drill-row{padding:7px 0;border-bottom:1px dotted #1b1b24}
+  .drill-tag{color:#1a1407;background:var(--gold2);border-radius:4px;padding:1px 6px;font-size:9px;letter-spacing:1px}
+  .drill-meta{color:var(--mut);font-size:10px;margin-left:6px}
+  .drill-content{color:#cfc8ad;white-space:pre-wrap;margin-top:3px;font-size:12px;line-height:1.45}
+  .drill-ents{display:flex;flex-wrap:wrap;gap:6px}
+  .drill-ent{background:var(--panel2);border:1px solid var(--line);border-radius:5px;padding:3px 8px;font-size:11px;color:#cdc6ad}
+  .drill-ent b{color:var(--gold)}
 </style>
 </head>
 <body>
@@ -157,7 +179,7 @@
   <!-- RIGHT: daemon/socket + memory + bus + dormant functions -->
   <div class="col">
     <div class="card"><h2>LOCAL DAEMON &amp; SOCKET <span class="tag" id="dae-tag">—</span></h2><div id="daemon"></div></div>
-    <div class="card"><h2>MEMORY · BRAIN</h2><div id="memory"></div></div>
+    <div class="card drillable" data-drill="memory"><h2>MEMORY · BRAIN</h2><div id="memory"></div></div>
     <div class="card"><h2>EVENT BUS · LIVE</h2><div class="ticker" id="ticker"><div>awaiting events…</div></div></div>
     <div class="card"><h2>VOICE PIPELINE</h2><div class="dormbody" id="p-voice">DORMANT</div></div>
     <div class="card"><h2>AUDIT LEDGER</h2><div class="dormbody" id="p-audit">DORMANT</div></div>
@@ -170,6 +192,13 @@
 </div>
 <div id="ans" style="max-height:40vh;overflow-y:auto;padding:0 22px"></div>
 <footer>LIVE · REAL DATA ONLY · DORMANT = NO PRODUCER WIRED YET (NEVER SIMULATED) · SOURCE: UTAH CONTROL PLANE</footer>
+
+<div id="drill" onclick="if(event.target===this)drillClose()">
+  <div class="drill-box">
+    <div class="drill-head"><span id="drill-title">—</span><span class="drill-x" onclick="drillClose()">✕ CLOSE</span></div>
+    <div class="drill-body" id="drill-body"></div>
+  </div>
+</div>
 
 <script>
 const $=id=>document.getElementById(id);
@@ -282,6 +311,34 @@ function ask(){
   _es.onerror=()=>{ if(!gotAnswer) t.ab.textContent="[brain unreachable]"; if(_es){_es.close(); _es=null;} };
 }
 $("q").addEventListener("keydown",e=>{if(e.key==="Enter")ask();});
+// ---- TRANSPARENCY drill-down (groundwork pattern: click panel -> REAL detail) ----
+function drillClose(){ $("drill").classList.remove("open"); $("drill-body").innerHTML=""; }
+document.addEventListener("keydown",e=>{ if(e.key==="Escape") drillClose(); });
+async function openDrill(title,render){
+  $("drill-title").textContent=title;
+  $("drill-body").innerHTML='<div style="color:#8a8470">loading real data…</div>';
+  $("drill").classList.add("open");
+  try{ await render($("drill-body")); }
+  catch(e){ $("drill-body").innerHTML='<div style="color:#c66">drill failed: '+esc(String(e))+'</div>'; }
+}
+async function drillMemory(body){
+  const [mem,ent]=await Promise.all([
+    fetch("/memory/list?limit=300").then(r=>r.json()),
+    fetch("/memory/entities").then(r=>r.json())
+  ]);
+  const rws=mem.rows||[], ents=ent.entities||[];
+  body.innerHTML=
+    '<div class="drill-sec">'+rws.length+' LIVE MEMORY ROWS (newest first)</div>'+
+    rws.map(r=>'<div class="drill-row"><span class="drill-tag">'+esc(r.source)+'</span>'+
+      '<span class="drill-meta">#'+r.id+' · conf '+r.confidence+' · ×'+r.reinforcement+' · '+esc(r.ts)+'</span>'+
+      '<div class="drill-content">'+esc(r.content)+'</div></div>').join('')+
+    '<div class="drill-sec">'+ents.length+' ENTITIES (by links)</div>'+
+    '<div class="drill-ents">'+ents.map(e=>'<span class="drill-ent">'+esc(e.name)+' <b>'+e.mentions+'</b></span>').join('')+'</div>';
+}
+const DRILLS={ memory: ["MEMORY · BRAIN — live rows + entities", drillMemory] };
+document.querySelectorAll(".drillable").forEach(card=>{
+  card.addEventListener("click",()=>{ const d=DRILLS[card.dataset.drill]; if(d) openDrill(d[0],d[1]); });
+});
 function clock(){$("clock").textContent=new Date().toLocaleTimeString([],{hour:"2-digit",minute:"2-digit",second:"2-digit"})+" · ET";}
 poll();setInterval(poll,2000);clock();setInterval(clock,1000);
 </script>

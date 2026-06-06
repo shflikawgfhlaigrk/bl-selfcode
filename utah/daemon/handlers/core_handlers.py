@@ -96,6 +96,37 @@ async def memory_stats(ctx: Context, params: object) -> dict:
         return await ctx.pool.run(_memory_stats_blocking)
 
 
+def _memory_list_blocking(limit: int, offset: int) -> list:
+    from utah import memory
+
+    fn = getattr(memory.get_backend(), "list_memories", None)
+    return fn(limit, offset) if fn else []
+
+
+async def memory_list(ctx: Context, params: object) -> dict:
+    """The actual live memory ROWS behind the gauge — deck drill-down (off-loop)."""
+    p = _as_dict(params)
+    limit = max(1, min(int(p.get("limit", 50)), 200))
+    offset = max(0, int(p.get("offset", 0)))
+    with ctx.governor.admission():
+        return {"rows": await ctx.pool.run(_memory_list_blocking, limit, offset)}
+
+
+def _entities_blocking(limit: int) -> list:
+    from utah import memory
+
+    fn = getattr(memory.get_backend(), "list_entities", None)
+    return fn(limit) if fn else []
+
+
+async def memory_entities(ctx: Context, params: object) -> dict:
+    """The actual entities behind the gauge — deck drill-down (off-loop)."""
+    p = _as_dict(params)
+    limit = max(1, min(int(p.get("limit", 100)), 500))
+    with ctx.governor.admission():
+        return {"entities": await ctx.pool.run(_entities_blocking, limit)}
+
+
 def _busy(seconds: float) -> float:
     t = time.perf_counter()
     time.sleep(seconds)  # a real blocking unit of work, off the loop
@@ -123,6 +154,8 @@ REGISTRY = {
     "tell": tell,
     "agent": agent,
     "memory_stats": memory_stats,
+    "memory_list": memory_list,
+    "memory_entities": memory_entities,
     "publish": publish,
     "shutdown": shutdown,
 }
