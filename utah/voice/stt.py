@@ -1,7 +1,7 @@
-"""STT boundary — speech (a WAV file) -> text. Default = MLX Whisper (on-device,
-auto-downloads its model on first use). Moonshine drops into this SAME boundary
-later (swap the engine; nothing else changes). Injectable for tests; degrades to
-"" on any error so the voice loop never crashes on a bad clip.
+"""STT boundary — speech (a WAV file) -> text. Default = Moonshine ONNX
+(very-low-latency, on-device). MLX Whisper is the swappable fallback (same
+boundary; ``set_stt`` to switch). Injectable for tests; degrades to "" on any
+error so the voice loop never crashes on a bad clip.
 """
 from __future__ import annotations
 
@@ -17,11 +17,26 @@ class STT(Protocol):
     def transcribe(self, wav_path: str) -> str: ...
 
 
-class MLXWhisperSTT:
-    """On-device MLX Whisper. The model auto-downloads on first transcribe."""
+class MoonshineSTT:
+    """Moonshine ONNX — the default. Very low latency; model auto-downloads once."""
 
     def __init__(self, model: str | None = None) -> None:
         self._model = model or config.STT_MODEL
+
+    def transcribe(self, wav_path: str) -> str:
+        import moonshine_onnx
+
+        out = moonshine_onnx.transcribe(wav_path, self._model)
+        if isinstance(out, (list, tuple)):
+            return " ".join(str(x) for x in out).strip()
+        return str(out).strip()
+
+
+class MLXWhisperSTT:
+    """On-device MLX Whisper (swappable fallback). Model auto-downloads once."""
+
+    def __init__(self, model: str | None = None) -> None:
+        self._model = model or config.WHISPER_MODEL
 
     def transcribe(self, wav_path: str) -> str:
         import mlx_whisper
@@ -36,7 +51,7 @@ _stt: STT | None = None
 def get_stt() -> STT:
     global _stt
     if _stt is None:
-        _stt = MLXWhisperSTT()
+        _stt = MoonshineSTT()
     return _stt
 
 
@@ -54,4 +69,4 @@ def transcribe(wav_path: str) -> str:
         return ""
 
 
-__all__ = ["STT", "MLXWhisperSTT", "get_stt", "set_stt", "transcribe"]
+__all__ = ["STT", "MoonshineSTT", "MLXWhisperSTT", "get_stt", "set_stt", "transcribe"]

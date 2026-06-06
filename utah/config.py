@@ -46,10 +46,11 @@ EMBED_DIM: int = 384
 #: Cross-encoder rerank model (fastembed ONNX, free).
 RERANK_MODEL: str = "Xenova/ms-marco-MiniLM-L-6-v2"
 
-# --- voice (wake "ace" -> MLX Whisper STT -> brain -> Piper TTS) -------------
-#: STT model. MLX Whisper (mlx_whisper) — on-device, auto-downloads on first use.
-#: Moonshine drops into the same STT boundary later (UTAH_STT to override).
-STT_MODEL: str = os.environ.get("UTAH_STT", "mlx-community/whisper-base.en-mlx")
+# --- voice (wake "ace" -> Moonshine STT -> brain -> Piper TTS) ---------------
+#: Default STT = Moonshine ONNX (very-low-latency, on-device, auto-downloads).
+STT_MODEL: str = os.environ.get("UTAH_STT", "moonshine/base")
+#: MLX Whisper model — the swappable fallback STT (set engine via stt.set_stt).
+WHISPER_MODEL: str = os.environ.get("UTAH_WHISPER", "mlx-community/whisper-base.en-mlx")
 #: Piper TTS voice model (the .json config sits next to it).
 PIPER_MODEL: str = os.environ.get(
     "UTAH_PIPER", os.path.expanduser("~/.utah/models/piper/en_GB-cori-high.onnx")
