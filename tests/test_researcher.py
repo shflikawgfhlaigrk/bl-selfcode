@@ -34,6 +34,20 @@ def test_parse_results_extracts_title_url():
     assert ("Title B", "https://b.com") in res
 
 
+def test_extract_research_facts_parses_json_and_filters():
+    # injected ask returns a JSON array of facts -> parsed; junk/short dropped
+    facts = researcher.extract_research_facts(
+        "pgvector content", "what is pgvector",
+        ask=lambda p: 'prose... ["pgvector is a PostgreSQL extension for vector search.", "x", '
+                      '"It supports HNSW and IVFFlat indexes for similarity search."] trailing')
+    assert "pgvector is a PostgreSQL extension for vector search." in facts
+    assert all(len(f) > 15 for f in facts)               # the short "x" was filtered
+
+
+def test_extract_research_facts_bad_output_is_empty():
+    assert researcher.extract_research_facts("c", "q", ask=lambda p: "no json here") == []
+
+
 def test_research_extracts_and_stores_facts():
     failures.set_store(FakeFailureStore())
     stored = []

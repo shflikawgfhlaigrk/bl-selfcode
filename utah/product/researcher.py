@@ -9,6 +9,7 @@ facts — is documented to the failure log and degrades honestly; it never fabri
 """
 from __future__ import annotations
 
+import json
 import logging
 import re
 import urllib.parse
@@ -22,7 +23,36 @@ _DDG_HTML_URL = "https://duckduckgo.com/html/"
 _DDG_LITE_URL = "https://lite.duckduckgo.com/lite/"
 _UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 14_5) AppleWebKit/605.1.15 "
        "(KHTML, like Gecko) Version/17.5 Safari/605.1.15")
-MAX_PAGE_CHARS = 6000
+MAX_PAGE_CHARS = 10000   # nav/boilerplate eats the first few KB; give the brain real article text
+
+#: Research extraction is DISTINCT from brain.extract_facts (which is tuned for personal/
+#: project facts about Michael and returns [] on general web prose). This pulls the key
+#: world-knowledge facts that answer the query, as standalone statements.
+_RESEARCH_EXTRACT = (
+    "From the WEB CONTENT below, extract the key factual statements that answer the "
+    "QUESTION. Each fact must be a short, standalone sentence understandable on its own "
+    "(include the subject — don't write 'It supports...'). Ignore navigation/menu/boilerplate. "
+    "Return ONLY a JSON array of fact strings; [] if the content has no real answer. No commentary."
+)
+_JSON_ARRAY = re.compile(r"\[.*\]", re.S)
+
+
+def extract_research_facts(content: str, query: str, ask=None) -> list[str]:
+    """Brain-extract standalone world-knowledge facts answering *query* from *content*.
+    Returns [] on brain failure or unparseable output (never fabricates)."""
+    ask = ask or brain.ask
+    try:
+        raw = ask(f"{_RESEARCH_EXTRACT}\n\nQUESTION: {query}\n\nWEB CONTENT:\n{content[:MAX_PAGE_CHARS]}")
+    except brain.BrainUnavailable:
+        return []
+    m = _JSON_ARRAY.search(raw or "")
+    try:
+        parsed = json.loads(m.group(0) if m else (raw or ""))
+    except (ValueError, json.JSONDecodeError):
+        return []
+    if not isinstance(parsed, list):
+        return []
+    return [s.strip() for s in parsed if isinstance(s, str) and len(s.strip()) > 15][:10]
 
 _RESULT_ANCHOR_RE = re.compile(
     r'<a[^>]*class="(?:result__a|result-link)"[^>]*href="([^"]+)"[^>]*>(.*?)</a>',
@@ -138,7 +168,8 @@ def research(query: str, *, k: int = 4, search_fn=None, fetch_fn=None,
     ``{query, sources, facts, stored}``. Every failure documented; never raises."""
     search_fn = search_fn or (lambda q, k=k: search(q, k))
     fetch_fn = fetch_fn or fetch
-    extract_fn = extract_fn or brain.extract_facts
+    # query-aware research extractor (NOT brain.extract_facts, which is for personal facts)
+    extract_fn = extract_fn or (lambda content: extract_research_facts(content, query))
     store_fn = store_fn or (lambda c: memory.store(c, source="fact", confidence=0.5))
 
     try:
@@ -179,4 +210,5 @@ def research(query: str, *, k: int = 4, search_fn=None, fetch_fn=None,
     return {"query": query, "sources": len(sources), "facts": facts_found, "stored": stored}
 
 
-__all__ = ["search", "fetch", "research", "sanitize_fetched_text", "SearchBlocked"]
+__all__ = ["search", "fetch", "research", "sanitize_fetched_text", "SearchBlocked",
+           "extract_research_facts"]
