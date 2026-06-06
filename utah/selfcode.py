@@ -25,7 +25,9 @@ from utah.daemon import runtime
 log = logging.getLogger("utah.selfcode")
 
 KILL_SWITCH = runtime.RUN_DIR / "selfcode.disabled"
-CODE_TIMEOUT_S = 600
+#: Bound a single coding run. Kept tight: the live proof showed an unbounded Claude+Bash
+#: run can hang (it ran `uv` and timed out at 600s), so the gate must cut it off.
+CODE_TIMEOUT_S = 300
 
 
 def enabled() -> bool:
@@ -119,7 +121,10 @@ def _real_branch(slug: str, *, repo: str = ".") -> str:
 
 
 def _real_discard(*, repo: str = ".") -> None:
+    # Roll back tracked edits AND remove untracked files. The live proof showed a timed-out
+    # run leaves untracked artifacts (uv.lock) that `git reset --hard` alone won't clear.
     subprocess.run(["git", "reset", "--hard"], cwd=repo, capture_output=True, text=True)
+    subprocess.run(["git", "clean", "-fd"], cwd=repo, capture_output=True, text=True)
 
 
 __all__ = ["enabled", "propose", "KILL_SWITCH"]
