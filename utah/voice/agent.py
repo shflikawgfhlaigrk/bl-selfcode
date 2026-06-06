@@ -34,6 +34,15 @@ def handle_utterance(transcript, *, tell_stream=None, speak=None, publish=None) 
     command = wake.extract_command(transcript)
     if command is None:
         return None  # not addressed to Utah
+
+    # Wake fired — pulse the deck orb IMMEDIATELY, before the (slow) brain turn, so
+    # Michael sees Utah heard "ace" at once (the wave the old Ace orb emitted), not
+    # 14s later when the answer lands. Never let a publish hiccup crash the loop.
+    try:
+        publish("wake", {"command": command})
+    except Exception as exc:  # noqa: BLE001
+        log.warning("voice wake publish failed: %s", exc)
+
     if not command:
         return {"wake": True, "command": "", "answer": ""}  # bare "ace"
 

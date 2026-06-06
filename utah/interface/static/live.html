@@ -71,6 +71,16 @@
   .orb b{color:#1a1407;font-size:18px;letter-spacing:1px} .orb span{color:#2a2008;font-size:8px;letter-spacing:2px}
   .orbit{position:absolute;color:var(--mut);font-size:9px;letter-spacing:2px;background:#0c0b10;padding:3px 7px;border:1px solid var(--line);border-radius:4px}
   .o-top{top:6px} .o-bot{bottom:6px} .o-l{left:-6px;top:46%} .o-r{right:-6px;top:46%}
+  /* wake-word confirmation: expanding waves emitted from the orb the instant
+     "ace" is heard (the old-Ace visual — so Michael KNOWS it fired) */
+  .orb{transition:transform .22s ease,box-shadow .22s ease}
+  .orb.heard{animation:none;transform:scale(1.07);box-shadow:0 0 95px 18px var(--goldglow)}
+  .wave{position:absolute;left:50%;top:50%;width:118px;height:118px;border-radius:50%;
+    border:2px solid var(--gold);box-shadow:0 0 22px 4px var(--goldglow);
+    transform:translate(-50%,-50%) scale(.7);opacity:0;pointer-events:none}
+  .wave.go{animation:wake-wave 1.05s cubic-bezier(.22,.61,.36,1) forwards}
+  @keyframes wake-wave{0%{transform:translate(-50%,-50%) scale(.7);opacity:.85}
+    100%{transform:translate(-50%,-50%) scale(2.6);opacity:0}}
   .tiles{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;width:100%;margin-top:6px}
   .tile{background:var(--panel2);border:1px solid var(--line);border-radius:7px;padding:10px;text-align:center}
   .tile b{color:var(--gold2);font-size:16px;display:block} .tile span{color:var(--mut);font-size:9px;letter-spacing:2px}
@@ -210,6 +220,23 @@ function addEvent(ch,data){const t=$("ticker"); if(t.firstChild&&t.firstChild.te
   while(t.children.length>30) t.removeChild(t.lastChild);}
 ev.onmessage=e=>addEvent("event",e.data);
 ["engine","trading","leads","probate","outreach","risk","memory","agent"].forEach(c=>ev.addEventListener(c,e=>addEvent(c,e.data)));
+// wake word heard ("ace") -> the orb emits expanding waves at once, so Michael
+// sees it fired (the old-Ace visual). Published BEFORE the brain runs.
+function fireWake(data){
+  let cmd=""; try{cmd=(JSON.parse(data)||{}).command||"";}catch(_){}
+  const core=document.querySelector(".core");
+  if(core) for(let i=0;i<3;i++){
+    const w=document.createElement("div"); w.className="wave"; core.appendChild(w);
+    setTimeout(()=>w.classList.add("go"), i*170);
+    w.addEventListener("animationend",()=>w.remove());
+    setTimeout(()=>w.remove(), 2500);   // belt-and-suspenders cleanup
+  }
+  const orb=document.querySelector(".orb"), st=$("core-state");
+  if(orb){ orb.classList.add("heard"); setTimeout(()=>orb.classList.remove("heard"),1300); }
+  if(st){ st.textContent="HEARD"; setTimeout(()=>{ st.textContent="ACE"; },1300); }
+  addEvent("wake", cmd?("heard “"+esc(cmd)+"”"):"heard “ace”");
+}
+ev.addEventListener("wake", e=>fireWake(e.data));
 // a voice turn ("ace …") flows through the SAME brain and lands in the chat box
 ev.addEventListener("voice",e=>{
   addEvent("voice",e.data);

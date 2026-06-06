@@ -32,6 +32,30 @@ def test_wake_runs_brain_speaks_and_publishes():
     assert any(ev.get("q") == "what is utah" for ch, ev in published)  # shown on deck
 
 
+def test_wake_publishes_immediate_wake_event_before_brain():
+    """The instant the wake word fires, a 'wake' event is published BEFORE the slow
+    brain turn — so the deck orb emits its wave immediately and Michael sees it heard
+    'ace' (like old Ace), not 14s later when the answer lands."""
+    published, order = [], []
+    def fake_tell(cmd):
+        order.append("brain")
+        return iter([("answer", "ok.")])
+    def pub(ch, ev):
+        published.append((ch, ev))
+        order.append(ch)
+    agent.handle_utterance("ace what is utah", tell_stream=fake_tell,
+                           speak=lambda x: None, publish=pub)
+    assert any(ch == "wake" for ch, _ in published)   # orb gets its pulse
+    assert order[0] == "wake"                          # and BEFORE the brain runs
+
+
+def test_bare_wake_still_pulses_the_orb():
+    published = []
+    agent.handle_utterance("ace", tell_stream=_boom, speak=lambda x: None,
+                           publish=lambda ch, ev: published.append((ch, ev)))
+    assert any(ch == "wake" for ch, _ in published)
+
+
 def test_bare_wake_does_not_call_brain():
     r = agent.handle_utterance("ace", tell_stream=_boom, speak=lambda x: None,
                                publish=lambda *a: None)
