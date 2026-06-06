@@ -179,6 +179,27 @@ async def scout_probate(ctx: Context, params: object) -> dict:
         return await ctx.pool.run(_scout_probate_blocking)
 
 
+def _queue_outreach_blocking(campaign: str) -> dict:
+    import psycopg
+
+    from utah import config
+    from utah.product import outreach
+    from utah.product.ledger import get_ledger
+
+    with psycopg.connect(config.DB_DSN, autocommit=True) as c:
+        rows = c.execute("SELECT name, kind, contact FROM leads").fetchall()
+    leads = [{"name": r[0], "kind": r[1], "contact": r[2] or {}} for r in rows]
+    return outreach.queue(get_ledger(), campaign, leads)
+
+
+async def queue_outreach(ctx: Context, params: object) -> dict:
+    """Capability (not an agent): compose + lint + suppression-queue outreach for the
+    ledger's leads. Send stays GATED (documented) until Michael's creds/address land."""
+    campaign = str(_as_dict(params).get("campaign", "smb_no_website"))
+    with ctx.governor.admission():
+        return await ctx.pool.run(_queue_outreach_blocking, campaign)
+
+
 def _busy(seconds: float) -> float:
     t = time.perf_counter()
     time.sleep(seconds)  # a real blocking unit of work, off the loop
@@ -211,6 +232,7 @@ REGISTRY = {
     "ledger_snapshot": ledger_snapshot,
     "scout_leads": scout_leads,
     "scout_probate": scout_probate,
+    "queue_outreach": queue_outreach,
     "publish": publish,
     "shutdown": shutdown,
 }
