@@ -83,6 +83,9 @@ class ControlServer:
                 if req.method == "subscribe" and self._bus is not None:
                     await self._subscribe(stream, req)  # connection becomes a stream
                     return
+                if req.method == "tell_stream":
+                    await self._tell_stream(stream, req)  # connection becomes a stream
+                    return
                 response = await self._respond_req(req)
                 if response is None:
                     continue  # notification: no reply
@@ -121,6 +124,41 @@ class ControlServer:
 
                 tg.start_soon(pump)
                 tg.start_soon(watch_close)
+
+    async def _tell_stream(self, stream, req) -> None:
+        """Run core.tell_stream off-loop and push one frame per (channel, chunk)
+        event, so chat/voice render the brain's reasoning live. A slow turn never
+        blocks the loop (the blocking generator runs in a worker thread)."""
+        from anyio import from_thread, to_thread
+
+        from utah import core
+
+        text = req.params.get("text", "") if isinstance(req.params, dict) else ""
+        if not await self._safe_write(stream, rpc.ok(req.id, {"streaming": True})):
+            return
+        send, recv = anyio.create_memory_object_stream(256)
+
+        async with anyio.create_task_group() as tg:
+            async def produce() -> None:
+                def _work() -> None:
+                    for channel, chunk in core.tell_stream(text):
+                        from_thread.run(send.send, {"channel": channel, "chunk": chunk})
+                try:
+                    await to_thread.run_sync(_work)
+                except Exception:  # never crash the connection; the client ends on close
+                    log.exception("tell_stream producer crashed")
+                finally:
+                    await send.aclose()
+
+            async def pump() -> None:
+                async with recv:
+                    async for ev in recv:
+                        if not await self._safe_write(stream, rpc.notify("tell_event", ev)):
+                            tg.cancel_scope.cancel()
+                            return
+
+            tg.start_soon(produce)
+            tg.start_soon(pump)
 
     async def _respond_req(self, req) -> bytes | None:
         try:

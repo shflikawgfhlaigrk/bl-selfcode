@@ -210,9 +210,26 @@ function addEvent(ch,data){const t=$("ticker"); if(t.firstChild&&t.firstChild.te
   while(t.children.length>30) t.removeChild(t.lastChild);}
 ev.onmessage=e=>addEvent("event",e.data);
 ["engine","trading","leads","probate","outreach","risk","memory","voice","agent"].forEach(c=>ev.addEventListener(c,e=>addEvent(c,e.data)));
-async function ask(){const q=$("q").value.trim(); if(!q)return; $("ans").textContent="…thinking";
-  try{const r=await (await fetch("/api/tell",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({text:q})})).json();
-    $("ans").textContent=`[${r.source||"?"}] ${r.text||r.error||""}`;}catch(e){$("ans").textContent="brain unreachable";}}
+let _es=null;
+function ask(){
+  const q=$("q").value.trim(); if(!q)return;
+  if(_es){_es.close(); _es=null;}
+  $("ans").innerHTML=
+    '<div id="ans-src" style="color:#8a8470;font-size:10px;letter-spacing:2px;margin:8px 0 4px">…thinking</div>'+
+    '<div id="ans-think" style="background:#15130d;border:1px solid #2a2620;border-radius:7px;padding:8px 10px;margin-bottom:8px;font-size:12px;color:#9a937c">'+
+      '<div id="ans-think-h" style="cursor:pointer;letter-spacing:2px;font-size:10px;margin-bottom:4px">▼ THINKING</div>'+
+      '<div id="ans-think-body" style="white-space:pre-wrap;line-height:1.45"></div></div>'+
+    '<div id="ans-answer" style="white-space:pre-wrap;line-height:1.55;color:#ece6d4;padding-bottom:12px"></div>';
+  const tb=$("ans-think-body"), ab=$("ans-answer"), th=$("ans-think"), hh=$("ans-think-h");
+  hh.onclick=()=>{ tb.style.display = tb.style.display==="none" ? "" : "none"; };
+  let gotThinking=false, gotAnswer=false;
+  _es=new EventSource("/api/tell/stream?q="+encodeURIComponent(q));
+  _es.addEventListener("source",e=>{ $("ans-src").textContent="["+e.data+"]"; if(e.data!=="brain"){ th.style.display="none"; } });
+  _es.addEventListener("thinking",e=>{ gotThinking=true; th.style.display=""; tb.textContent+=e.data; });
+  _es.addEventListener("answer",e=>{ gotAnswer=true; ab.textContent+=e.data; });
+  _es.addEventListener("done",e=>{ if(!gotThinking) th.style.display="none"; else { tb.style.display="none"; hh.textContent="▶ THINKING"; } if(_es){_es.close(); _es=null;} });
+  _es.onerror=()=>{ if(!gotAnswer) ab.textContent="[brain unreachable]"; if(_es){_es.close(); _es=null;} };
+}
 $("q").addEventListener("keydown",e=>{if(e.key==="Enter")ask();});
 function clock(){$("clock").textContent=new Date().toLocaleTimeString([],{hour:"2-digit",minute:"2-digit",second:"2-digit"})+" · ET";}
 poll();setInterval(poll,2000);clock();setInterval(clock,1000);

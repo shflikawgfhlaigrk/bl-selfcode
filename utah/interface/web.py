@@ -71,6 +71,26 @@ async def api_tell(request):
         return JSONResponse({"error": str(exc)}, status_code=503)
 
 
+async def api_tell_stream(request):
+    """Stream a turn to the browser as SSE: one event per (channel, chunk) so the
+    chat box shows the brain's reasoning live like Claude. GET ?q=<text> (EventSource
+    is GET-only). Relays the daemon's ``tell_stream`` RPC; nothing fabricated."""
+    text = request.query_params.get("q", "").strip()
+
+    async def gen():
+        if not text:
+            yield {"event": "done", "data": ""}
+            return
+        try:
+            async for ev in ctl.tell_stream(text):
+                yield {"event": ev.get("channel", "answer"), "data": ev.get("chunk", "")}
+        except Exception as exc:  # daemon unreachable etc. — honest, no fabrication
+            yield {"event": "answer", "data": f"[brain unreachable: {exc}]"}
+            yield {"event": "done", "data": ""}
+
+    return EventSourceResponse(gen())
+
+
 async def events(request):
     async def gen():
         try:
@@ -136,6 +156,7 @@ def build_app() -> Starlette:
         Route("/status", api_status),
         Route("/memory", api_memory),
         Route("/api/tell", api_tell, methods=["POST"]),
+        Route("/api/tell/stream", api_tell_stream),
         Route("/events", events),
         Mount("/assets", StaticFiles(directory=str(DASH / "assets"))),
         Route("/{route:path}", deck_data),  # catch-all data routes (last)

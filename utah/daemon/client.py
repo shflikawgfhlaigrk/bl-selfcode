@@ -73,6 +73,33 @@ async def subscribe(channels=None, *, sock_path=CONTROL_SOCK):
                 yield msg.get("params")
 
 
+async def tell_stream(text: str, *, sock_path=CONTROL_SOCK, timeout: float = 180.0):
+    """Stream a turn: yields ``{channel, chunk}`` events (source/thinking/answer/
+    done) as the daemon produces them. The connection stays open and frames are
+    pushed (first frame = ack); ends on the ``done`` event or when the peer closes.
+    """
+    try:
+        stream = await anyio.connect_unix(str(sock_path))
+    except (FileNotFoundError, ConnectionRefusedError, OSError) as exc:
+        raise DaemonNotRunning(f"daemon not reachable at {sock_path}: {exc}") from exc
+    env = {"jsonrpc": "2.0", "method": "tell_stream", "id": 1, "params": {"text": text}}
+    async with stream:
+        with anyio.fail_after(timeout):
+            await frame.write_frame(stream, frame.KIND_JSON, _encode(env))
+            await frame.read_frame(stream)  # ack
+            while True:
+                try:
+                    _kind, payload = await frame.read_frame(stream)
+                except Exception:
+                    return
+                msg = _decode(payload)
+                if isinstance(msg, dict) and msg.get("method") == "tell_event":
+                    ev = msg.get("params") or {}
+                    yield ev
+                    if ev.get("channel") == "done":
+                        return
+
+
 def call_sync(method: str, params: object | None = None, **kwargs) -> object:
     """Blocking convenience for the CLI."""
     return anyio.run(lambda: call(method, params, **kwargs))
