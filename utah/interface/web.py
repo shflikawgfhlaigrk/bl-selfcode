@@ -84,33 +84,47 @@ async def events(request):
     return EventSourceResponse(gen())
 
 
+# Panel domains carried as feed lists (rows). DORMANT = honest-empty [] until a
+# producer publishes; a producer lighting one of these needs NO frontend change.
+DECK_LIST_DOMAINS = (
+    "engines", "agents", "leads", "probate", "outreach", "audit", "tick", "sync", "events",
+)
+
+
+def _deck_state(st: dict | None) -> dict:
+    """The ONE live deck feed covering every panel domain.
+
+    Real where a producer exists (spine/daemon/memory come straight from the live
+    daemon status); honest-empty everywhere else (real-or-DORMANT, never faked).
+    """
+    state: dict = {
+        "health": "live" if st is not None else "down",
+        "spine": st or {},
+        "daemon": st or {},
+        "memory": (st or {}).get("memory", {}),
+        "risk": {},
+        "voice": {"status": "idle", "listening": False},
+    }
+    for domain in DECK_LIST_DOMAINS:
+        state[domain] = []
+    return state
+
+
 async def deck_data(request):
-    """Every deck data route. Live where a producer exists; honest-empty else.
-    Always 200 (the SPA throws on non-200), JSON-shaped per route."""
+    """Every deck data route, served from the single live ``_deck_state`` feed.
+    Always 200 (the SPA throws on non-200); ``/state`` returns the whole feed,
+    other routes return that domain's slice."""
     route = request.path_params["route"].strip("/").split("/")[0] or "state"
     st = await _daemon_status()
-    up = st is not None
-    log.info("deck GET /%s (daemon=%s)", route, "up" if up else "down")
+    log.info("deck GET /%s (daemon=%s)", route, "up" if st is not None else "down")
+    state = _deck_state(st)
 
-    if route == "health":
-        return JSONResponse({"status": "live" if up else "down", "ok": up})
     if route in ("status", "state"):
-        # the aggregate the deck's spine panels read; live spine + honest-empty domains
-        return JSONResponse({
-            "health": "live" if up else "down",
-            "spine": st or {},
-            "daemon": st or {},
-            "memory": (st or {}).get("memory", {}),
-            "engines": [], "agents": [], "risk": {}, "voice": {"status": "idle"},
-            "leads": [], "events": [], "tick": [],
-        })
-    if route == "voice":
-        return JSONResponse({"status": "idle", "listening": False})
-    if route == "memory":
-        return JSONResponse((st or {}).get("memory", {}))
-    # engines / agents / risk / leads / events / tick / consolidate: no producer yet
-    if route in ("engines", "agents", "leads", "events", "tick"):
-        return JSONResponse([])
+        return JSONResponse(state)
+    if route == "health":
+        return JSONResponse({"status": state["health"], "ok": st is not None})
+    if route in state:
+        return JSONResponse(state[route])
     return JSONResponse({})
 
 
