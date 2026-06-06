@@ -85,10 +85,12 @@ def run() -> None:
     def _cb(indata, frames, t, status):  # noqa: ANN001
         q.put(bytes(indata))
 
+    fail_n = 0
     while True:
         try:
             with sd.RawInputStream(samplerate=SAMPLE_RATE, blocksize=BLOCK,
                                    channels=CHANNELS, dtype="int16", callback=_cb):
+                fail_n = 0  # mic opened cleanly
                 log.info("voice loop: mic open — always listening for 'ace'")
                 while True:
                     pcm = _capture_one(q)
@@ -105,9 +107,15 @@ def run() -> None:
                             os.remove(path)
                         except OSError:
                             pass
-        except Exception as exc:  # noqa: BLE001 — mic glitch / device change → retry
-            log.warning("voice loop error: %s — reopening mic in 2s", exc)
-            time.sleep(2)
+        except Exception as exc:  # noqa: BLE001 — mic unavailable / glitch / device change
+            fail_n += 1
+            if fail_n == 1:  # log ONCE (no spam if mic permission is missing)
+                import sys as _sys
+                log.warning(
+                    "voice loop: mic unavailable (%s) — retrying quietly; if this persists, "
+                    "grant Microphone permission to %s", exc, _sys.executable,
+                )
+            time.sleep(min(2 * fail_n, 30))  # backoff to 30s — never a tight error loop
 
 
 def main() -> int:
