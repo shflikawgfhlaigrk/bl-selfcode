@@ -20,7 +20,7 @@ import threading
 import time
 import wave
 
-from utah.voice import agent, stt, vad
+from utah.voice import agent, state, stt, tts, vad
 
 log = logging.getLogger("utah.voice.loop")
 
@@ -69,6 +69,9 @@ def run() -> None:
     # one reply into an endless self-conversation).
     processing = threading.Event()
     level = {"max": 0.0, "last_loud": time.monotonic(), "alerted": False}
+    # Real voice state surfaced on the deck /voice route (heartbeat'd by _monitor).
+    vstate = {"status": "starting", "listening": False, "speaking": False,
+              "segments": 0, "last_transcript": None, "last_wake": None}
 
     def _cb(indata, frames, t, status):  # noqa: ANN001
         if processing.is_set():
@@ -87,6 +90,7 @@ def run() -> None:
         # logs the level and records ONE failure so it's never silent.
         while True:
             time.sleep(MONITOR_S)
+            state.write(**vstate)  # heartbeat: deck sees a live (fresh) voice state
             if processing.is_set():
                 level["last_loud"] = time.monotonic()  # not deaf — we muted ourselves
                 continue
@@ -114,8 +118,16 @@ def run() -> None:
                 level["last_loud"] = time.monotonic()
                 seg = vad.Segmenter()
                 detector.reset()
+                vstate.update(status="listening", listening=True, speaking=False)
+                state.write(**vstate)
                 log.info("voice loop: mic open — Silero VAD listening for 'ace' "
                          "(speech threshold %.2f)", vad.SPEECH_THRESHOLD)
+
+                def _speak(answer: str) -> None:  # surface SPEAKING state during TTS
+                    vstate.update(status="speaking", speaking=True, listening=False)
+                    state.write(**vstate)
+                    tts.speak(answer)
+
                 while True:
                     frame = q.get()
                     is_speech = detector.prob(frame) > vad.SPEECH_THRESHOLD
@@ -125,16 +137,21 @@ def run() -> None:
                     secs = len(pcm) / 2 / SAMPLE_RATE
                     log.info("voice: speech segment %.1fs → transcribing", secs)
                     processing.set()  # mute the mic for the whole turn (no self-capture)
+                    vstate.update(status="thinking", listening=False, speaking=False)
+                    state.write(**vstate)
                     try:
                         path = _write_wav(pcm)
                         try:
                             text = stt.transcribe(path)
                             log.info("voice: transcript=%r", text)
                             if text:
-                                result = agent.handle_utterance(text)
+                                vstate["last_transcript"] = text[:120]
+                                result = agent.handle_utterance(text, speak=_speak)
                                 cmd = result.get("command") if result else None
                                 log.info("voice: wake_fired=%s command=%r",
                                          result is not None, cmd)
+                                if result is not None:
+                                    vstate["last_wake"] = cmd or "ace"
                                 if result and result.get("command"):
                                     log.info("voice turn: %r → %r", result["command"],
                                              (result.get("answer") or "")[:60])
@@ -145,6 +162,9 @@ def run() -> None:
                                 pass
                     finally:
                         detector.reset()
+                        vstate.update(status="listening", listening=True, speaking=False,
+                                      segments=vstate["segments"] + 1)
+                        state.write(**vstate)
                         try:  # drop everything the room/TTS queued during the turn
                             while True:
                                 q.get_nowait()

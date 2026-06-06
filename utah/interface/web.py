@@ -24,6 +24,7 @@ from sse_starlette.sse import EventSourceResponse
 
 from utah import failures
 from utah.daemon import client as ctl
+from utah.voice import state as voice_state
 
 log = logging.getLogger("utah.interface.web")
 DASH = pathlib.Path(__file__).resolve().parents[2] / "dashboard"
@@ -147,7 +148,7 @@ def _deck_state(st: dict | None) -> dict:
         "daemon": st or {},
         "memory": (st or {}).get("memory", {}),
         "risk": {},
-        "voice": {"status": "idle", "listening": False},
+        "voice": voice_state.status(),  # REAL live voice-loop state (or 'down'), never faked
     }
     for domain in DECK_LIST_DOMAINS:
         state[domain] = []
