@@ -67,6 +67,42 @@ def test_restarts_a_wedged_child_failing_its_probe():
         sup.drain_all()
 
 
+def test_wedged_child_restarts_only_after_consecutive_failures():
+    """A single slow/failed probe must NOT restart a healthy-but-busy child —
+    only N consecutive failures count as wedged (the false-positive-kill fix)."""
+    state = {"healthy": False}
+    sup = Supervisor(children=[ChildSpec("a", SLEEP, probe=lambda: state["healthy"])],
+                     ready_timeout=1.0, probe_grace_s=0.0, wedge_after=3)
+    try:
+        sup._children[0].spawn()
+        first = sup._children[0].proc
+        sup.supervise_once()  # fail 1 — below threshold
+        assert sup._children[0].proc.pid == first.pid
+        sup.supervise_once()  # fail 2 — still below
+        assert sup._children[0].proc.pid == first.pid
+        sup.supervise_once()  # fail 3 — wedged → restart
+        assert sup._children[0].proc.pid != first.pid
+    finally:
+        sup.drain_all()
+
+
+def test_probe_success_resets_the_unhealthy_streak():
+    state = {"healthy": False}
+    sup = Supervisor(children=[ChildSpec("a", SLEEP, probe=lambda: state["healthy"])],
+                     ready_timeout=1.0, probe_grace_s=0.0, wedge_after=3)
+    try:
+        sup._children[0].spawn()
+        first = sup._children[0].proc
+        sup.supervise_once(); sup.supervise_once()  # 2 fails
+        state["healthy"] = True
+        sup.supervise_once()  # success → streak resets
+        state["healthy"] = False
+        sup.supervise_once(); sup.supervise_once()  # 2 more fails (< 3 after reset)
+        assert sup._children[0].proc.pid == first.pid  # not restarted
+    finally:
+        sup.drain_all()
+
+
 def test_per_child_circuit_breaks_after_max_restarts():
     sup = Supervisor(
         children=[ChildSpec("crasher", EXIT_NOW, probe=HEALTHY)],

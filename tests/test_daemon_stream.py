@@ -71,6 +71,45 @@ def test_tell_stream_relays_brain_events_over_the_socket(sock, monkeypatch):
     assert answer == "the answer"
 
 
+def test_safe_write_swallows_broken_pipe_returns_false():
+    """A client vanishing mid-stream makes the socket write raise BrokenResourceError;
+    _safe_write MUST swallow it and return False — never let it crash the daemon."""
+    server = ControlServer(None, sock_path=Path("/tmp/none.sock"))
+
+    class DeadStream:
+        async def send(self, data):
+            raise anyio.BrokenResourceError()
+
+    async def go():
+        return await server._safe_write(DeadStream(), b'{"jsonrpc":"2.0","method":"event"}')
+
+    assert anyio.run(go) is False
+
+
+def test_tell_stream_survives_client_disconnect_mid_stream(sock, monkeypatch):
+    """The headline regression: a client that disconnects mid-turn must NOT crash
+    the server. tell_stream yields many events; the client reads one then closes."""
+    monkeypatch.setattr(core, "tell_stream", lambda t: iter(
+        [("answer", f"chunk{i}") for i in range(50)] + [("done", "x")]))
+    server = _build_server(sock)
+    crashed = {}
+
+    async def scenario():
+        async with anyio.create_task_group() as tg:
+            await tg.start(server.serve)
+            # read exactly one event then drop the connection
+            agen = ctl.tell_stream("hi", sock_path=sock)
+            await agen.__anext__()
+            await agen.aclose()  # client disconnects mid-stream
+            await anyio.sleep(0.3)  # give the server a chance to crash if it would
+            # server still alive? a fresh ping must succeed
+            crashed["ping_ok"] = (await ctl.call("ping", sock_path=sock)).get("pong") is True
+            tg.cancel_scope.cancel()
+
+    anyio.run(scenario)
+    assert crashed["ping_ok"] is True  # daemon survived the mid-stream disconnect
+
+
 def test_tell_stream_passes_the_text_to_core(sock, monkeypatch):
     seen = {}
     def _capture(text):

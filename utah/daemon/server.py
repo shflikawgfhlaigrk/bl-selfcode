@@ -96,8 +96,15 @@ class ControlServer:
         try:
             await frame.write_frame(stream, frame.KIND_JSON, payload, self._max_frame)
             return True
-        except frame.FrameError:
-            return False
+        except (
+            frame.FrameError,
+            anyio.BrokenResourceError,
+            anyio.ClosedResourceError,
+            anyio.EndOfStream,
+            ConnectionError,
+            OSError,
+        ):
+            return False  # peer vanished mid-write — never let it crash the server
 
     async def _subscribe(self, stream, req) -> None:
         """Hold the connection open and push bus events until the client closes."""
@@ -145,7 +152,9 @@ class ControlServer:
                         from_thread.run(send.send, {"channel": channel, "chunk": chunk})
                 try:
                     await to_thread.run_sync(_work)
-                except Exception:  # never crash the connection; the client ends on close
+                except (anyio.BrokenResourceError, anyio.ClosedResourceError):
+                    pass  # client disconnected; the receive side closed — normal
+                except Exception:  # never crash the connection
                     log.exception("tell_stream producer crashed")
                 finally:
                     await send.aclose()

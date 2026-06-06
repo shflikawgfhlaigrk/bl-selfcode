@@ -80,7 +80,7 @@ class ChildSpec:
 class _ManagedChild:
     def __init__(
         self, spec: ChildSpec, *, ready_timeout: float, max_restarts: int,
-        window_s: float, probe_grace_s: float,
+        window_s: float, probe_grace_s: float, wedge_after: int = 1,
     ) -> None:
         self.spec = spec
         self.proc: subprocess.Popen | None = None
@@ -88,6 +88,8 @@ class _ManagedChild:
         self._max = max_restarts
         self._window = window_s
         self._grace = probe_grace_s
+        self._wedge_after = max(1, wedge_after)
+        self._unhealthy = 0
         self._restarts: collections.deque[float] = collections.deque()
         self._spawned_at = 0.0
 
@@ -157,11 +159,12 @@ class Supervisor:
         probe_interval: float = 5.0,
         drain_timeout: float = 12.0,
         probe_grace_s: float = 3.0,
+        wedge_after: int = 1,
     ) -> None:
         self._children = [
             _ManagedChild(
                 s, ready_timeout=ready_timeout, max_restarts=max_restarts,
-                window_s=window_s, probe_grace_s=probe_grace_s,
+                window_s=window_s, probe_grace_s=probe_grace_s, wedge_after=wedge_after,
             )
             for s in children
         ]
@@ -186,13 +189,21 @@ class Supervisor:
         for child in self._children:
             if child.circuit_broken():
                 continue  # gave up on this child; already alerted
-            dead = not child.alive()
-            wedged = (not dead) and (not child.healthy())
-            if not (dead or wedged):
-                continue
-            log.warning("%s %s → restart", child.spec.name, "died" if dead else "wedged")
-            if wedged:
+            if not child.alive():
+                reason = "died"
+            elif not child.healthy():
+                child._unhealthy += 1
+                if child._unhealthy < child._wedge_after:
+                    continue  # one slow/failed probe is tolerated — not yet wedged
+                reason = "wedged"
                 child.kill()
+            else:
+                child._unhealthy = 0  # healthy probe resets the streak
+                continue
+            log.warning(
+                "%s %s → restart (unhealthy_streak=%d)", child.spec.name, reason, child._unhealthy
+            )
+            child._unhealthy = 0
             child.record_restart()
             if child.circuit_broken():
                 log.error(
@@ -260,16 +271,21 @@ def main() -> int:
         ChildSpec(
             "daemon",
             [sys.executable, "-m", "utah.daemon.daemon"],
-            probe=ping_probe(2.0),
+            probe=ping_probe(5.0),
             drain=_daemon_drain,
         ),
         ChildSpec(
             "web",
             [sys.executable, "-m", "utah.interface.web"],
-            probe=http_probe("http://127.0.0.1:8766/", 2.0),
+            probe=http_probe("http://127.0.0.1:8766/", 5.0),
         ),
     ]
-    return Supervisor(children).run()
+    # Tolerant of a busy/cold-booting Mac: 8s post-spawn grace, 5s probe timeout,
+    # and only wedge after 3 consecutive failed probes (~15s) — never kill a
+    # healthy-but-slow child on one slow ping (the self-inflicted-outage fix).
+    return Supervisor(
+        children, ready_timeout=30.0, probe_grace_s=8.0, probe_interval=5.0, wedge_after=3
+    ).run()
 
 
 if __name__ == "__main__":
