@@ -1,16 +1,37 @@
 """TTS boundary — speak text aloud (Piper). Injectable; degrades (logs, no-op) if
 the engine/model/audio device is missing so the voice loop never crashes. F5-TTS/
 StyleTTS2 (natural voice) drop into this same boundary later.
+
+``speak`` synthesizes the PROVEN-clean WAV (the same ``synthesize_wav`` bytes the
+round-trip proof checks) and plays it through the macOS reference player (``afplay``).
+The old ``sd.play(int16_array)`` path was the static the live test surfaced: a
+module-global stream that's fragile on dtype, on output-device selection (it followed
+the PortAudio default, not the system output), and — fatally — on concurrency, since
+voice and the chat-speak thread share that one stream and corrupt each other. afplay
+fed a clean WAV, under a global lock, removes all three failure modes at once.
 """
 from __future__ import annotations
 
 import logging
+import os
+import subprocess
+import tempfile
 import threading
 import wave
 
 from utah import config
 
 log = logging.getLogger("utah.voice.tts")
+
+# Serialize ALL playback (voice loop + chat-speak thread): two players running at
+# once overlap into garble. One voice at a time, process-wide.
+_PLAY_LOCK = threading.Lock()
+
+
+def _afplay(path: str) -> None:
+    """Play a WAV via the macOS reference player — honours the system default output
+    device and handles the sample rate itself (no dtype/rate fragility)."""
+    subprocess.run(["afplay", path], check=True)
 
 
 class TTS:
@@ -19,13 +40,15 @@ class TTS:
 
 
 class PiperTTS:
-    """Piper voice (lazy-loaded). ``speak`` plays via sounddevice; ``synth_wav``
-    writes a WAV (used by the offline round-trip proof)."""
+    """Piper voice (lazy-loaded). ``synth_wav`` writes a WAV; ``speak`` synthesizes
+    that same clean WAV and plays it via ``player`` (default: macOS ``afplay``).
+    ``player`` is injectable so tests prove the wiring without blasting audio."""
 
-    def __init__(self, model_path: str | None = None) -> None:
+    def __init__(self, model_path: str | None = None, player=None) -> None:
         self._model_path = model_path or config.PIPER_MODEL
         self._voice = None
         self._lock = threading.Lock()
+        self._player = player or _afplay
 
     def _load(self):
         with self._lock:
@@ -44,15 +67,17 @@ class PiperTTS:
         text = (text or "").strip()
         if not text:
             return
-        voice = self._load()
-        import numpy as np
-        import sounddevice as sd
-
-        chunks = [c.audio_int16_array for c in voice.synthesize(text)]
-        if not chunks:
-            return
-        sd.play(np.concatenate(chunks), voice.config.sample_rate)
-        sd.wait()
+        fd, path = tempfile.mkstemp(suffix=".wav", prefix="utah_tts_")
+        os.close(fd)
+        try:
+            self.synth_wav(text, path)       # PROVEN-clean bytes (round-trip path)
+            with _PLAY_LOCK:                 # one voice at a time, process-wide
+                self._player(path)           # macOS reference player
+        finally:
+            try:
+                os.remove(path)
+            except OSError:
+                pass
 
 
 _tts: TTS | None = None
