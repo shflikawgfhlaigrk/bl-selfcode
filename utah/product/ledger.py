@@ -129,3 +129,46 @@ class Ledger:
                 t: c.execute(f"SELECT count(*) FROM {t}").fetchone()[0]
                 for t in ("leads", "probate", "outreach_ledger", "fires")
             }
+
+    #: deck panel domain -> (table, explicit columns). Explicit columns keep the
+    #: output JSON-safe (ts as text, no raw datetime/Decimal) and stable.
+    _RECENT = {
+        "leads": ("leads",
+                  "id, name, kind, region, source, status, to_char(ts,'YYYY-MM-DD HH24:MI') ts"),
+        "probate": ("probate",
+                    "id, case_name, county, status, to_char(ts,'YYYY-MM-DD HH24:MI') ts"),
+        "outreach": ("outreach_ledger",
+                     "id, recipient, campaign, channel, to_char(ts,'YYYY-MM-DD HH24:MI') ts"),
+        "fires": ("fires",
+                  "id, engine, direction, outcome, to_char(ts,'YYYY-MM-DD HH24:MI') ts"),
+    }
+
+    def recent(self, domain: str, limit: int = 50) -> list[dict]:
+        """Recent rows for a deck revenue panel (leads|probate|outreach|fires).
+        Unknown domain -> [] (honest empty, never an error)."""
+        spec = self._RECENT.get(domain)
+        if spec is None:
+            return []
+        table, cols = spec
+        limit = max(1, min(int(limit), 200))
+        with self._conn() as c:
+            cur = c.execute(f"SELECT {cols} FROM {table} ORDER BY id DESC LIMIT %s", (limit,))
+            names = [d.name for d in cur.description]
+            return [dict(zip(names, row)) for row in cur.fetchall()]
+
+
+_ledger: Ledger | None = None
+
+
+def get_ledger(publish: Publisher | None = None) -> Ledger:
+    """Process-wide ledger. ``publish`` (e.g. the daemon bus) is bound on first
+    construction so every write pushes to the deck."""
+    global _ledger
+    if _ledger is None:
+        _ledger = Ledger(publish=publish)
+    return _ledger
+
+
+def set_ledger(ledger: Ledger | None) -> None:
+    global _ledger
+    _ledger = ledger

@@ -184,6 +184,14 @@ def _audit_rows() -> list[str]:
     ]
 
 
+async def _ledger_snapshot() -> dict:
+    """Live product-ledger snapshot (revenue domains) — real-or-empty, never fabricated."""
+    try:
+        return await ctl.call("ledger_snapshot", {"limit": 8}, timeout=5.0)
+    except Exception:
+        return {}
+
+
 async def deck_data(request):
     """Every deck data route, served from the single live ``_deck_state`` feed.
     Always 200 (the SPA throws on non-200); ``/state`` returns the whole feed,
@@ -194,6 +202,14 @@ async def deck_data(request):
     state = _deck_state(st)
     # AUDIT LEDGER panel — live from the durable failure log (off-loop; empty on error)
     state["audit"] = await run_in_threadpool(_audit_rows)
+    # Revenue panels — live from the Postgres product ledger (real rows or empty).
+    snap = await _ledger_snapshot()
+    if snap:
+        state["leads"] = snap.get("leads", [])
+        state["probate"] = snap.get("probate", [])
+        state["outreach"] = snap.get("outreach", [])
+        state["engines"] = snap.get("fires", [])      # 'trading'/'engines' panel = fires
+        state["ledger"] = snap.get("counts", {})
 
     if route in ("status", "state"):
         return JSONResponse(state)

@@ -127,6 +127,28 @@ async def memory_entities(ctx: Context, params: object) -> dict:
         return {"entities": await ctx.pool.run(_entities_blocking, limit)}
 
 
+def _ledger_snapshot_blocking(limit: int) -> dict:
+    """One read of the product ledger: counts + recent rows per revenue domain.
+    The Postgres schema Ace's producers transition into (leads/probate/outreach/fires)."""
+    from utah.product.ledger import get_ledger
+
+    lg = get_ledger()
+    return {
+        "counts": lg.counts(),
+        "leads": lg.recent("leads", limit),
+        "probate": lg.recent("probate", limit),
+        "outreach": lg.recent("outreach", limit),
+        "fires": lg.recent("fires", limit),
+    }
+
+
+async def ledger_snapshot(ctx: Context, params: object) -> dict:
+    """Live product-ledger snapshot for the deck's revenue panels (off-loop, governed)."""
+    limit = max(1, min(int(_as_dict(params).get("limit", 8)), 100))
+    with ctx.governor.admission():
+        return await ctx.pool.run(_ledger_snapshot_blocking, limit)
+
+
 def _busy(seconds: float) -> float:
     t = time.perf_counter()
     time.sleep(seconds)  # a real blocking unit of work, off the loop
@@ -156,6 +178,7 @@ REGISTRY = {
     "memory_stats": memory_stats,
     "memory_list": memory_list,
     "memory_entities": memory_entities,
+    "ledger_snapshot": ledger_snapshot,
     "publish": publish,
     "shutdown": shutdown,
 }

@@ -72,6 +72,18 @@ async def amain() -> None:
         Dispatcher(ctx, REGISTRY), sock_path=runtime.CONTROL_SOCK, bus=bus
     )
 
+    # Configure the Postgres transition: apply the product-ledger schema and bind the
+    # bus publisher so every revenue write (the schema Ace's producers transition into)
+    # pushes to the deck. Deferred (not fatal) if Postgres is momentarily down — the
+    # ledger reconnects lazily, same as memory.
+    try:
+        from utah.product import ledger as product_ledger
+
+        product_ledger.get_ledger(publish=bus.publish).init_schema()
+        log.info("product ledger schema ready (leads/probate/outreach/fires)")
+    except Exception as exc:  # noqa: BLE001
+        log.warning("product ledger schema init deferred: %s", exc)
+
     async with anyio.create_task_group() as tg:
         await tg.start(server.serve)
         log.info(
