@@ -402,10 +402,18 @@ async def panel_detail(ctx: Context, params: object) -> dict:
                 "note": "ready" if rdy else "GATED: drop ~/.utah/secrets/gmail.json"}
     if panel == "marketer":
         from utah.product import marketer
-        return {"panel": "marketer",
-                "instagram": "ready" if marketer.creds_available("instagram") else "gated",
-                "tiktok": "ready" if marketer.creds_available("tiktok") else "gated",
-                "note": "GATED: IG/TikTok creds in ~/.utah/secrets/"}
+        from utah.product.ledger import Ledger
+        def _mk():
+            try:
+                rows = Ledger().recent("marketer", 15)
+            except Exception:  # noqa: BLE001
+                rows = []
+            return {"panel": "marketer", "rows": rows,
+                    "instagram": "ready" if marketer.creds_available("instagram") else "gated",
+                    "tiktok": "ready" if marketer.creds_available("tiktok") else "gated",
+                    "note": "email_spotlight LIVE (mail.send); IG/TikTok gated on creds"}
+        with ctx.governor.admission():
+            return await ctx.pool.run(_mk)
     if panel == "research":
         from utah import memory
         with ctx.governor.admission():

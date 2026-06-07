@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  com.utah.marketer — daily email-spotlight of a real local business.
+
+  Runs utah.product.marketer.run_scheduled(): picks ONE not-yet-featured lead from the
+  ledger, composes a spotlight caption, and sends it as an email via the LIVE mail path
+  (gmail.json), recording it in marketer_posts (UNIQUE(channel,media_ref) = never the same
+  business twice). EMAIL is the only marketing channel live today — IG/TikTok stay gated
+  on creds (~/.utah/secrets/instagram.json|tiktok.json) + a media renderer. Never fabricates.
+
+  Install:
+    cp ops/launchd/com.utah.marketer.plist ~/Library/LaunchAgents/
+    launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.utah.marketer.plist
+  Force-run now:  launchctl kickstart gui/$(id -u)/com.utah.marketer
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.utah.marketer</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/michaelbarber/.utah/venv/bin/python</string>
+    <string>-c</string>
+    <string>import logging; logging.basicConfig(level=logging.INFO); from utah.product.marketer import run_scheduled; print(run_scheduled())</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>/Users/michaelbarber/.utah</string>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PYTHONPATH</key>
+    <string>/Users/michaelbarber/Desktop/ProjectUtah</string>
+    <key>PYTHONUNBUFFERED</key>
+    <string>1</string>
+    <key>PATH</key>
+    <string>/Users/michaelbarber/.utah/venv/bin:/opt/homebrew/bin:/usr/local/bin:/Users/michaelbarber/.local/bin:/usr/bin:/bin</string>
+  </dict>
+
+  <key>StartInterval</key>
+  <integer>86400</integer>
+
+  <key>RunAtLoad</key>
+  <false/>
+
+  <key>StandardOutPath</key>
+  <string>/Users/michaelbarber/.utah/logs/marketer.log</string>
+
+  <key>StandardErrorPath</key>
+  <string>/Users/michaelbarber/.utah/logs/marketer.err</string>
+</dict>
+</plist>

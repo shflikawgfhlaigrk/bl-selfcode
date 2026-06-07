@@ -37,3 +37,20 @@ def test_post_failure_documented():
     r = marketer.post("cap", media_ref="r.mp4", channel="instagram", publish_fn=boom)
     assert r["posted"] is False and r.get("gated") is False
     assert any("post_failed" in row[2] for row in store.rows)
+
+
+def test_spotlight_emails_and_records():
+    """spotlight() sends via the injected mail path and records a marketer_posts row."""
+    class _Lg:
+        def __init__(s): s.posts = []
+        def record_post(s, channel, caption, media_ref, subject, status, post_id):
+            s.posts.append((channel, subject, status)); return True
+    lg = _Lg()
+    sent = {}
+    def fake_send(to, subject, body):
+        sent.update(to=to, subject=subject); return {"sent": True, "to": to}
+    out = marketer.spotlight({"name": "Tabby House", "kind": "cafe"},
+                             send_fn=fake_send, ledger=lg)
+    assert out["sent"] is True and out["status"] == "posted" and out["subject"] == "Tabby House"
+    assert sent["subject"] == "Spotlight: Tabby House"
+    assert lg.posts == [("email_spotlight", "Tabby House", "posted")]

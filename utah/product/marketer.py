@@ -54,4 +54,51 @@ def post(caption: str, *, media_ref: str, channel: str = "instagram", publish_fn
         return {"posted": False, "gated": False, "channel": channel, "error": str(exc)}
 
 
-__all__ = ["compose_caption", "post", "creds_available", "MAX_CAPTION"]
+def spotlight(lead: dict, *, to: str | None = None, send_fn=None, ledger=None) -> dict:
+    """Marketing v1 — email-spotlight a real local business. EMAIL is the only channel
+    live today (gmail.json present; IG/TikTok gated on creds + a media renderer), so this
+    is the minimal REAL, autonomous, provable marketing action: compose a caption, send it
+    as an email via the proven mail path, and record it in marketer_posts (deck lights up).
+    Defaults to Michael (a brand digest), never cold-emails a business here — that's the
+    outreach path with its suppression. Never fabricates a post."""
+    from utah import mail
+    from utah.product.ledger import Ledger
+
+    lg = ledger or Ledger()
+    name = (lead.get("name") or "a local business").strip()
+    caption = compose_caption(lead)
+    media_ref = f"spotlight:{name}"
+    res = (send_fn or mail.send)(to or "mtuburnsbarber@gmail.com", f"Spotlight: {name}", caption)
+    status = "posted" if res.get("sent") else ("gated" if res.get("gated") else "failed")
+    try:
+        lg.record_post("email_spotlight", caption, media_ref, name, status,
+                       res.get("to") if res.get("sent") else None)
+    except Exception as exc:  # noqa: BLE001 — a ledger hiccup must not lose the send result
+        failures.record("marketer", "ledger_write_failed", str(exc))
+    return {"channel": "email_spotlight", "subject": name, "status": status,
+            "sent": bool(res.get("sent"))}
+
+
+def run_scheduled(ledger=None, *, to: str | None = None) -> dict:
+    """``com.utah.marketer`` cron — spotlight ONE not-yet-featured lead/day via email.
+    UNIQUE(channel, media_ref) in marketer_posts prevents re-spotlighting the same business."""
+    import psycopg
+
+    from utah import config
+    from utah.product.ledger import Ledger
+
+    lg = ledger or Ledger()
+    with psycopg.connect(config.DB_DSN, autocommit=True) as c:
+        row = c.execute(
+            "SELECT name, kind FROM leads WHERE name NOT IN "
+            "(SELECT subject FROM marketer_posts WHERE channel='email_spotlight') "
+            "ORDER BY ts DESC LIMIT 1").fetchone()
+    if not row:
+        return {"status": "no_fresh_lead"}
+    out = spotlight({"name": row[0], "kind": row[1]}, to=to, ledger=lg)
+    log.info("marketer cron: %s", out)
+    return out
+
+
+__all__ = ["compose_caption", "post", "spotlight", "run_scheduled",
+           "creds_available", "MAX_CAPTION"]
