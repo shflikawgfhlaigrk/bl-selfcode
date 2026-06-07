@@ -266,6 +266,33 @@
   .nocontact{color:var(--mut);font-size:11px}
   .cell-bar{height:5px;border-radius:3px;background:#1c1b24;overflow:hidden;margin-top:5px}
   .cell-bar i{display:block;height:100%;background:linear-gradient(90deg,#caa24a,#ecd08a)}
+
+  /* ---- SELF-CODE page ---- */
+  .sc-banner{padding:9px 12px;border-radius:8px;font-size:11px;letter-spacing:.4px;margin-bottom:12px;
+    background:#1a1407;border:1px solid #2c2614;color:var(--gold2)}
+  .sc-banner.live{background:#0e1a12;border-color:#1c3a28;color:var(--ok)}
+  .sc-banner.off{background:#1a0b09;border-color:#3a1714;color:#e8a59d}
+  .goal{margin:0 0 11px}
+  .goal .gl{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:4px}
+  .goal .gl b{color:var(--gold2);font-size:11.5px;letter-spacing:.4px} .goal .gl span{color:var(--gold);font-weight:700;font-size:13px}
+  .goal-bar{height:9px;border-radius:5px;background:#1c1b24;overflow:hidden;border:1px solid #23222c}
+  .goal-bar i{display:block;height:100%;background:linear-gradient(90deg,#caa24a,#ecd08a);transition:width .5s ease}
+  .goal .gd{color:var(--mut);font-size:9.5px;letter-spacing:.3px;margin-top:3px}
+  .cyc{display:grid;grid-template-columns:auto 1fr auto;gap:9px;align-items:center;padding:7px 0;border-bottom:1px dotted #1b1b24}
+  .cyc:last-child{border-bottom:0}
+  .cyc .yn{font-size:13px;flex:none;width:34px;text-align:center} .cyc .yn .y{color:var(--ok)} .cyc .yn .n{color:var(--err)}
+  .cyc .ct{color:#cfc8ad;font-size:11px;line-height:1.35;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
+  .cyc .cm{color:var(--mut);font-size:9px;letter-spacing:.5px;margin-top:2px}
+  .cyc .cu{color:var(--gold2);font-weight:700;font-size:12px;text-align:right;line-height:1} .cyc .cu span{color:var(--mut);font-size:8px;letter-spacing:1px;display:block;margin-top:2px}
+  .sc-edit{display:flex;gap:9px;margin-top:6px}
+  .sc-edit input{flex:1;background:var(--panel2);border:1px solid var(--line);color:var(--txt);padding:9px 12px;border-radius:8px;font:inherit}
+  .sc-edit input:focus{outline:0;border-color:var(--gold);box-shadow:0 0 0 1px var(--goldglow)}
+  .sc-edit button{background:linear-gradient(180deg,var(--gold2),var(--gold));border:0;color:#1a1407;padding:0 18px;border-radius:8px;font-weight:700;cursor:pointer;letter-spacing:.5px}
+  .sc-edit button:disabled{opacity:.5;cursor:default}
+  .sc-job{margin-top:10px;background:#0e1217;border:1px solid #15303a;border-radius:8px;padding:10px 12px;font-size:11px;color:#bcd3c5}
+  .sc-job .jh{color:#7fc9e0;font-size:10px;letter-spacing:1.5px;margin-bottom:5px;display:flex;align-items:center;gap:7px}
+  .sc-diff{margin-top:7px;background:#0a0a0e;border:1px solid var(--line);border-radius:7px;padding:9px 11px;max-height:230px;overflow:auto;white-space:pre;font-size:10.5px;line-height:1.45;color:#cfc8ad}
+  .sc-diff .add{color:#7fd9a5} .sc-diff .del{color:#e89a92} .sc-diff .hd{color:var(--gold)}
 </style>
 </head>
 <body>
@@ -467,6 +494,7 @@ const TABS=[
   {id:"probate",  label:"PROBATE"},
   {id:"outreach", label:"OUTREACH"},
   {id:"research", label:"RESEARCH"},
+  {id:"selfcode", label:"SELF-CODE"},
   {id:"audit",    label:"AUDIT"},
   {id:"system",   label:"SYSTEM"},
   {id:"voice",    label:"VOICE"},
@@ -487,6 +515,7 @@ const TAB_INTRO={
   leads:"Local businesses with no website — your prospects. Tap one for its type, location and contact info.",
   outreach:"Everyone Utah has already messaged. It never contacts the same prospect twice.",
   research:"Facts Utah taught itself from the web. Tap one to read it.",
+  selfcode:"Utah improving its OWN code — what he finds on the web, what he corrects in himself, ask him for an edit, and goals wired off real merges.",
   audit:"Every real failure, recorded plainly. An empty list means nothing has broken.",
   system:"Your Mac's CPU and Utah's worker team, right now.",
   voice:"Utah's hands-free ears and mouth — all on-device."};
@@ -558,6 +587,7 @@ async function loadDash(tab, quiet){
       if(v.last_transcript) h+=`<div class="drill-sec">LAST TRANSCRIPT (${esc(v.age_s)}s ago)</div><div class="item"><div class="body">${esc(v.last_transcript)}</div></div>`;
       body.innerHTML=h; return;
     }
+    if(tab==="selfcode"){ await loadSelfcode(body, quiet); return; }
     // generic row panels: leads / outreach / research / audit
     const d=await getPanel(tab);
     const arr=d.rows||[]; tabCounts[tab]=arr.length;
@@ -572,6 +602,127 @@ async function loadDash(tab, quiet){
     }
     body.innerHTML=h; renderTabs(); wireRows();
   }catch(e){ body.innerHTML='<div class="empty">unavailable — '+esc(String(e.message||e))+'</div>'; }
+}
+
+/* ============================ SELF-CODE PAGE (4 sections) ============================ */
+/* 1 finding-on-google · 2 correcting-in-himself · 3 ask-for-an-edit (real governed,
+   propose-only) · 4 percentage goals from real merges. All four pull REAL data; the
+   edit chat-box enqueues a real claude self-code cycle and polls for the result. */
+let _scEditJob=null, _scPoll=null;
+function pctBar(g){
+  return `<div class="goal"><div class="gl"><b>${esc(g.name)}</b><span>${esc(g.pct)}%</span></div>`+
+    `<div class="goal-bar"><i style="width:${Math.max(0,Math.min(100,g.pct))}%"></i></div>`+
+    `<div class="gd">${esc(g.detail)}</div></div>`;
+}
+function cycRow(c){
+  const yn=v=>v?'<span class="y">✓</span>':'<span class="n">✗</span>';
+  const meta=[c.domain||"—", c.attempts+" attempt"+(c.attempts===1?"":"s"),
+              c.propagated===true?"propagated→live":null, c.logged_at].filter(Boolean).join(" · ");
+  const u=c.utility!=null?(+c.utility).toFixed(3):"—";
+  return `<div class="cyc"><div class="yn">${yn(c.passed)} ${yn(c.merged)}</div>`+
+    `<div><div class="ct">${esc(c.task||"(no task)")}</div><div class="cm">${esc(meta)}</div></div>`+
+    `<div class="cu">${esc(u)}<span>UTILITY</span></div></div>`;
+}
+function fmtDiff(d){
+  if(!d) return "";
+  return '<div class="sc-diff">'+esc(d).split("\n").map(l=>{
+    const cl=l.startsWith("+")&&!l.startsWith("+++")?"add":(l.startsWith("-")&&!l.startsWith("---")?"del":(l.startsWith("@@")||l.startsWith("diff ")||l.startsWith("index ")?"hd":""));
+    return cl?`<span class="${cl}">${l||" "}</span>`:(l||" ");
+  }).join("\n")+"</div>";
+}
+async function loadSelfcode(body, quiet){
+  // Don't let the 2.5s background poll clobber a half-typed edit or an in-flight job
+  // (it would wipe the input / reset the diff). Only the explicit tab-click (quiet=false)
+  // or a one-time empty render rebuilds the page; the job box self-updates via polling.
+  const inEl=$("sc-edit-in");
+  if(quiet && (_scEditJob || (inEl && document.activeElement===inEl))) return;
+  // fetch all four sections in parallel; each is real-or-empty
+  const [gov,cyc,goals,research]=await Promise.all([
+    getPanel("selfcode").catch(()=>({})),
+    getPanel("selfcode_cycles").catch(()=>({rows:[],stats:{}})),
+    getPanel("selfcode_goals").catch(()=>({goals:[]})),
+    getPanel("research").catch(()=>({rows:[]})),
+  ]);
+  tabCounts.selfcode=(cyc.rows||[]).length;
+  const on=gov.enabled!==false, am=gov.automerge&&/ARMED/i.test(gov.automerge);
+  const bcls=!on?"off":(am?"live":"");
+  const banner=`<div class="sc-banner ${bcls}">${esc(gov.note||gov.status||"self-coding")} · `+
+    `<b>${esc((gov.status||"—").toUpperCase())}</b>`+
+    (gov.sica?` · archived ${esc(gov.sica.archived)} · best utility ${esc(gov.sica.best_utility)}`:"")+
+    ` · kill-switch ${esc((gov.kill_switch_smoke||"").replace(/—.*/,"").trim()||"?")}</div>`;
+  let h=intro("selfcode")+banner;
+
+  // SECTION 4 — percentage goals (top, the headline)
+  h+=sec("◆ GOALS — % WIRED OFF REAL MERGES & CYCLES");
+  const gl=goals.goals||[];
+  h+= gl.length? gl.map(pctBar).join("") : '<div class="empty">DORMANT — no self-code data yet</div>';
+
+  // SECTION 1 — finding on google (web-grounded facts)
+  const rf=research.rows||[];
+  h+=sec("◆ FINDING ON GOOGLE — "+rf.length+" WEB-GROUNDED FACTS HE LEARNED");
+  h+= rf.length? rf.slice(0,12).map(r=>`<div class="item"><div class="h"><span class="pill">${esc(r.source||"web")}</span><span class="meta">#${esc(r.id)} · conf ${esc(r.confidence)} · ${esc(r.ts||"")}</span></div><div class="body">${esc(r.content)}</div></div>`).join("")
+       : '<div class="empty">DORMANT — nothing learned from the web yet</div>';
+
+  // SECTION 2 — correcting in himself (recent self-code cycles)
+  const st=cyc.stats||{}; const rows=cyc.rows||[];
+  h+=sec("◆ CORRECTING IN HIMSELF — RECENT SELF-CODE CYCLES");
+  if(st.cycles!=null) h+='<div class="kpis">'+
+    `<div class="kpi"><b>${esc(st.cycles)}</b><span>CYCLES</span></div>`+
+    `<div class="kpi"><b>${esc(st.passed)}/${esc(st.attempts)}</b><span>PASSED GATE</span></div>`+
+    `<div class="kpi"><b>${esc(st.merged)}</b><span>MERGED</span></div></div>`;
+  h+='<div class="rail-title" style="margin:6px 0 4px"><span>✓✓ = passed gate · merged</span></div>';
+  h+= rows.length? rows.map(cycRow).join("") : '<div class="empty">DORMANT — no cycles logged yet</div>';
+
+  // SECTION 3 — ask for an edit (chat box → real governed propose-only run)
+  h+=sec("◆ ASK FOR AN EDIT — HE DOES IT (PROPOSE-ONLY · NEVER MERGES MAIN)");
+  h+= on? `<div class="sc-edit"><input id="sc-edit-in" placeholder="Tell Utah what to change in his own code…  (real claude cycle · ~minutes · isolated clone)"/>`+
+        `<button id="sc-edit-go" onclick="submitSelfcodeEdit()">PROPOSE</button></div><div id="sc-job-box"></div>`
+     : '<div class="sc-banner off">kill-switch is ON — self-coding disabled. Remove ~/.utah/run/selfcode.disabled to enable.</div>';
+  body.innerHTML=h; renderTabs();
+  // restore the edit input + render any in-flight/finished job
+  const inEl=$("sc-edit-in"); if(inEl) inEl.addEventListener("keydown",e=>{if(e.key==="Enter")submitSelfcodeEdit();});
+  if(_scEditJob) renderSelfcodeJob(_scEditJob);
+}
+function submitSelfcodeEdit(){
+  const inEl=$("sc-edit-in"); if(!inEl) return;
+  const text=inEl.value.trim(); if(!text) return;
+  const btn=$("sc-edit-go"); if(btn){btn.disabled=true; btn.textContent="WORKING…";}
+  inEl.value="";
+  fetch("/api/selfcode/edit",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({text})})
+    .then(r=>r.json()).then(j=>{
+      if(j.error){ renderSelfcodeJob({status:"error",task:text,result:{error:j.error}}); if(btn){btn.disabled=false;btn.textContent="PROPOSE";} return; }
+      _scEditJob={job:j.job,status:"queued",task:text,result:null};
+      renderSelfcodeJob(_scEditJob); pollSelfcodeJob(j.job);
+    }).catch(e=>{ renderSelfcodeJob({status:"error",task:text,result:{error:String(e)}}); if(btn){btn.disabled=false;btn.textContent="PROPOSE";} });
+}
+function pollSelfcodeJob(id){
+  if(_scPoll) clearTimeout(_scPoll);
+  fetch("/api/selfcode/job/"+id).then(r=>r.json()).then(j=>{
+    _scEditJob=j; renderSelfcodeJob(j);
+    if(j.status==="queued"||j.status==="working"){ _scPoll=setTimeout(()=>pollSelfcodeJob(id),3000); }
+    else { const btn=$("sc-edit-go"); if(btn){btn.disabled=false;btn.textContent="PROPOSE";} }
+  }).catch(()=>{ _scPoll=setTimeout(()=>pollSelfcodeJob(id),4000); });
+}
+function renderSelfcodeJob(j){
+  const box=$("sc-job-box"); if(!box) return;
+  const working=j.status==="queued"||j.status==="working";
+  const r=j.result||{};
+  let inner=`<div class="jh">${working?'<span class="bdot"></span>':""}EDIT JOB · ${esc((j.status||"").toUpperCase())}`+
+    (j.elapsed_s!=null?` · ${esc(j.elapsed_s)}s`:"")+`</div>`;
+  inner+=`<div><b>Task:</b> ${esc(j.task||r.task||"")}</div>`;
+  if(working){ inner+=`<div style="color:var(--mut);margin-top:5px">Running a real governed self-code cycle on the isolated clone (claude + full suite gate). This takes a few minutes — propose-only, never merges main.</div>`; }
+  else if(r.ran===false){ inner+=`<div style="color:var(--err);margin-top:5px">Did not run: ${esc(r.error||"unknown")}</div>`; }
+  else {
+    const yn=v=>v?'<span style="color:var(--ok)">✓</span>':'<span style="color:var(--err)">✗</span>';
+    inner+=`<div style="margin-top:6px">Suite gate ${yn(r.passed)} · applied ${yn(r.applied)} · merged ${yn(r.merged)} (propose-only)`+
+      (r.tier?` · tier ${esc(r.tier)}`:"")+(r.utility!=null?` · utility ${esc((+r.utility).toFixed(3))}`:"")+
+      (r.elapsed_s!=null?` · ${esc((+r.elapsed_s).toFixed(0))}s`:"")+`</div>`;
+    if(r.branch) inner+=`<div style="margin-top:4px"><b>Branch:</b> ${esc(r.branch)} (review it on ~/.utah/selfcode-repo)</div>`;
+    if(r.reason) inner+=`<div style="color:var(--mut);margin-top:4px">${esc(r.reason)}</div>`;
+    if(r.diff) inner+=fmtDiff(r.diff);
+    else inner+=`<div style="color:var(--mut);margin-top:4px">(no diff captured — see the branch)</div>`;
+  }
+  box.innerHTML='<div class="sc-job">'+inner+'</div>';
 }
 
 /* ============================ LIVE EVENT BUS (SSE) ============================ */

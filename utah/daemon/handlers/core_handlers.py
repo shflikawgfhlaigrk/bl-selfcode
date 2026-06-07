@@ -458,6 +458,23 @@ async def panel_detail(ctx: Context, params: object) -> dict:
                 "engine": "headless chrome · --dump-dom (JS-rendered DOM)",
                 "binary": b or "",
                 "note": "ready — JS-rendered fetch live" if b else "GATED: no Chrome found"}
+    if panel == "selfcode_cycles":
+        # SELF-CODE page · "correcting in himself" — recent self-code cycles from the
+        # selfcode_log table (task/domain/utility/passed/merged), real-or-empty.
+        from utah.product import selfcode_web
+        with ctx.governor.admission():
+            rows = await ctx.pool.run(lambda: selfcode_web.recent_cycles(30))
+            stats = await ctx.pool.run(selfcode_web.cycle_stats)
+        return {"panel": "selfcode_cycles", "rows": rows, "stats": stats,
+                "note": "self-code cycles (selfcode_log) — what he's correcting in himself"}
+    if panel == "selfcode_goals":
+        # SELF-CODE page · "percentage goals from PRs" — every % traces to a real git
+        # commit count or selfcode_log row count (never fabricated).
+        from utah.product import selfcode_web
+        with ctx.governor.admission():
+            gls = await ctx.pool.run(selfcode_web.goals)
+        return {"panel": "selfcode_goals", "goals": gls,
+                "note": "progress wired off real selfcode(auto) commits + cycle outcomes"}
     return {"panel": panel, "rows": []}
 
 

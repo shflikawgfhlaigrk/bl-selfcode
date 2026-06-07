@@ -14,6 +14,8 @@ import json
 import logging
 import pathlib
 import threading
+import time
+import uuid
 
 from starlette.applications import Starlette
 from starlette.concurrency import run_in_threadpool
@@ -129,6 +131,67 @@ async def api_speak(request):
         return JSONResponse({"error": "empty text"}, status_code=400)
     threading.Thread(target=_speak_answer, args=(text,), daemon=True).start()
     return JSONResponse({"speaking": True, "chars": len(text)})
+
+
+# --- SELF-CODE page · chat-box "ask for an edit, he does it" -----------------
+# A web-typed edit triggers a REAL governed self-code attempt (claude coding cycle +
+# the suite gate) — ~minutes — so it can't run inside a request. We ENQUEUE it on a
+# detached thread and the page POLLs the job. PROPOSE-ONLY by construction (run_edit
+# calls propose_governed with auto_merge=False): a web-triggered edit NEVER merges to
+# main. Jobs live in-process (the deck is single-owner, loopback-only); bounded count.
+_EDIT_JOBS: dict[str, dict] = {}
+_EDIT_JOBS_MAX = 40
+
+
+def _run_edit_job(job_id: str, text: str) -> None:
+    from utah.product import selfcode_web
+
+    job = _EDIT_JOBS.get(job_id)
+    if job is None:
+        return
+    job["status"] = "working"
+    try:
+        result = selfcode_web.run_edit(text)             # the real blocking governed run
+        job["result"] = result
+        job["status"] = "error" if result.get("ran") is False else "done"
+    except Exception as exc:  # noqa: BLE001 — never crash the worker thread
+        failures.record("selfcode", "web_edit_failed", f"{text[:60]}: {exc}")
+        job["result"] = {"ran": False, "error": str(exc)[:300], "task": text}
+        job["status"] = "error"
+    finally:
+        job["finished"] = time.time()
+
+
+async def api_selfcode_edit(request):
+    """Enqueue a web-typed edit as a REAL governed (propose-only) self-code attempt.
+    Returns a job id at once; the page polls ``/api/selfcode/job/<id>`` for the result.
+    The run is slow (minutes) and PROPOSE-ONLY — auto_merge=False, never merges main."""
+    try:
+        body = await request.json()
+    except Exception:  # noqa: BLE001
+        body = {}
+    text = str(body.get("text", "")).strip()
+    if not text:
+        return JSONResponse({"error": "empty edit request"}, status_code=400)
+    # bound the job table: drop the oldest finished jobs first
+    if len(_EDIT_JOBS) >= _EDIT_JOBS_MAX:
+        for k in sorted(_EDIT_JOBS, key=lambda j: _EDIT_JOBS[j].get("finished", 0))[:10]:
+            _EDIT_JOBS.pop(k, None)
+    job_id = uuid.uuid4().hex[:12]
+    _EDIT_JOBS[job_id] = {"id": job_id, "task": text, "status": "queued",
+                          "started": time.time(), "result": None}
+    threading.Thread(target=_run_edit_job, args=(job_id, text), daemon=True).start()
+    return JSONResponse({"job": job_id, "status": "queued", "task": text})
+
+
+async def api_selfcode_job(request):
+    """Poll a self-code edit job. ``status`` ∈ queued|working|done|error; ``result`` is
+    the shaped propose_governed outcome (task/passed/branch/tier/utility/diff) once done."""
+    job = _EDIT_JOBS.get(request.path_params["job"])
+    if job is None:
+        return JSONResponse({"error": "unknown job"}, status_code=404)
+    elapsed = round(time.time() - job.get("started", time.time()), 1)
+    return JSONResponse({**job, "elapsed_s": elapsed})
 
 
 async def api_tell_stream(request):
@@ -258,6 +321,8 @@ def build_app() -> Starlette:
         Route("/api/tell", api_tell, methods=["POST"]),
         Route("/api/tell/stream", api_tell_stream),
         Route("/api/speak", api_speak, methods=["POST"]),
+        Route("/api/selfcode/edit", api_selfcode_edit, methods=["POST"]),
+        Route("/api/selfcode/job/{job}", api_selfcode_job),
         Route("/events", events),
         Mount("/assets", StaticFiles(directory=str(DASH / "assets"))),
         Route("/{route:path}", deck_data),  # catch-all data routes (last)
