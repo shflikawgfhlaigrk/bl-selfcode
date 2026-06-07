@@ -20,7 +20,7 @@ import threading
 import time
 import wave
 
-from utah.voice import agent, state, stt, vad
+from utah.voice import agent, state, stt, tts, vad
 
 log = logging.getLogger("utah.voice.loop")
 
@@ -74,8 +74,10 @@ def run() -> None:
               "segments": 0, "last_transcript": None, "last_wake": None}
 
     def _cb(indata, frames, t, status):  # noqa: ANN001
-        if processing.is_set():
-            return  # echo/feedback guard — ignore the world while we speak/think
+        if processing.is_set() or tts.is_anything_playing():
+            return  # echo/feedback guard — drop frames while WE *or any process* speak,
+            # so the mic never captures another process's TTS (a reply saying "Ace" would
+            # else re-fire the wake word → a self-conversation cascade of voices).
         pcm = bytes(indata)
         r = _rms(pcm)
         if r > level["max"]:

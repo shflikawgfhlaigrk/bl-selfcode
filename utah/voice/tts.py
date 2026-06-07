@@ -59,6 +59,28 @@ def _system_play_lock():
         finally:
             os.close(fd)
 
+
+_CHECK_FD: int | None = None
+
+
+def is_anything_playing() -> bool:
+    """True if ANY process is currently playing TTS (holds the playback lock). The voice
+    loop's own echo guard only mutes the mic during ITS OWN turn — so when the web/chat
+    process speaks a reply aloud (and Ace's replies say "Ace"), the always-on mic captured
+    it and the wake word re-fired into a self-conversation. The loop calls this to drop mic
+    frames during EVERY process's speech, not just its own. Cheap: a non-blocking SHARED
+    flock probe on a cached fd (conflicts only with the player's exclusive lock)."""
+    global _CHECK_FD
+    try:
+        if _CHECK_FD is None:
+            runtime.RUN_DIR.mkdir(parents=True, exist_ok=True)
+            _CHECK_FD = os.open(_PLAY_LOCKFILE, os.O_CREAT | os.O_RDWR, 0o600)
+        fcntl.flock(_CHECK_FD, fcntl.LOCK_SH | fcntl.LOCK_NB)
+        fcntl.flock(_CHECK_FD, fcntl.LOCK_UN)
+        return False          # acquired freely → nobody is playing
+    except OSError:
+        return True           # would block → an exclusive player holds it
+
 #: Closing punctuation that may trail a sentence terminator (".", "!", "?").
 _CLOSERS = "\"')]}»”’"
 
