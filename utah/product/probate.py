@@ -252,14 +252,16 @@ FetchPages = Callable[..., list[str]]
 
 
 def scout(ledger, category: str = "probate", counties=None, days: int = 60,
-          fetch: FetchPages | None = None) -> dict:
-    """Find ring probate notices and write each to the ledger (never-twice). Returns
-    ``{found, new, region[, error]}``. Every failure is recorded with a documented
-    reason to the failure log (the AUDIT panel) — degrades honestly, never crashes."""
-    region = "Coweta metro ring, GA"
+          max_pages: int = 4, fetch: FetchPages | None = None) -> dict:
+    """Find probate notices and write each to the ledger (never-twice). Returns
+    ``{found, new, region[, error]}``. ``counties=None`` filters to the Coweta ring;
+    an empty set captures STATEWIDE (every GA notice). Every failure is recorded with a
+    documented reason to the failure log (the AUDIT panel) — degrades honestly, never
+    crashes."""
     cset = set(counties) if counties is not None else set(DEFAULT_COUNTIES)
+    region = "Georgia (statewide)" if not cset else "Coweta metro ring, GA"
     try:
-        pages = (fetch or _real_fetch)(category=category, days=days)
+        pages = (fetch or _real_fetch)(category=category, days=days, max_pages=max_pages)
     except Exception as exc:  # noqa: BLE001 — fragile ASP.NET fetch
         failures.record("probate", "fetch_failed",
                         f"GPN {category} fetch failed: {exc}")
@@ -278,10 +280,15 @@ def scout(ledger, category: str = "probate", counties=None, days: int = 60,
         else:
             from collections import Counter
             seen = Counter((n["county"] or _county_from_text(n["text"]) or "?") for n in raw)
-            failures.record("probate", "zero_ring",
-                            f"GPN {category}: {len(raw)} statewide notices across "
-                            f"{dict(seen)} — 0 in Coweta ring this window (raw POST can't "
-                            "bind the county filter; ring counties absent from newest results)")
+            if cset:
+                failures.record("probate", "zero_ring",
+                                f"GPN {category}: {len(raw)} statewide notices across "
+                                f"{dict(seen)} — 0 in the {len(cset)}-county ring this window "
+                                "(raw POST can't bind the county filter)")
+            else:
+                failures.record("probate", "zero_named",
+                                f"GPN {category}: {len(raw)} notices but 0 had an extractable "
+                                f"decedent name (counties: {dict(seen)})")
         return {"found": 0, "new": 0, "region": region, "raw_notices": len(raw)}
 
     new = 0
@@ -296,5 +303,29 @@ def scout(ledger, category: str = "probate", counties=None, days: int = 60,
     return {"found": len(findings), "new": new, "region": region}
 
 
-__all__ = ["find_probate", "scout", "DEFAULT_COUNTIES",
+#: ``com.utah.probate`` cron knobs — statewide daily catch.
+DAILY_DAYS = 45
+DAILY_MAX_PAGES = 12
+
+
+def run_scheduled(days: int = DAILY_DAYS, max_pages: int = DAILY_MAX_PAGES,
+                  ledger=None, fetch: FetchPages | None = None) -> dict:
+    """``com.utah.probate`` cron entry — capture ALL Georgia probate notices, daily.
+
+    STATEWIDE (``counties=set()`` → no filter): GPN's county checkbox doesn't bind over
+    a raw POST, so the search returns the statewide newest-first stream; we walk
+    ``max_pages`` deep for coverage and write EVERY actionable estate (the ledger dedups
+    on case_name+county, so daily overlap never double-writes). The Coweta-ring filter
+    that zeroed older runs is intentionally dropped here — the county is still stored per
+    row, so the deck can narrow to the market. Real GPN only; degrades honestly."""
+    if ledger is None:
+        from utah.product.ledger import Ledger
+        ledger = Ledger()
+    res = scout(ledger, category="probate", counties=set(), days=days,
+                max_pages=max_pages, fetch=fetch)
+    log.info("probate cron (statewide): %s", res)
+    return res
+
+
+__all__ = ["find_probate", "scout", "run_scheduled", "DEFAULT_COUNTIES",
            "_extract_name", "_county_from_text", "_parse_notices"]

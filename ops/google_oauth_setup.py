@@ -96,7 +96,7 @@ def main() -> int:
 
     t = threading.Thread(target=srv.handle_request, daemon=True)
     t.start()
-    for _ in range(300):  # up to 5 min for you to approve
+    for _ in range(int(os.environ.get("UTAH_OAUTH_WAIT", "300"))):  # default 5 min to approve
         if captured.get("code") or captured.get("error"):
             break
         time.sleep(1)

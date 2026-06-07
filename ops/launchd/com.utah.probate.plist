@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  com.utah.probate — probate-scout cron (daily).
+
+  Runs utah.product.probate.run_scheduled(): STATEWIDE Georgia probate/estate notices
+  from georgiapublicnotice.com (the county checkbox doesn't bind over a raw POST, so we
+  take the statewide newest-first stream and walk deep), writing each actionable estate
+  to the product ledger (UNIQUE case_name+county → never-twice across runs). The county
+  is stored per row so the deck can narrow to the market. Daily cadence; failures go to
+  the probate log + AUDIT panel, never fabricated rows.
+
+  Install:
+    cp ops/launchd/com.utah.probate.plist ~/Library/LaunchAgents/
+    launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.utah.probate.plist
+  Force-run now:  launchctl kickstart gui/$(id -u)/com.utah.probate
+  Stop:           launchctl bootout  gui/$(id -u)/com.utah.probate
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.utah.probate</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/michaelbarber/.utah/venv/bin/python</string>
+    <string>-c</string>
+    <string>import logging; logging.basicConfig(level=logging.INFO); from utah.product.probate import run_scheduled; print(run_scheduled())</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>/Users/michaelbarber/Desktop/ProjectUtah</string>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PYTHONPATH</key>
+    <string>/Users/michaelbarber/Desktop/ProjectUtah</string>
+    <key>PYTHONUNBUFFERED</key>
+    <string>1</string>
+    <key>PATH</key>
+    <string>/Users/michaelbarber/.utah/venv/bin:/opt/homebrew/bin:/usr/local/bin:/Users/michaelbarber/.local/bin:/usr/bin:/bin</string>
+  </dict>
+
+  <key>StartInterval</key>
+  <integer>86400</integer>
+
+  <key>RunAtLoad</key>
+  <true/>
+
+  <key>StandardOutPath</key>
+  <string>/Users/michaelbarber/.utah/logs/probate.log</string>
+
+  <key>StandardErrorPath</key>
+  <string>/Users/michaelbarber/.utah/logs/probate.err</string>
+</dict>
+</plist>
