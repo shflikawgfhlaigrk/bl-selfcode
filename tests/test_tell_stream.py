@@ -64,6 +64,38 @@ def test_tell_stream_always_reasons_with_memory_as_context(monkeypatch):
     assert "Michael lives in Newnan, Georgia" in r.last_prompt  # memory fed as context
 
 
+def test_tell_stream_emits_grounding_for_the_recalled_memory(monkeypatch):
+    """The chat box shows what the answer STANDS ON — a 'grounding' event carries the
+    real recalled rows (id/source/sim/content). Transparency, never fabricated."""
+    monkeypatch.setattr(memory, "recall", lambda t, *a, **k: [_hit("Utah is the rebuild")])
+    monkeypatch.setattr(memory, "store", lambda *a, **k: None)
+    brain.set_stream_runner(ScriptedStreamRunner(_brain_lines("t", "Utah is the rebuild.")))
+    evs = list(core.tell_stream("what is utah?"))
+    grounding = [t for k, t in evs if k == "grounding"]
+    assert len(grounding) == 1
+    rows = json.loads(grounding[0])
+    assert rows and rows[0]["content"].startswith("Utah is the rebuild")
+    assert rows[0]["source"] == "fact" and rows[0]["sim"] == 0.9
+
+
+def test_tell_stream_no_grounding_event_when_memory_is_cold(monkeypatch):
+    monkeypatch.setattr(memory, "recall", lambda t, *a, **k: [])
+    monkeypatch.setattr(memory, "store", lambda *a, **k: None)
+    brain.set_stream_runner(ScriptedStreamRunner(_brain_lines("t", "An answer.")))
+    evs = list(core.tell_stream("q?"))
+    assert not any(k == "grounding" for k, _ in evs)   # no hits → no faked grounding
+
+
+def test_tell_stream_capability_has_no_grounding(monkeypatch):
+    """A deterministic capability (weather) is not memory-grounded — it must not emit
+    a grounding event even if recall returned something."""
+    monkeypatch.setattr(memory, "recall", lambda t, *a, **k: [_hit("stale weather note")])
+    monkeypatch.setattr("utah.product.weather.current", lambda *a, **k: "Gulf Shores, AL: sunny, 75°F.")
+    evs = list(core.tell_stream("what's the weather"))
+    assert ("source", "capability") in evs
+    assert not any(k == "grounding" for k, _ in evs)
+
+
 def test_tell_stream_remembers_the_turn_after_brain(monkeypatch):
     stored = {}
     monkeypatch.setattr(memory, "recall", lambda t, *a, **k: [])

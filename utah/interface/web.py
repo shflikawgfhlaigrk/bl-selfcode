@@ -117,6 +117,20 @@ def _speak_answer(text: str) -> None:
         log.warning("chat TTS failed: %s", exc)
 
 
+async def api_speak(request):
+    """Speak arbitrary text aloud with the REAL Piper voice (the chat box re-speak
+    button). Detached thread so the response returns at once; never fabricated audio."""
+    try:
+        body = await request.json()
+    except Exception:  # noqa: BLE001
+        body = {}
+    text = str(body.get("text", "")).strip()
+    if not text:
+        return JSONResponse({"error": "empty text"}, status_code=400)
+    threading.Thread(target=_speak_answer, args=(text,), daemon=True).start()
+    return JSONResponse({"speaking": True, "chars": len(text)})
+
+
 async def api_tell_stream(request):
     """Stream a turn to the browser as SSE: one event per (channel, chunk) so the
     chat box shows the brain's reasoning live like Claude. GET ?q=<text> (EventSource
@@ -243,6 +257,7 @@ def build_app() -> Starlette:
         Route("/panel/{name}", api_panel),
         Route("/api/tell", api_tell, methods=["POST"]),
         Route("/api/tell/stream", api_tell_stream),
+        Route("/api/speak", api_speak, methods=["POST"]),
         Route("/events", events),
         Mount("/assets", StaticFiles(directory=str(DASH / "assets"))),
         Route("/{route:path}", deck_data),  # catch-all data routes (last)

@@ -140,15 +140,63 @@
 
   /* ---- command dock (pinned bottom row; structurally independent of the deck) ---- */
   .dock{border-top:1px solid var(--line);background:linear-gradient(0deg,#0b0a07,transparent)}
+  .stream-bar{display:none;justify-content:space-between;align-items:center;padding:8px 20px 2px}
+  .stream-bar.open{display:flex}
+  .sb-title{color:var(--gold);font-size:10px;letter-spacing:2px}
+  .sb-title span{color:var(--mut)}
+  .sb-actions{display:flex;gap:7px}
+  .sb-actions button{background:#0f0e0a;border:1px solid var(--line);color:var(--mut);padding:3px 10px;border-radius:13px;cursor:pointer;font:inherit;font-size:9.5px;letter-spacing:1px}
+  .sb-actions button:hover{color:var(--gold2);border-color:#2a2415}
   #stream{height:0;overflow:auto;transition:height .25s ease;padding:0 20px}
-  #stream.open{height:32vh;padding:12px 20px}
-  .turn{margin:0 0 12px}
-  .turn .u{margin:8px 0 4px;color:#cfc9b6;font-size:13px}.turn .u b{color:#8a8470;font-weight:400}
-  .turn .src{color:#8a8470;font-size:10px;letter-spacing:2px;margin:1px 0 4px}
+  #stream.open{height:34vh;padding:10px 20px}
+  #stream.expanded{height:64vh}
+
+  .turn{margin:0 0 13px;padding-bottom:11px;border-bottom:1px solid #14131b}
+  .turn:last-child{border-bottom:0}
+  .turn .u{margin:4px 0 5px;color:#dcd6c4;font-size:13px;display:flex;justify-content:space-between;gap:12px;align-items:baseline}
+  .turn .u b{color:var(--gold2);font-weight:700} .turn .u .ts{color:#56513f;font-size:9px;letter-spacing:1px;flex:none}
+
+  /* provenance + timing meta row */
+  .turn .meta{display:flex;align-items:center;gap:9px;margin:0 0 6px;flex-wrap:wrap}
+  .badge{font-size:8.5px;letter-spacing:1.5px;padding:2px 9px;border-radius:11px;border:1px solid var(--line);color:var(--mut);text-transform:uppercase;white-space:nowrap}
+  .badge.pending{color:var(--mut)}
+  .badge.brain{color:var(--gold2);border-color:#3a2f14;background:#1a1407}
+  .badge.memory{color:#7fc9e0;border-color:#173039;background:#0b1820}
+  .badge.learned{color:#5cd0bf;border-color:#163a35;background:#0c1a18}
+  .badge.local{color:#b3acc9;border-color:#262433;background:#121119}
+  .badge.capability{color:#c79bf0;border-color:#2c2140;background:#140e1f}
+  .badge.social{color:#9a9382;border-color:#22212a;background:#0f0e13}
+  .badge.unavailable{color:var(--err);border-color:#3a1714;background:#1a0b09}
+  .bdot{display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--gold);margin-right:6px;animation:pulse-dot 1s ease-in-out infinite;vertical-align:middle}
+  @keyframes pulse-dot{0%,100%{opacity:.25}50%{opacity:1}}
+  .timing{color:#6f6957;font-size:9px;letter-spacing:.8px} .timing b{color:#a7a087}
+  .t-stop{margin-left:auto;cursor:pointer;color:var(--err);border:1px solid #3a1714;border-radius:6px;padding:2px 9px;font-size:9px;letter-spacing:1.5px;background:#160a09}
+  .t-stop:hover{background:#220c0a}
+
+  /* grounding — the real recalled memory the answer stands on (transparency) */
+  .grounding{display:none;margin:0 0 7px} .grounding.on{display:block}
+  .g-h{cursor:pointer;color:#6f9f86;font-size:9px;letter-spacing:1.5px;margin-bottom:4px}
+  .g-h:hover{color:#8fcfae}
+  .g-chips{display:flex;flex-wrap:wrap;gap:5px}
+  .g-chip{background:#0b150f;border:1px solid #163a28;border-radius:5px;padding:3px 8px;font-size:10px;color:#a7c4b3;max-width:340px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .g-chip .src{color:#5cae86;font-size:8px;letter-spacing:1px;margin-right:5px}
+  .g-chip .sim{color:#6f6957;font-size:8px;margin-left:5px}
+  .g-list{display:none;margin-top:6px} .g-list.on{display:block}
+  .g-row{padding:5px 0;border-bottom:1px dotted #16231b} .g-row:last-child{border-bottom:0}
+  .g-row .src{color:#5cae86;font-size:9px;letter-spacing:1px} .g-row .sim{color:#6f6957;font-size:9px;margin-left:6px}
+  .g-row .g-body{color:#bcd3c5;font-size:11px;margin-top:2px;line-height:1.4}
+
   .turn .think{display:none;background:#15130d;border:1px solid #2a2620;border-radius:7px;padding:6px 9px;margin-bottom:6px;font-size:12px;color:#9a937c}
   .turn .think .hh{cursor:pointer;font-size:10px;letter-spacing:2px;margin-bottom:3px}
   .turn .think .bb{white-space:pre-wrap;line-height:1.4}
-  .turn .ans{white-space:pre-wrap;line-height:1.55;color:#ece6d4}
+  .turn .ans{white-space:pre-wrap;line-height:1.55;color:#ece6d4;display:inline}
+  .caret{display:inline-block;width:7px;margin-left:1px;color:var(--gold);animation:blink 1s step-end infinite}
+  @keyframes blink{50%{opacity:0}}
+  .turn.done .caret{display:none}
+  .actions{display:none;gap:7px;margin-top:8px}
+  .turn.done .actions{display:flex}
+  .actions button{background:#0f0e0a;border:1px solid var(--line);color:var(--mut);padding:3px 11px;border-radius:13px;cursor:pointer;font:inherit;font-size:9.5px;letter-spacing:1px}
+  .actions button:hover{color:var(--gold2);border-color:#2a2415}
   .quick{display:flex;gap:7px;padding:7px 20px 0;flex-wrap:wrap}
   .quick button{background:#0f0e0a;border:1px solid var(--line);color:var(--mut);padding:4px 11px;border-radius:14px;cursor:pointer;font:inherit;font-size:10px;letter-spacing:1px}
   .quick button:hover{color:var(--gold2);border-color:#2a2415}
@@ -238,6 +286,13 @@
 
   <!-- COMMAND DOCK (pinned; deck polling cannot move it) -->
   <div class="dock">
+    <div class="stream-bar" id="stream-bar">
+      <span class="sb-title">◆ CONVERSATION <span id="turn-count"></span></span>
+      <span class="sb-actions">
+        <button id="expandBtn" onclick="streamExpand()" title="expand panel">⤢ EXPAND</button>
+        <button onclick="streamClear()">✕ CLEAR</button>
+      </span>
+    </div>
     <div id="stream"></div>
     <div class="quick">
       <button onclick="ask('what is my live system status right now?')">System status</button>
@@ -472,38 +527,98 @@ function fireWake(data){
 }
 ev.addEventListener("wake",e=>fireWake(e.data));
 ev.addEventListener("voice",e=>{ addEvent("voice",e.data);
-  try{const v=JSON.parse(e.data); if(v&&v.q){ streamOpen(); const t=newTurn("🎙 "+v.q); t.src.textContent="[voice · "+esc(v.source||"brain")+"]"; t.ans.textContent=v.answer||""; streamScroll(); }}catch(_){}
+  try{const v=JSON.parse(e.data); if(v&&v.q){
+    const t=newTurn(v.q,true); setBadge(t,v.source||"brain");
+    t.ans.textContent=v.answer||""; t.w.classList.add("done"); t.timing.textContent="via voice";
+    streamScroll();
+  }}catch(_){}
 });
 
 /* ============================ CHAT STREAM (real brain) ============================ */
+/* The chat box is a full reasoning console: provenance badge (where the answer
+   came from — brain/memory/learned/local/capability, color-coded), the grounding
+   it stands on (the REAL recalled rows, drill-downable), live latency (time-to-
+   first-token + total, client-measured), streaming thinking + answer with a caret,
+   a STOP control mid-stream, and copy / re-speak actions per answer. Nothing here
+   is fabricated — every field is a real SSE event or a measured timing. */
 let _es=null;
-function streamOpen(){ $("stream").classList.add("open"); }
+const SRC_LABEL={brain:"CLAUDE BRAIN",memory:"MEMORY",learned:"LEARNED · WEB",
+  local:"LOCAL MODEL",capability:"CAPABILITY",social:"SOCIAL",unavailable:"UNAVAILABLE",pending:"THINKING"};
+function streamOpen(){ $("stream").classList.add("open"); $("stream-bar").classList.add("open"); }
 function streamScroll(){ const a=$("stream"); a.scrollTop=a.scrollHeight; }
-function streamClear(){ $("stream").innerHTML=""; $("stream").classList.remove("open"); }
-function newTurn(userText){
+function streamExpand(){ const s=$("stream"); s.classList.toggle("expanded");
+  $("expandBtn").textContent=s.classList.contains("expanded")?"⤡ COLLAPSE":"⤢ EXPAND"; streamScroll(); }
+function streamClear(){ if(_es){_es.close();_es=null;} $("stream").innerHTML="";
+  $("stream").classList.remove("open","expanded"); $("stream-bar").classList.remove("open"); updateTurnCount(); }
+function updateTurnCount(){ const n=$("stream").querySelectorAll(".turn").length; $("turn-count").textContent=n?("· "+n):""; }
+function nowClock(){ return new Date().toLocaleTimeString([],{hour:"2-digit",minute:"2-digit",second:"2-digit"}); }
+
+function setBadge(t,src){ src=(src||"pending").toLowerCase();
+  t.badge.className="badge "+src;
+  t.badge.innerHTML=(src==="pending"?'<span class="bdot"></span>':"")+esc(SRC_LABEL[src]||src.toUpperCase()); }
+
+function renderGrounding(t,arr){
+  if(!arr||!arr.length) return;
+  t.grounding.classList.add("on");
+  t.gh.textContent="◆ GROUNDED IN "+arr.length+" MEMOR"+(arr.length===1?"Y":"IES")+" — click to inspect";
+  t.gchips.innerHTML=arr.map(g=>{const c=(g.content||"");
+    return `<span class="g-chip" title="${esc(c)}"><span class="src">${esc(g.source||"fact")}</span>${esc(c.slice(0,64))}${c.length>64?"…":""}<span class="sim">${g.sim!=null?((g.sim*100)|0)+"%":""}</span></span>`;}).join("");
+  t.glist.innerHTML=arr.map(g=>`<div class="g-row"><span class="src">${esc(g.source||"fact")} #${esc(g.id)}</span><span class="sim">sim ${esc(g.sim)}</span><div class="g-body">${esc(g.content||"")}</div></div>`).join("");
+  t.gh.onclick=()=>{ const on=t.glist.classList.toggle("on"); t.gchips.style.display=on?"none":"flex"; streamScroll(); };
+}
+
+function speakText(text,btn){ text=(text||"").trim(); if(!text)return;
+  if(btn){const o=btn.dataset.o||btn.textContent; btn.dataset.o=o; btn.textContent="🔊 SPEAKING…"; setTimeout(()=>btn.textContent=o,1600);}
+  fetch("/api/speak",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({text})}).catch(()=>{}); }
+
+function newTurn(userText,isVoice){
   streamOpen();
   const w=document.createElement("div"); w.className="turn";
-  w.innerHTML=`<div class="u"><b>▸ </b>${esc(userText)}</div>`+
-    '<div class="src">…</div>'+
-    '<div class="think"><div class="hh">▼ THINKING</div><div class="bb"></div></div>'+
-    '<div class="ans"></div>';
+  w.innerHTML=
+    `<div class="u"><span><b>${isVoice?"🎙 ":"▸ "}</b>${esc(userText)}</span><span class="ts">${nowClock()}</span></div>`+
+    `<div class="meta"><span class="badge pending"><span class="bdot"></span>THINKING</span>`+
+      `<span class="timing"></span><span class="t-stop" style="display:none">◼ STOP</span></div>`+
+    `<div class="grounding"><div class="g-h"></div><div class="g-chips"></div><div class="g-list"></div></div>`+
+    `<div class="think"><div class="hh">▼ THINKING</div><div class="bb"></div></div>`+
+    `<span class="ans"></span><span class="caret">▋</span>`+
+    `<div class="actions"><button class="a-copy">⧉ COPY</button><button class="a-speak">🔊 SPEAK</button></div>`;
   $("stream").appendChild(w);
-  const th=w.querySelector(".think"), hh=w.querySelector(".hh"), bb=w.querySelector(".bb");
-  hh.onclick=()=>{bb.style.display=bb.style.display==="none"?"":"none";};
-  return {src:w.querySelector(".src"), think:th, hh, bb, ans:w.querySelector(".ans")};
+  const Q=sel=>w.querySelector(sel);
+  const bb=Q(".bb"), hh=Q(".hh");
+  hh.onclick=()=>{ const hid=bb.style.display==="none"; bb.style.display=hid?"":"none"; hh.textContent=(hid?"▼":"▶")+" THINKING"; };
+  Q(".a-copy").onclick=()=>{ const a=Q(".ans").textContent; if(navigator.clipboard)navigator.clipboard.writeText(a);
+    const b=Q(".a-copy"); b.textContent="✓ COPIED"; setTimeout(()=>b.textContent="⧉ COPY",1200); };
+  Q(".a-speak").onclick=()=>speakText(Q(".ans").textContent, Q(".a-speak"));
+  updateTurnCount();
+  return {w, badge:Q(".badge"), timing:Q(".timing"), stop:Q(".t-stop"),
+          grounding:Q(".grounding"), gh:Q(".g-h"), gchips:Q(".g-chips"), glist:Q(".g-list"),
+          think:Q(".think"), hh, bb, ans:Q(".ans"), caret:Q(".caret")};
 }
+
 function ask(preset){
   const q=(preset!=null?preset:$("q").value).trim(); if(!q)return;
   if(preset==null)$("q").value="";
   if(_es){_es.close();_es=null;}
   const t=newTurn(q); streamScroll();
-  let gotThink=false, gotAns=false;
+  const t0=performance.now(); let tFirst=null, gotThink=false, gotAns=false, src="pending", ended=false;
+  t.stop.style.display="";
+  function finalize(state){
+    if(ended)return; ended=true;
+    t.w.classList.add("done"); t.stop.style.display="none";
+    if(gotThink){ t.bb.style.display="none"; t.hh.textContent="▶ THINKING"; }
+    const tot=((performance.now()-t0)/1000).toFixed(1);
+    const ttf=tFirst!=null?((tFirst-t0)/1000).toFixed(1):"—";
+    t.timing.innerHTML=`<b>${ttf}s</b> first token · <b>${tot}s</b> total`+(state==="stopped"?" · ⏹ stopped":(state==="error"?" · ⚠ error":""));
+    streamScroll();
+  }
+  t.stop.onclick=()=>{ if(_es){_es.close();_es=null;} if(!gotAns&&!gotThink)setBadge(t,"unavailable"); finalize("stopped"); };
   _es=new EventSource("/api/tell/stream?q="+encodeURIComponent(q));
-  _es.addEventListener("source",e=>{ t.src.textContent="["+esc(e.data)+"]"; if(e.data!=="brain")t.think.style.display="none"; });
-  _es.addEventListener("thinking",e=>{ gotThink=true; t.think.style.display=""; t.bb.textContent+=e.data; streamScroll(); });
-  _es.addEventListener("answer",e=>{ gotAns=true; t.ans.textContent+=e.data; streamScroll(); });
-  _es.addEventListener("done",()=>{ if(gotThink){t.bb.style.display="none";t.hh.textContent="▶ THINKING";} if(_es){_es.close();_es=null;} streamScroll(); });
-  _es.onerror=()=>{ if(!gotAns)t.ans.textContent="[brain unreachable]"; if(_es){_es.close();_es=null;} };
+  _es.addEventListener("source",e=>{ src=e.data; setBadge(t,src); if(src!=="brain"&&src!=="local")t.think.style.display="none"; });
+  _es.addEventListener("grounding",e=>{ try{renderGrounding(t,JSON.parse(e.data));}catch(_){}} );
+  _es.addEventListener("thinking",e=>{ if(tFirst==null)tFirst=performance.now(); gotThink=true; t.think.style.display=""; t.bb.textContent+=e.data; streamScroll(); });
+  _es.addEventListener("answer",e=>{ if(tFirst==null)tFirst=performance.now(); gotAns=true; t.ans.textContent+=e.data; streamScroll(); });
+  _es.addEventListener("done",()=>{ if(_es){_es.close();_es=null;} if(src==="pending")setBadge(t,gotAns?"brain":"unavailable"); finalize("done"); });
+  _es.onerror=()=>{ if(_es){_es.close();_es=null;} if(!gotAns){setBadge(t,"unavailable"); if(!t.ans.textContent)t.ans.textContent="[brain unreachable]";} finalize("error"); };
 }
 $("q").addEventListener("keydown",e=>{if(e.key==="Enter")ask();});
 

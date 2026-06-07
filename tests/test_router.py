@@ -161,3 +161,32 @@ def test_external_factual_recall_routes_to_brain(text):
 def test_quick_tasks_still_go_local_not_brain(text):
     # The factual-recall guard must not hijack genuine quick tasks.
     assert route(text) is Route.LOCAL_QUICK
+
+
+@pytest.mark.parametrize("text", [
+    "what is Project Utah",
+    "what is utah",
+    "tell me about ace",
+    "who are you",
+    "what are you",
+    "what can you do",
+    "what do you remember about Project Utah",
+    "what do you know about my goals",
+    "what's your mission",
+])
+def test_self_and_project_questions_ground_at_the_brain(text):
+    # The 3B fabricates about ourselves ("Utah-pre"); these must hit the grounded,
+    # no-fab brain so they answer from the real Utah corpus or say "I don't know".
+    assert route(text) is Route.BRAIN
+
+
+def test_weather_in_utah_still_wins_over_self_identity():
+    # Capabilities are checked first — "weather in Utah" is a weather turn, not an
+    # identity turn (the word 'utah' must not steal a grounded capability).
+    assert route("what's the weather in Utah") is Route.WEATHER
+
+
+def test_self_identity_word_boundary_does_not_catch_substrings():
+    # \bace\b / \butah\b must not fire on 'place', 'race', etc.
+    assert route("find me a parking place") is not Route.BRAIN
+    assert route("what's 2+2") is Route.LOCAL_QUICK

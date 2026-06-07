@@ -20,7 +20,7 @@ import threading
 import time
 import wave
 
-from utah.voice import agent, state, stt, tts, vad
+from utah.voice import agent, state, stt, vad
 
 log = logging.getLogger("utah.voice.loop")
 
@@ -123,10 +123,9 @@ def run() -> None:
                 log.info("voice loop: mic open — Silero VAD listening for 'ace' "
                          "(speech threshold %.2f)", vad.SPEECH_THRESHOLD)
 
-                def _speak(answer: str) -> None:  # surface SPEAKING state during TTS
+                def _on_speaking() -> None:  # flip to SPEAKING when audio actually starts
                     vstate.update(status="speaking", speaking=True, listening=False)
                     state.write(**vstate)
-                    tts.speak(answer)
 
                 while True:
                     frame = q.get()
@@ -146,7 +145,7 @@ def run() -> None:
                             log.info("voice: transcript=%r", text)
                             if text:
                                 vstate["last_transcript"] = text[:120]
-                                result = agent.handle_utterance(text, speak=_speak)
+                                result = agent.handle_utterance(text, on_speaking=_on_speaking)
                                 cmd = result.get("command") if result else None
                                 log.info("voice: wake_fired=%s command=%r",
                                          result is not None, cmd)

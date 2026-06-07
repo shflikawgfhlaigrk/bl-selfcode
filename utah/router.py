@@ -87,6 +87,22 @@ _FACTUAL_RECALL = re.compile(
 )
 
 
+#: Self / project / identity questions — about Utah, Ace/AceOS, "who/what are you",
+#: "what can you do", "what do you know/remember about …", "tell me about yourself".
+#: The small local model answers these from its OWN (wrong) parametric knowledge — it
+#: served a fabricated "Project Utah is a lightweight fork called Utah-pre". These must
+#: be GROUNDED: the brain answers from recalled memory (the Utah corpus) under the
+#: structural no-fab gate, or says "I don't know" — never a 3B guess about ourselves.
+_SELF_OR_PROJECT = re.compile(
+    r"\bproject\s+utah\b|\baceos\b|\butah\b|\bace\b|"
+    r"\bwho\s+are\s+you\b|\bwhat\s+are\s+you\b|\bwhat\s+can\s+you\s+do\b|"
+    r"\bwhat\s+do\s+you\s+do\b|\btell\s+me\s+about\s+(yourself|utah|ace|michael)\b|"
+    r"\bwhat('?s| is)\s+your\s+(name|purpose|mission|goal)\b|"
+    r"\bwhat\s+do\s+you\s+(know|remember)\s+about\b",
+    re.I,
+)
+
+
 def is_factual_recall(text: str) -> bool:
     """True for an external/world-knowledge question ("who won…", "capital of…",
     "how tall is…"). These are what the brain's no-fab gate refuses when memory is
@@ -127,6 +143,11 @@ def route(text: str) -> Route:
     # invents specifics. Checked before the local tiers; after capabilities/packs
     # so grounded weather/time/brief/Douglas still win.
     if _FACTUAL_RECALL.search(t):
+        return Route.BRAIN
+    # Self / project / identity → the GROUNDED brain, never the 3B (which fabricates
+    # about ourselves). After capabilities/packs so "weather in Utah" still wins; before
+    # the local tiers so "what is Project Utah" / "what do you remember about X" ground.
+    if _SELF_OR_PROJECT.search(t):
         return Route.BRAIN
     if _REASONING.search(t) or len(t.split()) >= config.ROUTER_HEAVY_MIN_WORDS:
         return Route.LOCAL_HEAVY

@@ -11,7 +11,7 @@ from __future__ import annotations
 import os
 import wave
 
-from utah.voice.tts import PiperTTS
+from utah.voice.tts import PiperTTS, _drain_sentences
 
 
 def _assert_clean_wav(path: str) -> None:
@@ -38,3 +38,79 @@ def test_speak_empty_text_does_not_play():
     played: list[str] = []
     PiperTTS(player=lambda p: played.append(p)).speak("   ")
     assert played == []
+
+
+# ----- sentence drainer: the unit that makes "speak the first sentence now" safe ----
+
+def test_drain_splits_complete_sentences_and_holds_the_remainder():
+    sents, rest = _drain_sentences("First one. Second one! Third")
+    assert sents == ["First one.", "Second one!"]
+    assert rest == " Third"                      # incomplete tail held back
+
+
+def test_drain_does_not_split_inside_a_number():
+    sents, rest = _drain_sentences("Pi is 3.14 roughly")
+    assert sents == []                           # "3.14" is not a sentence boundary
+    assert rest == "Pi is 3.14 roughly"
+
+
+def test_drain_holds_a_terminator_at_the_very_end():
+    # a "." at the buffer end might be mid-token or continue next chunk → hold it
+    sents, rest = _drain_sentences("Done.")
+    assert sents == []
+    assert rest == "Done."
+
+
+def test_drain_splits_on_newlines():
+    sents, rest = _drain_sentences("line one\nline two\n")
+    assert sents == ["line one", "line two"]
+    assert rest == ""
+
+
+# ----- streaming speak: first sentence reaches the player before the stream ends ----
+
+def test_speak_stream_pipelines_sentences_in_order():
+    played: list[str] = []
+
+    def rec(path: str) -> None:
+        _assert_clean_wav(path)                  # real Piper wrote each sentence
+        played.append(path)
+
+    tts = PiperTTS(player=rec)
+    # feed three sentences across awkward chunk boundaries (as the brain streams)
+    full = tts.speak_stream(["First sen", "tence. Second one. ", "Third and last."])
+    assert len(played) == 3                       # one clean WAV per sentence
+    assert all(not os.path.exists(p) for p in played)   # every temp WAV cleaned up
+    assert full == "First sentence. Second one. Third and last."
+
+
+def test_speak_stream_fires_on_start_once_at_first_audio():
+    starts: list[int] = []
+    tts = PiperTTS(player=lambda p: None)
+    tts.speak_stream(["Alpha. ", "Beta. ", "Gamma."], on_start=lambda: starts.append(1))
+    assert starts == [1]                          # fired exactly once, not per sentence
+
+
+def test_speak_stream_whitespace_only_plays_nothing():
+    played: list[str] = []
+    PiperTTS(player=lambda p: played.append(p)).speak_stream(["   ", "\n", "  "])
+    assert played == []
+
+
+def test_speak_stream_survives_a_bad_synth_clip():
+    """A synth failure on one sentence is logged and skipped — the rest still play."""
+    played: list[str] = []
+    tts = PiperTTS(player=lambda p: played.append(p))
+    real_synth = tts.synth_wav
+    calls = {"n": 0}
+
+    def flaky(text: str, path: str) -> None:
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise RuntimeError("synth blew up on the first clip")
+        real_synth(text, path)
+
+    tts.synth_wav = flaky  # type: ignore[method-assign]
+    full = tts.speak_stream(["Boom here. ", "But this one works."])
+    assert len(played) == 1                       # only the good sentence played
+    assert full == "Boom here. But this one works."   # spoken text still reports both

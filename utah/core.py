@@ -12,6 +12,7 @@ never fabricates:
 """
 from __future__ import annotations
 
+import json
 import logging
 import re
 import sys
@@ -328,6 +329,21 @@ def tell_stream(text: str) -> Iterator[tuple[str, str]]:
         _CONVO.append((text, cap.text))
         yield ("done", cap.text)
         return
+
+    # 1.55 GROUNDING (transparency) — surface the REAL recalled memory the reasoning
+    #      tiers (local/learn/brain) are about to stand on, so the chat box can render
+    #      "grounded in N facts" with a drill-down into the exact rows. Capabilities
+    #      already returned above (they are deterministic, not memory-grounded), so this
+    #      reflects only reasoning turns. Empty recall → no event (cold; the brain then
+    #      says "I don't know" or learns). Never fabricated — these are live rows.
+    if hits:
+        yield ("grounding", json.dumps([
+            {"id": getattr(h, "id", None),
+             "source": getattr(h, "source", "") or "",
+             "sim": round(float(getattr(h, "sim", 0.0) or 0.0), 3),
+             "content": (getattr(h, "content", "") or "")[:200]}
+            for h in hits[:5]
+        ]))
 
     # 1.6 L1 LOCAL — free resident model; stream thinking live, escalate on a miss.
     if route in (Route.LOCAL_QUICK, Route.LOCAL_HEAVY):
