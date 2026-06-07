@@ -32,6 +32,11 @@ HTTP_TIMEOUT_S = 60.0
 #: region; a single Overpass query over a much larger box times out (tiling is a TODO).
 COWETA_BBOX = (33.20, -84.95, 33.55, -84.55)
 
+#: A metro frontier: tile a large bbox into Overpass-sized sub-boxes.
+#: Atlanta metro ring around Coweta; ~0.7deg box tiled at 0.25deg ~= 9 tiles.
+METRO_BBOX = (33.0, -85.1, 34.1, -84.0)
+TILE_STEP = 0.25  # degrees; each tile small enough to not time out Overpass
+
 #: High-signal "local business that probably can't build its own site" categories.
 _CATEGORIES: list[tuple[str, str]] = [
     ("shop", "*"), ("craft", "*"),
@@ -87,6 +92,26 @@ NATIONAL_CHAINS: frozenset[str] = frozenset({
 })
 
 Fetch = Callable[[str], str]  # Overpass QL -> raw JSON text (injectable boundary)
+
+
+def frontier_tiles(bbox, step=TILE_STEP):
+    """Split (south, west, north, east) into a grid of <=step sub-boxes.
+
+    Pure function. Last row/column clamps to the parent edge so the whole
+    box is covered with no overlap and no spill.
+    """
+    south, west, north, east = bbox
+    tiles = []
+    s = south
+    while s < north:
+        n = min(s + step, north)
+        w = west
+        while w < east:
+            e = min(w + step, east)
+            tiles.append((round(s, 6), round(w, 6), round(n, 6), round(e, 6)))
+            w = e
+        s = n
+    return tiles
 
 
 def _normalize_name(name: str) -> str:
@@ -173,4 +198,4 @@ def scout(ledger, bbox: tuple[float, float, float, float] = COWETA_BBOX,
 
 
 __all__ = ["is_national_chain", "build_query", "find_no_website_smbs", "scout",
-           "COWETA_BBOX", "NATIONAL_CHAINS"]
+           "frontier_tiles", "COWETA_BBOX", "METRO_BBOX", "TILE_STEP", "NATIONAL_CHAINS"]
