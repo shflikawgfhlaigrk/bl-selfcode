@@ -76,7 +76,8 @@ def _subprocess_runner(argv: Sequence[str], timeout: int) -> str:
     """Default runner: run the CLI; every failure mode -> BrainUnavailable."""
     try:
         proc = subprocess.run(
-            list(argv), capture_output=True, text=True, timeout=timeout
+            list(argv), capture_output=True, text=True, timeout=timeout,
+            stdin=subprocess.DEVNULL,  # else the CLI waits ~3s on stdin, and HANGS to timeout on an open pipe
         )
     except FileNotFoundError as exc:
         raise BrainUnavailable(f"brain command not found: {argv[0]}") from exc
@@ -126,6 +127,7 @@ def _subprocess_stream_runner(argv: Sequence[str], timeout: int) -> Iterator[str
     try:
         proc = subprocess.Popen(
             list(argv),
+            stdin=subprocess.DEVNULL,  # else the CLI waits ~3s on stdin, and HANGS to timeout on an open pipe
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,

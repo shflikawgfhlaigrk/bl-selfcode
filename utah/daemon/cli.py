@@ -130,6 +130,21 @@ def cmd_agent(args) -> int:
     return 0
 
 
+def cmd_verify(_args) -> int:
+    """Utah's own test health, recorded by the com.utah.verify agent."""
+    try:
+        d = json.loads((runtime.RUN_DIR / "verify.json").read_text())
+    except (OSError, ValueError):
+        print("utah: no verify status yet (com.utah.verify hasn't run)")
+        return 1
+    age = int(time.time() - d.get("ts", 0))
+    print(f"verify: {d.get('state','?')}  exit={d.get('exit_code','?')}  "
+          f"pyfiles={d.get('pyfiles','?')}  ({age}s ago)")
+    for fail in d.get("failures") or []:
+        print(f"  - {fail}")
+    return 1 if d.get("state") == "red" and d.get("confirmed") else 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="utah", description="Utah control CLI")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -140,6 +155,7 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("ping", help="liveness probe").set_defaults(fn=cmd_ping)
     t = sub.add_parser("tell", help="ask the brain"); t.add_argument("text", nargs="+"); t.set_defaults(fn=cmd_tell)
     a = sub.add_parser("agent", help="run a pool task"); a.add_argument("seconds", nargs="?", type=float, default=0.5); a.set_defaults(fn=cmd_agent)
+    sub.add_parser("verify", help="Utah's own test health (from com.utah.verify)").set_defaults(fn=cmd_verify)
     return p
 
 
