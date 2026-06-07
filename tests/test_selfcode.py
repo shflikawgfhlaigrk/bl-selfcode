@@ -69,3 +69,46 @@ def test_claude_crash_is_documented_and_discarded(monkeypatch, tmp_path):
     assert r["applied"] is False
     assert calls["discarded"] is True
     assert any("claude timed out" in row[3] for row in store.rows)
+
+
+def test_auto_merge_on_green_merges_and_pushes(monkeypatch, tmp_path):
+    # With auto_merge=True, a green proposal goes through merge_fn (to main + push).
+    failures.set_store(FakeFailureStore())
+    monkeypatch.setattr(selfcode, "KILL_SWITCH", tmp_path / "nope")
+    calls, bf, df = _vcs()
+    merged = {}
+    def merge_fn(branch, task):
+        merged["branch"], merged["task"] = branch, task
+        return "abc1234", True
+    r = selfcode.propose("add a helper", run_claude=lambda t: None,
+                         run_tests=lambda: (True, ""), branch_fn=bf, discard_fn=df,
+                         merge_fn=merge_fn, auto_merge=True)
+    assert r["applied"] is True and r["merged"] is True
+    assert r["commit"] == "abc1234" and r["pushed"] is True
+    assert merged["branch"] == calls["branch"]           # merged the proposal's own branch
+
+
+def test_red_suite_never_merges(monkeypatch, tmp_path):
+    # A red suite must roll back and NEVER call merge_fn — the gate protects main.
+    failures.set_store(FakeFailureStore())
+    monkeypatch.setattr(selfcode, "KILL_SWITCH", tmp_path / "nope")
+    calls, bf, df = _vcs()
+    merge_called = []
+    r = selfcode.propose("risky change", run_claude=lambda t: None,
+                         run_tests=lambda: (False, "1 failed"), branch_fn=bf, discard_fn=df,
+                         merge_fn=lambda b, t: merge_called.append(1) or ("x", True),
+                         auto_merge=True)
+    assert r["applied"] is False and r.get("merged") in (False, None)
+    assert merge_called == [] and calls["discarded"] is True
+
+
+def test_auto_merge_flag_gates_default(monkeypatch, tmp_path):
+    # Without the flag (and no override), a green suite stays a branch proposal.
+    failures.set_store(FakeFailureStore())
+    monkeypatch.setattr(selfcode, "KILL_SWITCH", tmp_path / "nope")
+    monkeypatch.setattr(selfcode, "AUTOMERGE_FLAG", tmp_path / "no-automerge")
+    calls, bf, df = _vcs()
+    r = selfcode.propose("doc tweak", run_claude=lambda t: None,
+                         run_tests=lambda: (True, ""), branch_fn=bf, discard_fn=df,
+                         merge_fn=lambda b, t: ("x", True))
+    assert r["applied"] is True and r["merged"] is False  # flag absent → propose-only
