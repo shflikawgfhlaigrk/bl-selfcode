@@ -42,8 +42,11 @@ def _conversation_context() -> str:
 
 
 def _build_context(hits: list) -> str:
-    """Brain context = recent conversation thread + recalled memory (real-or-empty)."""
+    """Brain context = core identity facts + conversation thread + recalled memory."""
     parts: list[str] = []
+    core = memory.core_recall()
+    if core:
+        parts.append("CORE (always true):\n" + "\n".join(f"- {h.content}" for h in core))
     convo = _conversation_context()
     if convo:
         parts.append("RECENT CONVERSATION:\n" + convo)

@@ -123,7 +123,7 @@ SUPERSEDE_SCAN: int = 8
 #: Sources allowed through the admission gate. Anything else (backfill,
 #: synthetic, scraped) is denied structurally — confabulation dies here.
 ALLOWED_SOURCES: frozenset[str] = frozenset(
-    {"user", "turn", "fact", "consolidation", "sensor"}
+    {"user", "turn", "fact", "consolidation", "sensor", "core"}
 )
 
 #: Admission: reject degenerate content beyond this many characters
@@ -170,7 +170,7 @@ DECAY_ARCHIVE_BELOW: float = 0.25
 DECAY_MIN_AGE_DAYS: int = 7
 
 #: Sources that never decay-archive (durable, provenance-marked facts).
-DECAY_PROTECTED_SOURCES: frozenset[str] = frozenset({"fact", "consolidation"})
+DECAY_PROTECTED_SOURCES: frozenset[str] = frozenset({"fact", "consolidation", "core"})
 
 # --- brain prompt budget --------------------------------------------------------
 #: Hard cap on context characters passed to the CLI (argv size safety).

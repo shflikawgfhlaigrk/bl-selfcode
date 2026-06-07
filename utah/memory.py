@@ -738,6 +738,27 @@ def recall(query: str, k: int = config.RECALL_K) -> list[Hit]:
     ]
 
 
+def core_recall() -> list[Hit]:
+    """Return all live ``source='core'`` rows — identity/standing facts always
+    injected ahead of RAG hits so the brain never loses Michael's ground truth.
+
+    Returns [] (never raises) — the brain loop must never break because core
+    facts are temporarily unreadable.
+    """
+    try:
+        backend = get_backend()
+        with backend._tx() as conn:
+            rows = conn.execute(
+                "SELECT id, content, source FROM memory "
+                "WHERE source = 'core' AND superseded_by IS NULL AND NOT archived "
+                "ORDER BY reinforcement DESC, ts ASC"
+            ).fetchall()
+        return [Hit(id=int(r[0]), content=r[1], source=r[2], score=1.0, sim=1.0) for r in rows]
+    except Exception as exc:
+        log.warning("core_recall failed (degrading to empty): %s", exc)
+        return []
+
+
 def answer(query: str, k: int = config.RECALL_K) -> tuple[str | None, list[Hit]]:
     """No-fabrication gate: answer from memory only when confidently grounded.
 
