@@ -57,14 +57,16 @@ streaming `subscribe`) `lifecycle`(flock + verified-exit) `daemon`(thin orch)
 
 ## 3. Live state RIGHT NOW
 - **Postgres:** PostgreSQL 17.10 + pgvector 0.8.2, cluster `~/.utah/pgdata`, `127.0.0.1:5433`
-  + socket `/tmp/.s.PGSQL.5433`, DB `utah`. Tables `memory`(20 rows, vector(384),
-  HNSW `memory_hnsw` + GIN `memory_fts`), `entity`(22), `mem_entity`(41).
-- **Processes:** `postgres`(59898) · `utah.daemon.supervisor`(86186) · `utah.daemon.daemon`
-  (86189) · `utah.interface.web`(90979). Daemon socket `~/.utah/run/utahd.sock`.
+  + socket `/tmp/.s.PGSQL.5433`, DB `utah`. Tables `memory`(9,240 rows, vector(384),
+  HNSW `memory_hnsw` + GIN `memory_fts`), `entity`(9,600), `mem_entity`(84,911).
+- **Processes:** `postgres`(:5433) + the supervised stack — `utah.daemon.supervisor`
+  owns `utah.daemon.daemon` + `utah.interface.web` + `utah.voice.loop` (PIDs rotate;
+  the supervisor respawns any killed child). Daemon socket `~/.utah/run/utahd.sock`.
 - **Deck:** `http://127.0.0.1:8766/` = honest deck (real or DORMANT, never simulated);
   `/sim` = Black Gold design mockup; `/status` `/memory` `/events`(SSE) `/api/tell`.
-- **Brain memory:** 20 facts incl. 15 self-knowledge rows ("Utah's datastore is
-  Postgres+pgvector…") — the brain can describe its own build.
+- **Brain memory:** 9,240 facts (migrated Ace knowledge). NOTE: the always-injected
+  **core layer is currently empty** — 0 `source='core'` rows, so `core_recall()`
+  returns `[]` in prod (the path is wired/tested; it just has no seeded core facts).
 
 ## 4. Run / verify (commands)
 ```
@@ -117,11 +119,13 @@ address · TikTok/IG creds · WIN market feed.
 - **utah_test disposable DB** is the test/proof sandbox; the live `utah` DB holds only
   real seed + self-knowledge (keep it clean; purge any test pollution you create).
 
-## 8. The "forever" gap (only thing between supervised and literally-forever)
-Daemon is supervised (auto-restart proven). NOT yet wired: (a) the **web bridge is
-unsupervised**, (b) **no launchd boot-persistence** (`com.utah.*`) — a reboot or
-`utah stop` leaves the stack down until `utah start`. Wire a launchd job + put the
-bridge under the supervisor for true reboot-survival. (Deferred process/deploy substrate.)
+## 8. The "forever" gap — CLOSED (2026-06-07)
+Resolved. The supervisor IS a launchd job (`com.utah.supervisor`, `KeepAlive` +
+`RunAtLoad`) and it owns the **web bridge** and **voice loop** as supervised children,
+not just the daemon — verified by a live SIGKILL→respawn of the web child (~5s) and
+by `launchctl list | grep com.utah`. Reboot-survival is real via `RunAtLoad`. The
+continuous `com.utah.verify` gate publishes health to `~/.utah/run/verify.json`.
+(Earlier text claiming "web unsupervised / no boot-persistence" was stale.)
 
 ## 9. Binding rules (Michael — non-negotiable)
 - **No injected/fake data, ever.** Real-or-black on every surface. Prove every fix
