@@ -117,6 +117,11 @@ def queue(ledger, campaign: str, leads: list[dict], footer: dict | None = None,
             res = sender(recipient, msg["subject"], msg["body"])
             if res.get("sent"):
                 ledger.log_outreach(recipient, campaign, channel)   # commit suppression
+                # Record the actual email in the mail ledger so the deck MAIL panel shows it
+                # (caller-side: outreach already holds the ledger). Defensive getattr keeps
+                # test fakes / minimal ledgers working — same pattern as is_contacted above.
+                getattr(ledger, "record_mail", lambda *a, **k: None)(
+                    recipient, msg["subject"], status="sent", channel="email")
                 queued += 1
                 sent += 1
             else:
