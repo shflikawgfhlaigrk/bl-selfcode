@@ -104,6 +104,29 @@ def passes_gate(sim: float, overlap: float) -> bool:
     return sim >= config.ANSWER_MIN_SIM and overlap >= config.ANSWER_MIN_OVERLAP
 
 
+def entity_grounds(query: str, content: str) -> bool | None:
+    """Does the hit's entity actually appear in the query? Returns:
+
+    * ``True``  — a proper-noun entity from *content* is named in *query*;
+    * ``False`` — *content* is about a DIFFERENT entity than the query asks about
+      (so it must NOT be served as the answer, even with a passing lexical overlap);
+    * ``None``  — *content* has no extractable entity, so this signal can't decide
+      and the caller falls back to the lexical gate alone.
+
+    This kills the wrong-entity answer bug: a "Mount Everest" fact has no entity
+    present in "how tall is mount kilimanjaro", so generic-word overlap ("tall",
+    "mount", "metres") no longer lets it answer a question about a different subject.
+    Entities are extracted from the (capitalized) stored *content* — user queries are
+    lowercase, so query-side extraction can't see them; we match the hit's entity
+    tokens against the query's tokens instead.
+    """
+    hit_entities = entities.normalized_set(content)
+    if not hit_entities:
+        return None
+    q_tokens = set(re.findall(r"[a-z0-9]+", query.casefold()))
+    return any(set(ent.split()).issubset(q_tokens) for ent in hit_entities)
+
+
 def rrf_fuse(
     rankings: Sequence[Sequence[int]], k: int = config.RRF_K
 ) -> dict[int, float]:
@@ -779,17 +802,21 @@ def answer(query: str, k: int = config.RECALL_K) -> tuple[str | None, list[Hit]]
     """No-fabrication gate: answer from memory only when confidently grounded.
 
     Returns ``(text, hits)`` when the best hit is semantically close
-    (``sim >= ANSWER_MIN_SIM``) AND lexically on-topic
-    (``overlap >= ANSWER_MIN_OVERLAP``); otherwise ``(None, hits)`` and the
-    caller falls to the brain with the hits as context.
+    (``sim >= ANSWER_MIN_SIM``), lexically on-topic (``overlap >=
+    ANSWER_MIN_OVERLAP``), AND not about a different entity than the query
+    (:func:`entity_grounds`); otherwise ``(None, hits)`` and the caller falls to the
+    brain with the hits as context. The entity guard is what stops a confident-looking
+    but wrong-subject fact (an Everest fact for a Kilimanjaro question) being served.
     """
     hits = recall(query, k)
     if not hits:
         return None, []
     best = hits[0]
-    if passes_gate(best.sim, lexical_overlap(query, best.content)):
-        return best.content, hits
-    return None, hits
+    if not passes_gate(best.sim, lexical_overlap(query, best.content)):
+        return None, hits
+    if entity_grounds(query, best.content) is False:
+        return None, hits  # best hit is about a DIFFERENT entity → don't answer it
+    return best.content, hits
 
 
 def list_memories(limit: int = 50, offset: int = 0) -> list[dict]:

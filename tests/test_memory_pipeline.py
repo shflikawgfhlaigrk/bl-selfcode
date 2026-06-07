@@ -261,6 +261,42 @@ def test_answer_gate_passes_when_both_hold(mem):
     assert hits[0].sim >= config.ANSWER_MIN_SIM
 
 
+def test_answer_gate_rejects_wrong_entity_even_with_word_overlap(mem):
+    """The live bug: an 'Everest' fact answered a 'Kilimanjaro' question because
+    generic words (tall, mount, metres) gave a passing overlap. The hit's entity is
+    NOT named in the query → it must NOT be served; fall to the brain (→ learn)."""
+    fact = "Mount Everest is the tallest mountain at 8849 metres"
+    mem.embedder.register(fact, basis(0))
+    mem.embedder.register("how tall is mount kilimanjaro in metres", blend(basis(0), basis(1), 0.70))
+    memory.store(fact, source="fact")
+    answer, hits = memory.answer("how tall is mount kilimanjaro in metres")
+    assert answer is None   # wrong entity → not answered (the fix)
+    assert hits             # still offered to the brain as context
+
+
+def test_answer_gate_answers_when_entity_matches(mem):
+    """The right-entity fact still answers verbatim — the guard only rejects the wrong
+    subject, never the correct one."""
+    fact = "Mount Kilimanjaro is 5895 metres tall"
+    mem.embedder.register(fact, basis(0))
+    mem.embedder.register("how tall is mount kilimanjaro in metres", blend(basis(0), basis(1), 0.70))
+    memory.store(fact, source="fact")
+    answer, _ = memory.answer("how tall is mount kilimanjaro in metres")
+    assert answer == fact
+
+
+def test_answer_gate_falls_back_to_lexical_for_entity_less_hit(mem):
+    """A hit with no proper-noun entity (a definition) still answers on the lexical
+    gate — the entity signal only REJECTS wrong-entity hits, never blocks entity-less
+    ones."""
+    fact = "the speed of light is 299792 kilometres per second"
+    mem.embedder.register(fact, basis(0))
+    mem.embedder.register("what is the speed of light", blend(basis(0), basis(1), 0.70))
+    memory.store(fact, source="fact")
+    answer, _ = memory.answer("what is the speed of light")
+    assert answer == fact
+
+
 # --- decay (through the pipeline) -----------------------------------------------------------
 
 def test_decay_archives_stale_turns_but_not_facts(mem):
