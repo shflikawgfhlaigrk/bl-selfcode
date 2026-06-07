@@ -50,6 +50,34 @@ CREATE TABLE IF NOT EXISTS fires (
   ts timestamptz NOT NULL DEFAULT now(), outcome text, pnl numeric,
   synthetic boolean NOT NULL DEFAULT false   -- real engine.fired only on the board
 );
+CREATE TABLE IF NOT EXISTS mail_ledger (
+  id bigserial PRIMARY KEY,
+  recipient text NOT NULL, subject text NOT NULL,
+  channel text NOT NULL DEFAULT 'email',
+  status text NOT NULL DEFAULT 'sent',        -- sent | gated | failed
+  ts timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (recipient, subject)                 -- never send the same message twice
+);
+CREATE TABLE IF NOT EXISTS marketer_posts (
+  id bigserial PRIMARY KEY,
+  channel text NOT NULL,                       -- instagram | tiktok | ...
+  caption text NOT NULL, media_ref text NOT NULL,
+  subject text NOT NULL DEFAULT '',            -- the business/topic spotlighted
+  status text NOT NULL DEFAULT 'posted',       -- posted | gated | failed
+  post_id text,                                -- external id when actually posted
+  ts timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (channel, media_ref)                  -- never post the same media to a channel twice
+);
+CREATE TABLE IF NOT EXISTS sync_log (
+  id bigserial PRIMARY KEY,
+  source text NOT NULL,                        -- ace_knowledge | web_research | osm_leads | ...
+  kind text NOT NULL DEFAULT 'ingest',         -- ingest | refresh
+  rows_in integer NOT NULL DEFAULT 0,
+  cursor text,                                 -- resumable position (last id / ts / page)
+  status text NOT NULL DEFAULT 'ok',           -- ok | partial | failed
+  detail text,
+  ts timestamptz NOT NULL DEFAULT now()
+);                                             -- append-only run log (no UNIQUE; every run is a row)
 """
 
 
@@ -123,11 +151,53 @@ class Ledger:
             self._emit("trading", {"engine": engine, "direction": direction, "id": row[0]})
         return int(row[0])
 
+    def record_mail(self, recipient, subject, status="sent", channel="email") -> bool:
+        """Record an email attempt; True if new (False = this message already sent).
+        Never-twice — the merge's mail/outreach send writes here, real-or-nothing."""
+        with self._conn() as c:
+            row = c.execute(
+                "INSERT INTO mail_ledger (recipient, subject, channel, status) "
+                "VALUES (%s,%s,%s,%s) ON CONFLICT (recipient, subject) DO NOTHING RETURNING id",
+                (recipient, subject, channel, status),
+            ).fetchone()
+        if row:
+            self._emit("mail", {"recipient": recipient, "subject": subject, "id": row[0]})
+        return bool(row)
+
+    def record_post(self, channel, caption, media_ref, subject="", status="posted",
+                    post_id=None) -> bool:
+        """Record a marketer post; True if new (False = this media already posted to this
+        channel). Never-twice — the merge's marketer writes here, real-or-nothing."""
+        with self._conn() as c:
+            row = c.execute(
+                "INSERT INTO marketer_posts (channel, caption, media_ref, subject, status, post_id) "
+                "VALUES (%s,%s,%s,%s,%s,%s) ON CONFLICT (channel, media_ref) DO NOTHING RETURNING id",
+                (channel, caption, media_ref, subject, status, post_id),
+            ).fetchone()
+        if row:
+            self._emit("marketer", {"channel": channel, "subject": subject, "id": row[0]})
+        return bool(row)
+
+    def record_sync(self, source, kind="ingest", rows_in=0, cursor=None,
+                    status="ok", detail=None) -> int:
+        """Append one ingestion-run row (resumable cursor + counts). Returns the row id.
+        The merge's importers (ace_knowledge, web_research, osm_leads) write here so every
+        ingest is auditable on the deck — real-or-nothing."""
+        with self._conn() as c:
+            row = c.execute(
+                "INSERT INTO sync_log (source, kind, rows_in, cursor, status, detail) "
+                "VALUES (%s,%s,%s,%s,%s,%s) RETURNING id",
+                (source, kind, rows_in, cursor, status, detail),
+            ).fetchone()
+        self._emit("sync", {"source": source, "rows_in": rows_in, "status": status, "id": row[0]})
+        return int(row[0])
+
     def counts(self) -> dict:
         with self._conn() as c:
             return {
                 t: c.execute(f"SELECT count(*) FROM {t}").fetchone()[0]
-                for t in ("leads", "probate", "outreach_ledger", "fires")
+                for t in ("leads", "probate", "outreach_ledger", "fires",
+                          "mail_ledger", "marketer_posts", "sync_log")
             }
 
     #: deck panel domain -> (table, explicit columns). Explicit columns keep the
@@ -141,6 +211,12 @@ class Ledger:
                      "id, recipient, campaign, channel, to_char(ts,'YYYY-MM-DD HH24:MI') ts"),
         "fires": ("fires",
                   "id, engine, direction, outcome, to_char(ts,'YYYY-MM-DD HH24:MI') ts"),
+        "mail": ("mail_ledger",
+                 "id, recipient, subject, channel, status, to_char(ts,'YYYY-MM-DD HH24:MI') ts"),
+        "marketer": ("marketer_posts",
+                     "id, channel, subject, status, post_id, to_char(ts,'YYYY-MM-DD HH24:MI') ts"),
+        "sync": ("sync_log",
+                 "id, source, kind, rows_in, status, to_char(ts,'YYYY-MM-DD HH24:MI') ts"),
     }
 
     def recent(self, domain: str, limit: int = 50) -> list[dict]:

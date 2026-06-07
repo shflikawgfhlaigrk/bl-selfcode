@@ -29,6 +29,9 @@ def ledger():
         c.execute("DELETE FROM probate WHERE county=%s", (MARK,))
         c.execute("DELETE FROM outreach_ledger WHERE campaign=%s", (MARK,))
         c.execute("DELETE FROM fires WHERE engine=%s", (MARK,))
+        c.execute("DELETE FROM mail_ledger WHERE recipient=%s", (MARK,))
+        c.execute("DELETE FROM marketer_posts WHERE channel=%s", (MARK,))
+        c.execute("DELETE FROM sync_log WHERE source=%s", (MARK,))
 
 
 def test_record_lead_is_never_twice(ledger):
@@ -39,6 +42,29 @@ def test_record_lead_is_never_twice(ledger):
 def test_outreach_suppression(ledger):
     assert ledger.log_outreach("a@b.com", MARK) is True
     assert ledger.log_outreach("a@b.com", MARK) is False  # never email twice
+
+
+def test_record_mail_is_never_twice(ledger):
+    assert ledger.record_mail(MARK, "Following up on your roof") is True
+    assert ledger.record_mail(MARK, "Following up on your roof") is False  # never-twice
+    rows = [r for r in ledger.recent("mail", limit=50) if r["recipient"] == MARK]
+    assert rows and rows[0]["status"] == "sent" and rows[0]["channel"] == "email"
+
+
+def test_record_post_is_never_twice(ledger):
+    assert ledger.record_post(MARK, "Spotlight: Joe's", "reel_01.mp4", subject="Joe's Diner") is True
+    assert ledger.record_post(MARK, "Spotlight: Joe's", "reel_01.mp4", subject="Joe's Diner") is False
+    rows = [r for r in ledger.recent("marketer", limit=50) if r["channel"] == MARK]
+    assert rows and rows[0]["subject"] == "Joe's Diner" and rows[0]["status"] == "posted"
+
+
+def test_record_sync_appends_run(ledger):
+    # append-only run log: each call is a new row (no never-twice), returns the id.
+    i1 = ledger.record_sync(MARK, kind="ingest", rows_in=9179, cursor="id:9179", status="ok")
+    i2 = ledger.record_sync(MARK, kind="refresh", rows_in=12, status="ok")
+    assert isinstance(i1, int) and isinstance(i2, int) and i2 != i1
+    rows = [r for r in ledger.recent("sync", limit=50) if r["source"] == MARK]
+    assert len(rows) >= 2 and rows[0]["rows_in"] in (12, 9179)
 
 
 def test_write_emits_to_dashboard_channel():
@@ -70,4 +96,5 @@ def test_recent_unknown_domain_is_empty(ledger):
 
 def test_counts_includes_all_tables(ledger):
     c = ledger.counts()
-    assert {"leads", "probate", "outreach_ledger", "fires"} <= set(c)
+    assert {"leads", "probate", "outreach_ledger", "fires",
+            "mail_ledger", "marketer_posts", "sync_log"} <= set(c)
