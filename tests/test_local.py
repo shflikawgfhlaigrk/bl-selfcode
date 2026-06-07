@@ -120,3 +120,47 @@ def test_http_runner_parses_message_fields():
     body = json.dumps({"message": {"role": "assistant", "content": "A", "thinking": "T"}, "done": True})
     parsed = local._parse_message(body)
     assert parsed == {"content": "A", "thinking": "T"}
+
+
+# --- load guard: skip the local tier (escalate to brain) when the box is slammed --
+
+def test_load_guard_trips_above_threshold(monkeypatch):
+    monkeypatch.setattr(config, "LOCAL_SKIP_LOAD_PER_CORE", 2.5)
+    local.set_load_probe(lambda: 9.9)  # box badly oversubscribed
+    with pytest.raises(local.LocalUnavailable, match="overloaded"):
+        local._guard_load()
+
+
+def test_load_guard_inert_below_threshold(monkeypatch):
+    monkeypatch.setattr(config, "LOCAL_SKIP_LOAD_PER_CORE", 2.5)
+    local.set_load_probe(lambda: 0.7)
+    local._guard_load()  # does not raise
+
+
+def test_load_guard_disabled_when_threshold_zero(monkeypatch):
+    monkeypatch.setattr(config, "LOCAL_SKIP_LOAD_PER_CORE", 0.0)
+    local.set_load_probe(lambda: 99.0)
+    local._guard_load()  # disabled -> never skips
+
+
+def test_think_skips_real_ollama_under_load(monkeypatch):
+    # The REAL runner is selected (set_runner None) but the guard must skip BEFORE any
+    # network call — proven by pointing Ollama at a dead port and still getting the
+    # load-skip message (not an "unreachable" one).
+    monkeypatch.setattr(config, "LOCAL_SKIP_LOAD_PER_CORE", 2.5)
+    monkeypatch.setattr(config, "OLLAMA_URL", "http://127.0.0.1:1")
+    local.set_runner(None)
+    local.set_stream_runner(None)
+    local.set_load_probe(lambda: 8.0)
+    with pytest.raises(local.LocalUnavailable, match="skipped"):
+        local.think("hello")
+    with pytest.raises(local.LocalUnavailable, match="skipped"):
+        list(local.think_stream("hello"))
+
+
+def test_injected_runner_bypasses_load_guard(monkeypatch):
+    # An injected (test) runner is never gated by load — only the real Ollama path is.
+    monkeypatch.setattr(config, "LOCAL_SKIP_LOAD_PER_CORE", 2.5)
+    local.set_load_probe(lambda: 99.0)
+    local.set_runner(lambda payload, timeout: {"content": "ok", "thinking": ""})
+    assert local.think("q") == "ok"

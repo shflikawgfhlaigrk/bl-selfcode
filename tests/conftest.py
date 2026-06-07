@@ -38,6 +38,7 @@ def _restore_boundaries():
     memory_mod.set_backend(FakeStore())
     local_mod.set_runner(_local_down)
     local_mod.set_stream_runner(_local_down)
+    local_mod.set_load_probe(lambda: 0.0)  # never read the host's real load in tests
     core_mod.reset_conversation()
     yield
     core_mod.reset_conversation()
@@ -47,6 +48,7 @@ def _restore_boundaries():
     brain_mod.set_stream_runner(None)
     local_mod.set_runner(None)
     local_mod.set_stream_runner(None)
+    local_mod.set_load_probe(None)
     memory_mod.set_backend(None)
     failures_mod.set_store(None)
 

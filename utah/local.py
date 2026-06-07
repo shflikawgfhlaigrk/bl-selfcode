@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import threading
 import time
 import urllib.error
@@ -35,11 +36,51 @@ __all__ = [
     "NO_FAB",
     "set_runner",
     "set_stream_runner",
+    "set_load_probe",
 ]
 
 
 class LocalUnavailable(UtahError):
     """A local model could not produce a response (the caller escalates to the brain)."""
+
+
+# --------------------------------------------------------------------------
+# Load guard — under a CPU-starved box, skip the local tier and escalate to the
+# brain NOW rather than burning LOCAL_TIMEOUT on a doomed Ollama call. The probe
+# is injectable so tests are deterministic (never read the host's real load).
+# --------------------------------------------------------------------------
+
+def _real_load_per_core() -> float:
+    """1-minute load average divided by core count (0.0 if unavailable)."""
+    try:
+        return os.getloadavg()[0] / (os.cpu_count() or 1)
+    except (OSError, ValueError):
+        return 0.0
+
+
+_load_probe: Callable[[], float] = _real_load_per_core
+
+
+def set_load_probe(probe: Callable[[], float] | None) -> None:
+    """Inject the per-core load probe (tests). ``None`` restores the real os probe."""
+    global _load_probe
+    _load_probe = probe if probe is not None else _real_load_per_core
+
+
+def _guard_load() -> None:
+    """Raise :class:`LocalUnavailable` when the box is oversubscribed past
+    ``config.LOCAL_SKIP_LOAD_PER_CORE`` — the caller escalates to the brain instead
+    of wasting ``LOCAL_TIMEOUT`` on a starved local turn. Inert when the threshold
+    is <= 0. Only applied on the real Ollama runner (injected test runners skip it)."""
+    threshold = config.LOCAL_SKIP_LOAD_PER_CORE
+    if threshold <= 0:
+        return
+    lpc = _load_probe()
+    if lpc >= threshold:
+        raise LocalUnavailable(
+            f"local tier skipped: load {lpc:.2f}/core >= {threshold:.2f} "
+            f"(box overloaded — escalating to brain, not burning {config.LOCAL_TIMEOUT}s)"
+        )
 
 
 # --------------------------------------------------------------------------
@@ -183,6 +224,8 @@ def think(question: str, context: str = "", *, heavy: bool = False) -> str:
     payload = _payload(question, context, heavy=heavy, stream=False)
     with _runner_lock:
         runner = _runner
+    if runner is _http_runner:  # real Ollama only — skip fast when the box is slammed
+        _guard_load()
     resp = runner(payload, config.LOCAL_TIMEOUT)
     return (resp.get("content") or "").strip() or I_DONT_KNOW
 
@@ -196,6 +239,8 @@ def think_stream(
     payload = _payload(question, context, heavy=heavy, stream=True)
     with _runner_lock:
         runner = _stream_runner
+    if runner is _http_stream_runner:  # real Ollama only — skip fast when the box is slammed
+        _guard_load()
     for chunk in runner(payload, config.LOCAL_TIMEOUT):
         thinking = chunk.get("thinking") or ""
         if thinking:

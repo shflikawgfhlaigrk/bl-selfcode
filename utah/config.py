@@ -57,6 +57,11 @@ LOCAL_HEAVY_MODEL: str = os.environ.get("UTAH_LOCAL_HEAVY", "deepseek-r1:32b")
 LOCAL_KEEP_ALIVE: str = os.environ.get("UTAH_LOCAL_KEEP_ALIVE", "30m")
 #: Seconds to wait for one local turn before declaring it unavailable (-> escalate).
 LOCAL_TIMEOUT: int = int(os.environ.get("UTAH_LOCAL_TIMEOUT", "90"))
+#: Skip the local tier and escalate straight to the brain when the machine's 1-min
+#: load average PER CORE is at/above this. A CPU-starved Ollama call (esp. the 32B
+#: reasoner) would just burn LOCAL_TIMEOUT and fail, so escalate NOW instead of
+#: wasting it. 0 disables the guard (always attempt the local tier).
+LOCAL_SKIP_LOAD_PER_CORE: float = float(os.environ.get("UTAH_LOCAL_SKIP_LOAD", "2.5"))
 #: Answer-token caps (the heavy reasoner needs room for its thinking + answer).
 LOCAL_QUICK_MAX_TOKENS: int = int(os.environ.get("UTAH_LOCAL_QUICK_MAX", "512"))
 LOCAL_HEAVY_MAX_TOKENS: int = int(os.environ.get("UTAH_LOCAL_HEAVY_MAX", "1024"))
