@@ -65,6 +65,23 @@ _CATEGORIES: list[tuple[str, str]] = [
     ("office", "insurance"), ("office", "accountant"),
 ]
 
+#: ``shop=*`` is broad — these sub-values are retail AREAS / big-box, not a single
+#: owner-operated business that wants a website pitch. Dropped by kind.
+_NON_SMB_KINDS: frozenset[str] = frozenset({
+    "mall", "department_store", "supermarket", "hypermarket", "wholesale", "marketplace",
+})
+#: Name shapes that are a place/structure/civic body, not a business with a buyer
+#: (e.g. "5 Points Shopping Center", "... Foundation Concessions Building"). Kept tight
+#: to avoid dropping real SMBs.
+_JUNK_NAME = re.compile(
+    r"(shopping\s+cent(?:er|re)|\boutlet\s+mall\b|\bconcession|chamber of commerce"
+    r"|home ?owners? assoc|\bhoa\b|\bcity of\b|\bcounty of\b)", re.I)
+
+
+def _is_pitchable_smb(name: str, kind: str) -> bool:
+    """A real local SMB to pitch a website to — not a mall, big-box, or civic POI."""
+    return kind not in _NON_SMB_KINDS and not _JUNK_NAME.search(name)
+
 #: National chains OSM often leaves untagged for ``website`` (so they leak into the
 #: no-website list) but are useless for a website-build pitch. Single-word names match
 #: EXACTLY ("shell" keeps "Shell Crafts Boutique"); multiword names match as a prefix.
@@ -235,11 +252,13 @@ def find_no_website_smbs(bbox: tuple[float, float, float, float],
         name = (tags.get("name") or "").strip()
         if not name or is_national_chain(name):
             continue
+        kind = tags.get("shop") or tags.get("craft") or tags.get("amenity") \
+            or tags.get("office") or tags.get("leisure") or "business"
+        if not _is_pitchable_smb(name, kind):   # mall / big-box / civic POI, not a buyer
+            continue
         if name.lower() in seen:           # node+way dupes of the same business
             continue
         seen.add(name.lower())
-        kind = tags.get("shop") or tags.get("craft") or tags.get("amenity") \
-            or tags.get("office") or tags.get("leisure") or "business"
         out.append({"name": name, "kind": kind, "contact": _extract_contact(tags)})
     return out
 
