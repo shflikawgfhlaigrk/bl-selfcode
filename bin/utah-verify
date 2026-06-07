@@ -1,0 +1,6 @@
+#!/bin/sh
+# utah-verify — run Utah's self-verification on the Utah venv.
+#   utah-verify          one-shot: write ~/.utah/run/verify.json, print, exit 0/1
+#   utah-verify --loop   permanent quiescence-gated verifier (launchd entrypoint)
+exec /Users/michaelbarber/.utah/venv/bin/python \
+     /Users/michaelbarber/Desktop/ProjectUtah/ops/verify.py "$@"

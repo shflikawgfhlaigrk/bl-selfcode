@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  com.utah.verify — Utah's self-verification agent.
+
+  This is the ONE deliberate exception to the "one supervisor owns everything"
+  doctrine (doc 2-processes), and for a sound reason: a verifier must be
+  INDEPENDENT of the thing it verifies. If it were a child of com.utah.supervisor
+  it would die with the product and could never report "the product is down".
+  It checks the CODE (test suite), not the runtime — a separate concern from the
+  supervisor that keeps the daemon+deck alive. It is NOT product sprawl; it is CI.
+
+  It runs ops/verify.py --loop: quiescence-gated, triple-confirmed, exit-code
+  truth, writing health to ~/.utah/run/verify.json (read by the deck/daemon).
+
+  Install:
+    cp ops/launchd/com.utah.verify.plist ~/Library/LaunchAgents/
+    launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.utah.verify.plist
+  Reload:  launchctl kickstart -k gui/$(id -u)/com.utah.verify
+  Stop:    launchctl bootout  gui/$(id -u)/com.utah.verify
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.utah.verify</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/michaelbarber/.utah/venv/bin/python</string>
+    <string>/Users/michaelbarber/Desktop/ProjectUtah/ops/verify.py</string>
+    <string>--loop</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>/Users/michaelbarber/Desktop/ProjectUtah</string>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PYTHONPATH</key>
+    <string>/Users/michaelbarber/Desktop/ProjectUtah</string>
+    <key>PYTHONUNBUFFERED</key>
+    <string>1</string>
+    <key>UTAH_TEST_DSN</key>
+    <string>host=/tmp port=5433 dbname=utah_test</string>
+    <key>PATH</key>
+    <string>/Users/michaelbarber/.utah/venv/bin:/opt/homebrew/bin:/usr/local/bin:/Users/michaelbarber/.local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+  </dict>
+
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>ThrottleInterval</key>
+  <integer>30</integer>
+  <key>ProcessType</key>
+  <string>Background</string>
+
+  <key>StandardOutPath</key>
+  <string>/Users/michaelbarber/.utah/logs/launchd-verify.out.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/michaelbarber/.utah/logs/launchd-verify.err.log</string>
+</dict>
+</plist>
