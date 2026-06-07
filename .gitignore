@@ -12,3 +12,6 @@ venv/
 
 # logs / scratch
 *.log
+
+# build artifacts (Flutter/Xcode regenerate these)
+/build/

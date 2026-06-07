@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  com.utah.postgres — keep Utah's Postgres cluster (~/.utah/pgdata, :5433) UP.
+  RunAtLoad starts it on login/boot; StartInterval re-checks every 60s and
+  self-heals a crash / OOM / stray `pg_ctl stop`. The guard script is a no-op
+  when PG is already accepting, so it's cheap to run often. This closes the
+  2026-06-07 gap where a smart-shutdown left PG dead with no supervisor.
+  Install: launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.utah.postgres.plist
+  Reload:  launchctl kickstart -k gui/$(id -u)/com.utah.postgres
+  Stop:    launchctl bootout gui/$(id -u)/com.utah.postgres
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.utah.postgres</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>/Users/michaelbarber/.utah/bin/utah_pg.sh</string>
+  </array>
+
+  <key>RunAtLoad</key>
+  <true/>
+  <key>StartInterval</key>
+  <integer>60</integer>
+  <key>ProcessType</key>
+  <string>Background</string>
+
+  <key>StandardOutPath</key>
+  <string>/Users/michaelbarber/.utah/logs/postgres.out.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/michaelbarber/.utah/logs/postgres.err.log</string>
+</dict>
+</plist>
