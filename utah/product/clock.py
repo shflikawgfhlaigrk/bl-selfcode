@@ -7,21 +7,21 @@ at a fixed instant.
 """
 from __future__ import annotations
 
+import logging
 from datetime import datetime
 from typing import Callable
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from utah import config
 
+log = logging.getLogger("utah.clock")
+
 
 def _zone() -> ZoneInfo | None:
     try:
         return ZoneInfo(config.TIMEZONE)
     except (ZoneInfoNotFoundError, ValueError):
-        import logging
-        logging.getLogger("utah.clock").warning(
-            "invalid TIMEZONE %r, using system-local time", config.TIMEZONE
-        )
+        log.warning("invalid TIMEZONE %r, using system-local time", config.TIMEZONE)
         return None
 
 
