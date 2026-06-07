@@ -94,12 +94,16 @@ NATIONAL_CHAINS: frozenset[str] = frozenset({
 Fetch = Callable[[str], str]  # Overpass QL -> raw JSON text (injectable boundary)
 
 
-def frontier_tiles(bbox, step=TILE_STEP):
+def frontier_tiles(
+    bbox: tuple[float, float, float, float], step: float = TILE_STEP
+) -> list[tuple[float, float, float, float]]:
     """Split (south, west, north, east) into a grid of <=step sub-boxes.
 
     Pure function. Last row/column clamps to the parent edge so the whole
     box is covered with no overlap and no spill.
     """
+    if step <= 0:
+        raise ValueError(f"step must be positive, got {step!r}")
     south, west, north, east = bbox
     tiles = []
     s = south
