@@ -25,6 +25,7 @@ from utah.daemon.dispatch import Context, Dispatcher
 from utah.daemon.governor import Governor
 from utah.daemon.handlers import REGISTRY
 from utah.daemon.pool import WorkerPool
+from utah.daemon.data_server import DataServer
 from utah.daemon.server import ControlServer
 
 log = logging.getLogger("utah.daemon")
@@ -71,6 +72,7 @@ async def amain() -> None:
     server = ControlServer(
         Dispatcher(ctx, REGISTRY), sock_path=runtime.CONTROL_SOCK, bus=bus
     )
+    data_server = DataServer(sock_path=runtime.DATA_SOCK)  # doc-3/8 WIN binary plane
 
     # Configure the Postgres transition: apply the product-ledger schema and bind the
     # bus publisher so every revenue write (the schema Ace's producers transition into)
@@ -86,9 +88,10 @@ async def amain() -> None:
 
     async with anyio.create_task_group() as tg:
         await tg.start(server.serve)
+        await tg.start(data_server.serve)       # WIN binary plane on utahd-data.sock
         log.info(
-            "utah daemon ready (pid %d, pool=%d) on %s",
-            os.getpid(), POOL_LIMIT, runtime.CONTROL_SOCK,
+            "utah daemon ready (pid %d, pool=%d) on %s (+data %s)",
+            os.getpid(), POOL_LIMIT, runtime.CONTROL_SOCK, runtime.DATA_SOCK,
         )
 
         with anyio.open_signal_receiver(signal.SIGINT, signal.SIGTERM) as signals:
