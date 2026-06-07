@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from utah import brain, core, memory
+from utah import brain, core, local, memory
 from utah.objects import ReplySource
 from tests.fakes import basis, blend
 
@@ -65,6 +65,118 @@ def test_i_dont_know_turns_are_not_stored(mem, fake_brain):
     reply = core.tell("something unanswerable")
     assert reply.text == brain.I_DONT_KNOW
     assert all(r.source != "turn" for r in mem.store.rows.values())
+
+
+# --- tell(): the L1 tier (capabilities + local models in front of the brain) ---
+
+def test_weather_route_uses_capability_not_the_brain(mem, fake_brain, monkeypatch):
+    fake_brain.respond = AssertionError("the paid lane must not be used for weather")
+    monkeypatch.setattr("utah.product.weather.current", lambda *a, **k: "Gulf Shores, AL: sunny, 75°F.")
+    reply = core.tell("what's the weather")
+    assert reply.source is ReplySource.CAPABILITY
+    assert "75°F" in reply.text
+    # capability replies are LIVE state — never stored as durable turns
+    assert all(r.source != "turn" for r in mem.store.rows.values())
+
+
+def test_brief_route_uses_capability_not_the_brain(mem, fake_brain, monkeypatch):
+    fake_brain.respond = AssertionError("the paid lane must not be used for the brief")
+    monkeypatch.setattr("utah.product.brief.run", lambda *a, **k: {"brief": "UTAH MORNING BRIEF\n..."})
+    reply = core.tell("give me the morning brief")
+    assert reply.source is ReplySource.CAPABILITY
+    assert "MORNING BRIEF" in reply.text
+
+
+def test_local_route_answers_quick_without_the_brain(mem, fake_brain):
+    fake_brain.respond = AssertionError("the paid lane must not be used for a quick local turn")
+    local.set_runner(lambda payload, timeout: {"content": "Hi there!", "thinking": ""})
+    reply = core.tell("say hi")
+    assert reply.source is ReplySource.LOCAL
+    assert reply.text == "Hi there!"
+    # a small local model is NOT a trusted durable source — its turns are threaded
+    # for follow-ups but never stored, so a hallucination can never poison recall.
+    assert all(r.source != "turn" for r in mem.store.rows.values())
+
+
+def test_capability_wins_over_a_stale_memory_hit(mem, fake_brain, monkeypatch):
+    # the live bug: a memory turn served day-old weather (74°) instead of the live
+    # capability. A capability is LIVE and must win over even a confident memory hit.
+    fake_brain.respond = AssertionError("brain must not run")
+    mem.embedder.register("It's 74 and partly cloudy", basis(0))
+    mem.embedder.register("what's the weather", blend(basis(0), basis(1), 0.99))
+    memory.store("It's 74 and partly cloudy", source="fact", confidence=0.9)
+    monkeypatch.setattr("utah.product.weather.current", lambda *a, **k: "LIVE: 80°F and clear.")
+    reply = core.tell("what's the weather")
+    assert reply.source is ReplySource.CAPABILITY
+    assert "LIVE" in reply.text       # the live capability, not the stale memory
+
+
+def test_knowledge_pack_answers_verbatim_never_a_model(mem, fake_brain):
+    # the bug this fixes: a 3B hallucinated the Douglas rules. The pack must answer
+    # deterministically — no local model, no brain, the REAL rules.
+    fake_brain.respond = AssertionError("brain must not be used for a curated pack")
+
+    def local_must_not_run(payload, timeout):
+        raise AssertionError("the local model must not regenerate a curated pack")
+
+    local.set_runner(local_must_not_run)
+    reply = core.tell("what are mark douglas's trading rules")
+    assert reply.source is ReplySource.CAPABILITY
+    assert "Anything can happen." in reply.text          # truth 1, verbatim
+    assert "I predefine the risk of every trade." in reply.text  # principle 2, verbatim
+    assert all(r.source != "turn" for r in mem.store.rows.values())  # not stored as a turn
+
+
+def test_reasoning_query_uses_the_heavy_local_model(mem, fake_brain):
+    fake_brain.respond = AssertionError("brain must not be used")
+    seen = {}
+    local.set_runner(lambda payload, timeout: seen.update(model=payload["model"]) or {"content": "Because chop.", "thinking": "t"})
+    from utah import config
+    reply = core.tell("why does the engine lose money on ranges")
+    assert reply.source is ReplySource.LOCAL
+    assert seen["model"] == config.LOCAL_HEAVY_MODEL
+
+
+def test_local_refusal_escalates_to_the_brain(mem, fake_brain):
+    local.set_runner(lambda payload, timeout: {"content": "I don't know.", "thinking": ""})
+    fake_brain.respond = "The real answer from Claude."
+    reply = core.tell("say hi")
+    assert reply.source is ReplySource.BRAIN
+    assert reply.text == "The real answer from Claude."
+
+
+def test_local_unavailable_escalates_to_the_brain(mem, fake_brain):
+    def boom(payload, timeout):
+        raise local.LocalUnavailable("ollama down")
+
+    local.set_runner(boom)
+    fake_brain.respond = "Claude picked it up."
+    reply = core.tell("say hi")
+    assert reply.source is ReplySource.BRAIN
+    assert reply.text == "Claude picked it up."
+
+
+def test_agentic_query_goes_straight_to_the_brain(mem, fake_brain):
+    def must_not_run(payload, timeout):
+        raise AssertionError("local must not be called for an agentic query")
+
+    local.set_runner(must_not_run)
+    fake_brain.respond = "wrote the function"
+    reply = core.tell("write a python function to sort a list")
+    assert reply.source is ReplySource.BRAIN
+
+
+def test_local_answer_is_grounded_in_recalled_context(mem, fake_brain):
+    fake_brain.respond = AssertionError("brain must not be used")
+    mem.embedder.register("Michael prefers tea", basis(0))
+    mem.embedder.register("does Michael like tea", blend(basis(0), basis(1), 0.40))
+    memory.store("Michael prefers tea", source="fact")
+    seen = {}
+    local.set_runner(lambda payload, timeout: seen.update(p=payload) or {"content": "Yes, tea.", "thinking": ""})
+    reply = core.tell("does Michael like tea")
+    assert reply.source is ReplySource.LOCAL
+    user = next(m["content"] for m in seen["p"]["messages"] if m["role"] == "user")
+    assert "Michael prefers tea" in user  # the local model was grounded
 
 
 def test_store_failure_does_not_eat_the_reply(mem, fake_brain):

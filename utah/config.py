@@ -46,6 +46,36 @@ BRAIN_TIMEOUT: int = int(os.environ.get("UTAH_BRAIN_TIMEOUT", "120"))
 #: Seconds to wait when opening a Postgres connection.
 DB_CONNECT_TIMEOUT: int = int(os.environ.get("UTAH_DB_CONNECT_TIMEOUT", "5"))
 
+# --- L1: the local lane (free, resident Ollama models in FRONT of the brain) --
+#: Ollama HTTP endpoint. The local tier is free; only the brain (Claude CLI) is paid.
+OLLAMA_URL: str = os.environ.get("UTAH_OLLAMA_URL", "http://127.0.0.1:11434")
+#: Quick tier — a fast instruct model (sub-second). Answers most quick things.
+LOCAL_QUICK_MODEL: str = os.environ.get("UTAH_LOCAL_QUICK", "llama3.2:3b")
+#: Heavy tier — the "20-gig" resident reasoner (native thinking), still free.
+LOCAL_HEAVY_MODEL: str = os.environ.get("UTAH_LOCAL_HEAVY", "deepseek-r1:32b")
+#: keep_alive pins both models resident ("always ready", at ~10 procs not ~120).
+LOCAL_KEEP_ALIVE: str = os.environ.get("UTAH_LOCAL_KEEP_ALIVE", "30m")
+#: Seconds to wait for one local turn before declaring it unavailable (-> escalate).
+LOCAL_TIMEOUT: int = int(os.environ.get("UTAH_LOCAL_TIMEOUT", "90"))
+#: Answer-token caps (the heavy reasoner needs room for its thinking + answer).
+LOCAL_QUICK_MAX_TOKENS: int = int(os.environ.get("UTAH_LOCAL_QUICK_MAX", "512"))
+LOCAL_HEAVY_MAX_TOKENS: int = int(os.environ.get("UTAH_LOCAL_HEAVY_MAX", "1024"))
+
+# --- router doctrine (the cheapest tier that can answer; misses escalate) -----
+#: At/above this word count, a non-capability query leans to the heavy local tier.
+ROUTER_HEAVY_MIN_WORDS: int = 18
+
+# --- weather capability (R-weather: free, grounded, cached) -------------------
+#: Default location (Gulf Shores, AL); env-overridable per machine.
+WEATHER_LAT: float = float(os.environ.get("UTAH_WEATHER_LAT", "30.2460"))
+WEATHER_LON: float = float(os.environ.get("UTAH_WEATHER_LON", "-87.7008"))
+WEATHER_LABEL: str = os.environ.get("UTAH_WEATHER_LABEL", "Gulf Shores, AL")
+#: Cache TTL — the spec's "cache <2h". Stale-on-fetch-failure is served, marked.
+WEATHER_CACHE_SECONDS: int = int(os.environ.get("UTAH_WEATHER_CACHE", "7200"))
+WEATHER_CACHE_PATH: str = os.environ.get(
+    "UTAH_WEATHER_CACHE_PATH", os.path.expanduser("~/.utah/cache/weather.json")
+)
+
 # --- embedding ---------------------------------------------------------------
 #: Free, no-torch: fastembed (onnxruntime) BGE-small, 384-dim.
 EMBED_MODEL: str = "BAAI/bge-small-en-v1.5"

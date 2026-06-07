@@ -1,0 +1,144 @@
+# 20 — L1: local tiered cognition under the Claude CLI
+
+> The brain (`utah/brain.py`) is the Claude CLI — the one paid lane. **L1** is the
+> free, resident, local layer **in front of it**: quick answers and grounded
+> capabilities that never have to wake Claude. Spec lineage: 1-programs.md "LLM:
+> MLX/mlx-lm (L0–L2) … Claude CLI (L3)", 11-interface.md "intent-tiered", 17-dash.md
+> "Tiered Cognition Router (Apple FM/MLX/Claude)", 14-migrate.md "32B/70B live tiers →
+> L1 + CLI" and "R-weather". Realized on the Ollama models already on disk.
+
+## Why
+
+Every turn today goes `recall → Claude CLI`. Claude is slow (4–7 s novel) and
+paid. "What's the weather", "morning brief", "Mark Douglas's rules", and ordinary
+quick chat do **not** need a frontier agent. They need a fast local tier that is
+grounded (real data, no fabrication) and escalates to Claude only when it must.
+
+## Measured ground truth (warm, `:11434`, this machine)
+
+| model | size | speed | shape | role |
+|---|---|---|---|---|
+| `llama3.2:3b` | 2 GB | **190 tok/s**, full answer 0.43 s | instruct | **LOCAL_QUICK** |
+| `deepseek-r1:32b` | 19.9 GB | 24 tok/s, 212 ms first-token | **reasoning** (native `thinking`) | **LOCAL_HEAVY** |
+
+The "20-gig process" (`deepseek-r1:32b`) is a *reasoning* model — it over-thinks and
+is the **wrong tool for "quick."** It is the heavy **free** local reasoner; the 3B is
+the quick tier. Ollama 0.30.5 streams `message.thinking` **separately** from
+`message.content`, so the heavy tier maps straight onto Utah's `("thinking"|"answer")`
+channels with **no tag parsing**. Facts (weather/brief/rules) are grounded data, not
+model recall — the 3B already half-hallucinated the Douglas rules in testing.
+
+## Architecture
+
+`core.tell` / `core.tell_stream` route FIRST (so live/authoritative tiers are never
+shadowed by a stale memory hit), then fall through to memory → local → the Claude CLI:
+
+```
+query → router.route(text)
+   BRIEF      → brief.run()        real Postgres state   ┐
+   WEATHER    → weather.current()  free API + ≤2h cache   ├ source = CAPABILITY  (live/authoritative,
+   KNOWLEDGE  → douglas.answer()   curated pack, verbatim ┘   not stored, beats memory)
+   else → memory.answer()  confident verbatim recall      → source = MEMORY
+        → LOCAL_QUICK  local.think(heavy=False)  llama3.2:3b     ┐ refusal / LocalUnavailable
+          LOCAL_HEAVY  local.think(heavy=True)   deepseek-r1:32b ┘   → escalate ↓  source = LOCAL
+          BRAIN / "ask claude" / agentic         → brain.think    the Claude CLI (L3)
+```
+
+The router is allowed to be imperfect: any local refusal or `LocalUnavailable`
+**escalates to the Claude CLI at runtime**, so a mis-route is never a wrong answer —
+only a slower one. (Order corrected after live proof — see *Corrections*.)
+
+## Components
+
+### `utah/local.py` — the local Ollama lane (mirror of `brain.py`)
+- HTTP to `config.OLLAMA_URL` `/api/chat`. Injectable runner + stream-runner
+  (`set_runner` / `set_stream_runner`); **tests never touch Ollama**.
+- Structured failure `LocalUnavailable(UtahError)` for every mode (conn refused,
+  timeout, non-200, bad JSON). Callers degrade to Claude; **never fabricate**.
+- Reuses `brain.NO_FAB`, `brain.I_DONT_KNOW`, `brain.is_refusal` — identical
+  no-fabrication contract.
+- `think(q, context, *, heavy=False) -> str` and
+  `think_stream(q, context, *, heavy=False) -> Iterator[(channel, chunk)]`.
+  Heavy sets `think=true` → `message.thinking` → `("thinking", …)`;
+  `message.content` → `("answer", …)`. Quick (3B) emits answer only.
+- `keep_alive` pins both models resident (the "always ready" the spec wanted, at
+  ~10 procs not ~120).
+
+### `utah/router.py` — deterministic intent router (pure, unit-tested)
+- `Route` enum {BRIEF, WEATHER, LOCAL_QUICK, LOCAL_HEAVY, BRAIN}.
+- Keyword/regex tables + a complexity heuristic (word count + reasoning verbs).
+  Explicit "ask claude" / "think hard" → BRAIN. Agentic verbs (write code, search
+  the web, run, fix, open a PR) → BRAIN. Thresholds are doctrine constants in config.
+
+### `utah/product/weather.py` — weather capability (R-weather)
+- Open-Meteo (free, no key), `current=temperature_2m,precipitation,weather_code,
+  wind_speed_10m`, °F. Injectable `fetch`/`now`/`cache_path`.
+- On-disk JSON cache under `~/.utah/cache/weather.json`, **≤2 h** (spec). Fetch
+  failure → `failures.record` + honest "weather unavailable" (never fabricate).
+- Location seams in config: Gulf Shores, AL (30.2460, −87.7008), overridable.
+
+### `utah/knowledge/douglas.py` — Mark Douglas knowledge pack
+- The **actual** *Trading in the Zone* content: 5 Fundamental Truths + 7 Principles
+  of Consistency, plus a summary fact, seeded as durable `fact` rows
+  (`source="fact"`, confidence 0.95). Idempotent (memory dedup). `seed()` returns
+  the count; runnable `python -m utah.knowledge.douglas`.
+- **Answered deterministically as a capability** (`matches()` + `render()` +
+  `answer()`), NOT regenerated by a model. Live proof showed the recall path is
+  not enough (see *Corrections* below): the pack renders the real rules verbatim.
+
+### Wiring — `utah/core.py`, `utah/objects.py`, `utah/config.py`
+- `ReplySource` gains `LOCAL` and `CAPABILITY`.
+- `core.tell`: route between the recall short-circuit and the brain; capability →
+  `Reply(CAPABILITY)`; local → try, escalate on refusal/unavailable; else brain.
+- `core.tell_stream`: capability → `source`/`answer`/`done`; local → stream
+  `thinking` live, **buffer the answer**, then escalate to the brain stream on
+  refusal/empty/unavailable else flush the answer (3B answer is sub-second, so the
+  buffer is imperceptible and escalation stays clean); else the existing brain stream.
+- `config.py`: `OLLAMA_URL`, `LOCAL_QUICK_MODEL`, `LOCAL_HEAVY_MODEL`,
+  `LOCAL_KEEP_ALIVE`, `LOCAL_TIMEOUT`, `LOCAL_QUICK_MAX_TOKENS`,
+  `LOCAL_HEAVY_MAX_TOKENS`; `WEATHER_*` seams; router doctrine constants.
+
+## Tests (TDD, per module)
+- `router`: every route mapping; escalation keywords; complexity boundary.
+- `local`: injected runner/stream-runner; structured failure per mode; channel
+  split (thinking vs answer); refusal contract.
+- `weather`: injected fetch — fresh fetch, cache hit < 2 h, stale → refetch, fetch
+  failure → honest string + recorded failure.
+- `core`: capability route returns real capability text (source=CAPABILITY); local
+  route (source=LOCAL); local refusal/unavailable escalates to brain; stream variants.
+- `douglas`: idempotent seed; recall returns the rules.
+
+## Proof gates (live)
+1. `ollama ps` — both models resident (keep_alive).
+2. "morning brief" → `brief.py` output, **no Claude call**, source=capability.
+3. "weather in gulf shores" → live values, second call served from cache.
+4. "what are Mark Douglas's trading rules" → the real pack, source=memory, **no hallucination**.
+5. a quick general question → 3B answers fast (source=local).
+6. a hard question → escalates to the Claude CLI (source=brain).
+
+## Corrections (found by live proof, fixed + re-proven)
+
+Two bugs the test suite passed but **live `core.tell` exposed** — the reason the
+"prove it live, no fabrication" doctrine exists:
+
+1. **Knowledge pack hallucinated.** The original plan ("`memory.answer()` serves
+   the pack verbatim") failed: the curated fact surfaces via the sparse/FTS lane
+   with dense `sim=0.000`, so the dense-similarity answer-gate never short-circuited
+   it → the query fell to the 3B, which **invented wrong rules** ("buy low sell
+   high"). Worse, that hallucination was **stored as a durable turn** (`sim=0.864`),
+   poisoning recall. **Fix:** the pack is a deterministic `KNOWLEDGE` capability
+   (router → `douglas.answer()` → verbatim), AND **local-model turns are never
+   durably stored** (only threaded) — a small model can never poison memory. The
+   one poisoned row was deleted.
+2. **Capabilities shadowed by stale memory.** `tell()` ran the memory short-circuit
+   *before* the router, so "what's the weather" returned a **day-old stored weather
+   turn** (74°) and "morning brief" returned a `memory.md` doc fragment. **Fix:**
+   capabilities/knowledge route **first** (live + authoritative), then memory
+   short-circuit for general factual recall, then local, then brain.
+
+Re-proven live: weather/brief → `[capability]` (live data), Douglas → `[capability]`
+(real verbatim rules), quick → `[local]` 0.68s, hard → `[brain]` (Claude CLI).
+
+Sources: Open-Meteo free API https://open-meteo.com/en/docs · Ollama thinking field
+(0.30.5) /api/chat `think` · Mark Douglas, *Trading in the Zone* (5 truths / 7
+principles) · Utah 1-programs.md, 11-interface.md, 14-migrate.md, 17-dash.md.

@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import json
 
-from utah import brain, core, memory
+from utah import brain, core, local, memory
 from utah.objects import Hit
 from tests.fakes import ScriptedStreamRunner
 
@@ -130,3 +130,71 @@ def test_tell_stream_empty_input_is_handled():
     evs = list(core.tell_stream("   "))
     assert ("source", "unavailable") in evs
     assert any(k == "done" for k, _ in evs)
+
+
+# --- streaming through the L1 tier ---------------------------------------------
+
+def test_tell_stream_weather_capability(monkeypatch):
+    monkeypatch.setattr(memory, "recall", lambda t, *a, **k: [])
+    monkeypatch.setattr("utah.product.weather.current", lambda *a, **k: "Gulf Shores, AL: sunny, 75°F.")
+    evs = list(core.tell_stream("what's the weather"))
+    assert ("source", "capability") in evs
+    assert ("answer", "Gulf Shores, AL: sunny, 75°F.") in evs
+    assert evs[-1] == ("done", "Gulf Shores, AL: sunny, 75°F.")
+    assert ("source", "brain") not in evs  # the paid lane never ran
+
+
+def test_tell_stream_local_quick_answers_without_brain(monkeypatch):
+    monkeypatch.setattr(memory, "recall", lambda t, *a, **k: [])
+    monkeypatch.setattr(memory, "store", lambda *a, **k: None)
+    brain.set_stream_runner(ScriptedStreamRunner(brain.BrainUnavailable("must not run")))
+    local.set_stream_runner(lambda payload, timeout: iter([{"content": "hi ", "thinking": ""}, {"content": "there", "thinking": ""}]))
+    evs = list(core.tell_stream("say hi"))
+    assert ("source", "local") in evs
+    answer = "".join(t for k, t in evs if k == "answer")
+    assert answer == "hi there"
+    assert evs[-1] == ("done", "hi there")
+    assert ("source", "brain") not in evs
+
+
+def test_tell_stream_heavy_streams_thinking_live(monkeypatch):
+    monkeypatch.setattr(memory, "recall", lambda t, *a, **k: [])
+    monkeypatch.setattr(memory, "store", lambda *a, **k: None)
+    chunks = [
+        {"content": "", "thinking": "weighing "},
+        {"content": "", "thinking": "options"},
+        {"content": "Because chop.", "thinking": ""},
+    ]
+    local.set_stream_runner(lambda payload, timeout: iter(chunks))
+    evs = list(core.tell_stream("why does the engine lose money on ranges"))
+    thinking = "".join(t for k, t in evs if k == "thinking")
+    assert "weighing options" in thinking          # heavy reasoner's thinking shown live
+    assert ("answer", "Because chop.") in evs
+
+
+def test_tell_stream_local_refusal_escalates_to_brain(monkeypatch):
+    monkeypatch.setattr(memory, "recall", lambda t, *a, **k: [])
+    monkeypatch.setattr(memory, "store", lambda *a, **k: None)
+    local.set_stream_runner(lambda payload, timeout: iter([{"content": "I don't know.", "thinking": ""}]))
+    brain.set_stream_runner(ScriptedStreamRunner(_brain_lines("reasoning", "Claude's answer.")))
+    evs = list(core.tell_stream("say hi"))
+    assert ("source", "brain") in evs
+    answer = "".join(t for k, t in evs if k == "answer")
+    assert "Claude's answer." in answer
+    assert evs[-1][0] == "done"
+
+
+def test_tell_stream_local_unavailable_escalates_seamlessly(monkeypatch):
+    monkeypatch.setattr(memory, "recall", lambda t, *a, **k: [])
+    monkeypatch.setattr(memory, "store", lambda *a, **k: None)
+
+    def boom(payload, timeout):
+        raise local.LocalUnavailable("conn refused")
+
+    local.set_stream_runner(boom)
+    brain.set_stream_runner(ScriptedStreamRunner(_brain_lines("t", "Claude here.")))
+    evs = list(core.tell_stream("say hi"))
+    # local raised before emitting anything → only the brain's source appears
+    assert ("source", "local") not in evs
+    assert ("source", "brain") in evs
+    assert "Claude here." in "".join(t for k, t in evs if k == "answer")

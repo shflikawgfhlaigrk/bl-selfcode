@@ -10,18 +10,29 @@ from utah import brain as brain_mod
 from utah import core as core_mod
 from utah import embed as embed_mod
 from utah import failures as failures_mod
+from utah import local as local_mod
 from utah import memory as memory_mod
 from utah import rerank as rerank_mod
 from tests.fakes import FakeEmbedder, FakeFailureStore, FakeStore, ScriptedRunner, ZeroReranker
+
+
+def _local_down(*_a, **_k):
+    """A local lane that is always unavailable — the test default so the router's
+    L1 routing escalates to the (injected) brain instead of hitting real Ollama.
+    Tests that exercise the local tier inject their own runner over this."""
+    raise local_mod.LocalUnavailable("local lane disabled in tests")
 
 
 @pytest.fixture(autouse=True)
 def _restore_boundaries():
     """Restore all injectable boundaries after every test. Also pin a fake failure
     store for EVERY test so code paths that record failures (core.tell_stream etc.)
-    never write to the real Postgres failures table (no test pollution), and clear
-    the in-memory conversation thread so it never bleeds across tests."""
+    never write to the real Postgres failures table (no test pollution), pin the
+    local lane OFF (so router L1 escalates to the injected brain, never real Ollama),
+    and clear the in-memory conversation thread so it never bleeds across tests."""
     failures_mod.set_store(FakeFailureStore())
+    local_mod.set_runner(_local_down)
+    local_mod.set_stream_runner(_local_down)
     core_mod.reset_conversation()
     yield
     core_mod.reset_conversation()
@@ -29,6 +40,8 @@ def _restore_boundaries():
     rerank_mod.set_reranker(None)
     brain_mod.set_runner(None)
     brain_mod.set_stream_runner(None)
+    local_mod.set_runner(None)
+    local_mod.set_stream_runner(None)
     memory_mod.set_backend(None)
     failures_mod.set_store(None)
 
