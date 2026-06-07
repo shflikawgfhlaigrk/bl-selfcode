@@ -17,7 +17,7 @@ import logging
 import re
 
 from utah import failures
-from utah.product import mail
+from utah import mail
 
 log = logging.getLogger("utah.product.outreach")
 
