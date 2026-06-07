@@ -255,6 +255,19 @@ async def maintenance_run(ctx: Context, params: object) -> dict:
         return await ctx.pool.run(_maintenance_blocking)
 
 
+def _run_engines_blocking() -> dict:
+    from utah.product import trading
+    from utah.product.ledger import get_ledger
+    return trading.run(get_ledger())
+
+
+async def run_engines(ctx: Context, params: object) -> dict:
+    """Capability (not an agent): evaluate engine signals on the live feed -> record_fire.
+    GATED on the WealthCharts feed; 0 fires + documented until Michael's WC login lands."""
+    with ctx.governor.admission():
+        return await ctx.pool.run(_run_engines_blocking)
+
+
 def _busy(seconds: float) -> float:
     t = time.perf_counter()
     time.sleep(seconds)  # a real blocking unit of work, off the loop
@@ -292,6 +305,7 @@ REGISTRY = {
     "morning_brief": morning_brief,
     "watchdog_check": watchdog_check,
     "maintenance_run": maintenance_run,
+    "run_engines": run_engines,
     "publish": publish,
     "shutdown": shutdown,
 }
