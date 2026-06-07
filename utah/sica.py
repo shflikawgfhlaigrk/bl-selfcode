@@ -17,15 +17,20 @@ one JSONL file, so it is fully unit-proven.
 from __future__ import annotations
 
 import json
+import os
 import re
 import time
 from dataclasses import asdict, dataclass
 
 from utah.daemon import runtime
 
-#: SICA hard per-run limits (mirror selfcode.CODE_TIMEOUT_S = 300).
-TIME_LIMIT_S = 300.0
-COST_LIMIT_USD = 10.0
+#: SICA hard per-run limits. Env-overridable per deploy (still HARD bounds — the overseer
+#: kills past TIME_LIMIT_S and the utility time-term normalizes against it): a bot editing
+#: a large file + running the full gate needs more than the 300s default, so the autonomous
+#: launchd job raises it via UTAH_SELFCODE_TIME_LIMIT. Default 300s keeps every other caller
+#: (and the unit tests, which pass explicit values) unchanged.
+TIME_LIMIT_S = float(os.environ.get("UTAH_SELFCODE_TIME_LIMIT", "300"))
+COST_LIMIT_USD = float(os.environ.get("UTAH_SELFCODE_COST_LIMIT", "10"))
 #: τ — a timed-out run's utility is halved (paper §overseer).
 TIMEOUT_PENALTY = 0.5
 
