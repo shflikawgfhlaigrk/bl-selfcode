@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  com.utah.tailserve — keeps the tailnet serve hooked to Utah (:8765 -> :8766).
+  RunAtLoad re-asserts it on login/boot; StartInterval re-checks every 2 min and
+  self-heals any clobber (e.g. com.ace.phone_proxy). The script is a no-op when
+  already correct.
+  Install: launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.utah.tailserve.plist
+  Reload:  launchctl kickstart -k gui/$(id -u)/com.utah.tailserve
+  Stop:    launchctl bootout gui/$(id -u)/com.utah.tailserve
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.utah.tailserve</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>/Users/michaelbarber/.utah/bin/utah_tailserve.sh</string>
+  </array>
+
+  <key>RunAtLoad</key>
+  <true/>
+  <key>StartInterval</key>
+  <integer>120</integer>
+  <key>ProcessType</key>
+  <string>Background</string>
+
+  <key>StandardOutPath</key>
+  <string>/Users/michaelbarber/.utah/logs/tailserve.out.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/michaelbarber/.utah/logs/tailserve.err.log</string>
+</dict>
+</plist>
