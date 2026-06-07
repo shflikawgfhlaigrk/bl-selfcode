@@ -13,6 +13,7 @@ from utah import failures as failures_mod
 from utah import local as local_mod
 from utah import memory as memory_mod
 from utah import rerank as rerank_mod
+from utah import sica as sica_mod
 from tests.fakes import FakeEmbedder, FakeFailureStore, FakeStore, ScriptedRunner, ZeroReranker
 
 
@@ -36,6 +37,9 @@ def _restore_boundaries():
     # wiped it). Tests that need a configured store override via the `mem`/`fake_store`
     # fixtures, which run after this and replace it.
     memory_mod.set_backend(FakeStore())
+    # Pin an in-memory SICA archive so no test reads/writes the real Postgres
+    # selfcode_archive (Archive() with no path now defaults to PG in production).
+    sica_mod.set_archive_backend(sica_mod._MemArchive())
     local_mod.set_runner(_local_down)
     local_mod.set_stream_runner(_local_down)
     local_mod.set_load_probe(lambda: 0.0)  # never read the host's real load in tests
@@ -50,6 +54,7 @@ def _restore_boundaries():
     local_mod.set_stream_runner(None)
     local_mod.set_load_probe(None)
     memory_mod.set_backend(None)
+    sica_mod.set_archive_backend(None)
     failures_mod.set_store(None)
 
 

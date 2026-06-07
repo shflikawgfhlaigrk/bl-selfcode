@@ -29,8 +29,20 @@ COST_LIMIT_USD = 10.0
 #: τ — a timed-out run's utility is halved (paper §overseer).
 TIMEOUT_PENALTY = 0.5
 
-#: Append-only archive of every scored self-code attempt.
+#: Legacy file path for the archive — retained for isolated tests (``Archive(path=…)``)
+#: and one-time migration of pre-existing entries. The PRODUCTION store is Postgres
+#: (everything durable lives in PG); see :class:`_PgArchive`.
 ARCHIVE_PATH = runtime.RUN_DIR / "selfcode-archive.jsonl"
+
+#: Postgres schema for the self-code archive (created lazily on first use).
+_SCHEMA = """
+CREATE TABLE IF NOT EXISTS selfcode_archive (
+  id bigserial PRIMARY KEY,
+  utility double precision NOT NULL DEFAULT 0,
+  data jsonb NOT NULL,
+  ts timestamptz NOT NULL DEFAULT now()
+);
+"""
 
 
 def utility(score: float, cost_usd: float = 0.0, elapsed_s: float = 0.0,
@@ -95,14 +107,13 @@ def make_attempt(*, task: str, branch, tier, passed: bool, output: str,
     )
 
 
-class Archive:
-    """Append-only JSONL archive of scored attempts (one line per attempt)."""
+class _FileArchive:
+    """JSONL file backend — isolated tests (``Archive(path=…)``) and migration source."""
 
     def __init__(self, path=ARCHIVE_PATH):
         self.path = path
 
-    def record(self, attempt) -> dict:
-        d = attempt if isinstance(attempt, dict) else asdict(attempt)
+    def record(self, d: dict) -> dict:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with self.path.open("a", encoding="utf-8") as fh:
             fh.write(json.dumps(d) + "\n")
@@ -122,6 +133,90 @@ class Archive:
                 continue
         return out
 
+
+class _MemArchive:
+    """In-memory backend — the unit-test default (pinned in conftest, like FakeStore)."""
+
+    def __init__(self) -> None:
+        self._rows: list[dict] = []
+
+    def record(self, d: dict) -> dict:
+        self._rows.append(dict(d))
+        return d
+
+    def entries(self) -> list[dict]:
+        return [dict(r) for r in self._rows]
+
+
+class _PgArchive:
+    """Postgres backend — the PRODUCTION store. Append-only ``selfcode_archive`` table;
+    the schema is created lazily on first use so no boot wiring is required."""
+
+    def __init__(self, dsn: str | None = None) -> None:
+        self._dsn = dsn
+        self._ready = False
+
+    def _conn(self):
+        import psycopg
+        from utah import config
+        return psycopg.connect(self._dsn or config.DB_DSN, autocommit=True, connect_timeout=8)
+
+    def _ensure(self, c) -> None:
+        if not self._ready:
+            c.execute(_SCHEMA)
+            self._ready = True
+
+    def record(self, d: dict) -> dict:
+        with self._conn() as c:
+            self._ensure(c)
+            c.execute("INSERT INTO selfcode_archive (utility, data) VALUES (%s, %s)",
+                      (float(d.get("utility", 0.0) or 0.0), json.dumps(d)))
+        return d
+
+    def entries(self) -> list[dict]:
+        with self._conn() as c:
+            self._ensure(c)
+            rows = c.execute("SELECT data FROM selfcode_archive ORDER BY id").fetchall()
+        return [r[0] if isinstance(r[0], dict) else json.loads(r[0]) for r in rows]
+
+
+_backend = None
+
+
+def get_archive_backend():
+    """The process-wide archive backend (default: Postgres). Tests pin :class:`_MemArchive`."""
+    global _backend
+    if _backend is None:
+        _backend = _PgArchive()
+    return _backend
+
+
+def set_archive_backend(backend) -> None:
+    """Inject the archive backend (tests). ``None`` restores the Postgres default."""
+    global _backend
+    _backend = backend
+
+
+class Archive:
+    """Scored-attempt archive. Production = Postgres; passing a ``path`` forces the file
+    backend (isolated tests / migration). ``best()``/``count()`` are computed over
+    ``entries()`` so every backend shares identical semantics."""
+
+    def __init__(self, path=None, backend=None):
+        if backend is not None:
+            self._b = backend
+        elif path is not None:
+            self._b = _FileArchive(path)
+        else:
+            self._b = get_archive_backend()
+
+    def record(self, attempt) -> dict:
+        d = attempt if isinstance(attempt, dict) else asdict(attempt)
+        return self._b.record(d)
+
+    def entries(self) -> list[dict]:
+        return self._b.entries()
+
     def best(self) -> dict | None:
         """The highest-utility attempt so far (the meta-agent's base) — None if empty."""
         e = self.entries()
@@ -132,4 +227,5 @@ class Archive:
 
 
 __all__ = ["utility", "score_from_pytest", "Attempt", "make_attempt", "Archive",
-           "ARCHIVE_PATH", "TIME_LIMIT_S", "COST_LIMIT_USD", "TIMEOUT_PENALTY"]
+           "get_archive_backend", "set_archive_backend", "ARCHIVE_PATH",
+           "TIME_LIMIT_S", "COST_LIMIT_USD", "TIMEOUT_PENALTY"]
