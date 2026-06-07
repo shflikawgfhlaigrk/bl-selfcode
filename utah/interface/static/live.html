@@ -510,10 +510,13 @@ $("q").addEventListener("keydown",e=>{if(e.key==="Enter")ask();});
 function drillClose(){ $("drill").classList.remove("open"); $("drill-body").innerHTML=""; }
 function drillOpen(title,html){ $("drill-title").textContent=title; $("drill-body").innerHTML=html; $("drill").classList.add("open"); }
 function toggleMenu(){ $("menu").classList.toggle("open"); }
+function closeMenu(){ $("menu").classList.remove("open"); }
 
-/* Trading Engine Lab — merged roster + live fires ledger; honest GATED until WC feed lands. */
+/* Trading Engine Lab — merged roster + live fires ledger; honest GATED until WC feed lands.
+   Reachable from the hamburger menu AND the right-rail card, so CLOSE the menu (idempotent)
+   rather than toggle it — toggling from the card would pop the menu over the lab drawer. */
 async function openLab(){
-  toggleMenu();
+  closeMenu();
   drillOpen("⚡ TRADING ENGINE LAB", '<div class="empty">LOADING…</div>');
   try{
     const d=await getPanel("trading");
