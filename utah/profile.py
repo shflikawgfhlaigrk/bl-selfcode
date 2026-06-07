@@ -33,4 +33,9 @@ def browse(query: str, *, k: int = 8, recall=None) -> list[dict]:
              "score": round(getattr(h, "score", 0.0), 2)} for h in hits]
 
 
-__all__ = ["remember_profile", "browse"]
+def is_blank(text: str | None) -> bool:
+    """Return True when *text* is None or only whitespace."""
+    return text is None or not text.strip()
+
+
+__all__ = ["remember_profile", "browse", "is_blank"]
