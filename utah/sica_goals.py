@@ -66,7 +66,7 @@ def _leads_signal(db_query=None) -> str:
     try:
         by_src = q("SELECT source, count(*) FROM leads GROUP BY source ORDER BY 2 DESC")
         total = sum(n for _, n in by_src)
-        with_contact = q("SELECT count(*) FROM leads WHERE coalesce(contact,'') <> ''")[0][0]
+        with_contact = q("SELECT count(*) FROM leads WHERE contact IS NOT NULL AND contact <> '{}'::jsonb")[0][0]
         probate = q("SELECT count(*) FROM probate")[0][0]
         srcs = ", ".join(f"{s}={n}" for s, n in by_src) or "none"
         return (f"leads total={total} by source [{srcs}]; with_contact={with_contact}; "
