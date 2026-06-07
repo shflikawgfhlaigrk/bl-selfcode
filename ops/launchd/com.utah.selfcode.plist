@@ -30,8 +30,12 @@
     <string>utah.sica_autonomy</string>
   </array>
 
+  <!-- WorkingDirectory is ~/.utah, NOT the TCC-protected Desktop: under launchd a
+       Desktop cwd made every subprocess's getcwd() return EPERM ("Unable to read
+       current working directory"), aborting git propagation. PYTHONPATH still points
+       at the repo so imports resolve regardless of cwd. -->
   <key>WorkingDirectory</key>
-  <string>/Users/michaelbarber/Desktop/ProjectUtah</string>
+  <string>/Users/michaelbarber/.utah</string>
 
   <key>EnvironmentVariables</key>
   <dict>

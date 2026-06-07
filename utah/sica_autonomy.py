@@ -36,6 +36,13 @@ REPO_DIR = Path(os.environ.get("UTAH_SELFCODE_REPO", str(Path.home() / ".utah" /
 LIVE_REPO = Path(os.environ.get("UTAH_LIVE_REPO", str(Path(__file__).resolve().parents[1])))
 CYCLE_LOG = runtime.RUN_DIR / "selfcode-cycle.log"
 
+#: git subprocesses MUST start in a readable, non-TCC dir. Under launchd the process
+#: cwd was the TCC-protected Desktop, so git's startup getcwd() returned EPERM and EVERY
+#: git call aborted with "Unable to read current working directory" before propagate even
+#: evaluated the merge. ``git -C <repo>`` sets the operating dir; cwd just needs to be
+#: getcwd-readable. ~/.utah is neither TCC-protected nor missing.
+_SAFE_CWD = str(Path.home() / ".utah")
+
 #: Fallback when the archive is empty / the brain returns nothing — deliberately
 #: tiny and low-risk so an unattended cycle can never do harm by default.
 DEFAULT_TASK = ("Improve one docstring OR add one small unit test for an existing "
@@ -66,7 +73,8 @@ def propagate(live=None, clone=None) -> dict:
     clone = Path(clone) if clone else REPO_DIR
 
     def g(repo, *a):
-        return subprocess.run(["git", "-C", str(repo), *a], capture_output=True, text=True)
+        return subprocess.run(["git", "-C", str(repo), *a], capture_output=True,
+                              text=True, cwd=_SAFE_CWD)
 
     if not (live / ".git").exists() or not (clone / ".git").exists():
         return {"propagated": False, "reason": "live or clone repo missing"}
@@ -94,7 +102,8 @@ def sync_repo(repo: Path) -> bool:
         return False
 
     def git(*a):
-        return subprocess.run(["git", "-C", str(repo), *a], capture_output=True, text=True)
+        return subprocess.run(["git", "-C", str(repo), *a], capture_output=True,
+                              text=True, cwd=_SAFE_CWD)
 
     git("fetch", "origin", "main")
     git("checkout", "-f", "main")          # force back to main, drop in-progress attempt
@@ -104,7 +113,14 @@ def sync_repo(repo: Path) -> bool:
         behind = (git("rev-list", "--count", "main..origin/main").stdout.strip() or "0")
         if ahead == "0" and behind != "0":
             git("reset", "--hard", "origin/main")   # purely behind → safe to pull dev
-        # ahead/diverged → keep the autonomous main (compounding); dev sync via push/pull later
+        elif ahead != "0" and behind != "0":
+            # DIVERGED (clone has autonomous commits AND live advanced with dev work):
+            # rebase the autonomous commits onto current live main so the clone never
+            # permanently forks — ff propagate to live then works and self-improvement
+            # keeps compounding. A conflict aborts cleanly and retries next cycle.
+            if git("rebase", "origin/main").returncode != 0:
+                git("rebase", "--abort")
+        # ahead-only → already a strict descendant of live; ff propagate applies as-is.
     # prune stale selfcode/* branches so they don't accumulate
     for b in git("branch", "--list", "selfcode/*").stdout.split():
         if b and b != "*":
