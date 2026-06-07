@@ -26,6 +26,19 @@ def test_connectivity_online_when_any_host_up():
     assert r["online"] is True
 
 
+def test_connectivity_partial_outage_records_nothing_and_maps_each_host():
+    store = FakeFailureStore(); failures.set_store(store)
+    def fetch(url):
+        if "google" in url:
+            raise RuntimeError("down")     # one of the two custom hosts is down
+        return None
+    r = connectivity.check(hosts=["https://google.com", "https://up.example"], fetch=fetch)
+    # the returned map reflects per-host reachability...
+    assert r["hosts"] == {"https://google.com": False, "https://up.example": True}
+    # ...and a single host being down is NOT an outage, so nothing is documented
+    assert store.rows == []
+
+
 def test_connectivity_offline_is_documented():
     store = FakeFailureStore(); failures.set_store(store)
     def fetch(url):
