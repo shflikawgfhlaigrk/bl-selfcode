@@ -162,6 +162,56 @@ def fetch(url: str, get=None) -> str:
     return text[:MAX_PAGE_CHARS]
 
 
+def gather(query: str, k: int = 3, *, search_fn=None, fetch_fn=None, budget: int = 6500) -> str:
+    """Low-latency learn primitive: search + fetch the top-k pages IN PARALLEL and return
+    their concatenated sanitized text as brain CONTEXT — with NO per-source brain
+    extraction (the per-source ``brain.ask`` calls are what made a cold learn cost ~60s).
+
+    The brain reads this real fetched text in ONE grounded pass and answers (no-fab:
+    it answers only from this context). Each page contributes a slice so the budget is
+    shared across sources (the answer might live in source #2), and the total is capped
+    to fit the brain's context window. Returns '' on a block / empty results / all
+    fetches failing — every failure is documented; it never raises and never fabricates.
+    """
+    search_fn = search_fn or (lambda q, kk=k: search(q, kk))
+    fetch_fn = fetch_fn or fetch
+    try:
+        sources = search_fn(query, k)
+    except SearchBlocked as exc:
+        failures.record("researcher", "search_blocked", f"{query[:60]}: {exc}")
+        return ""
+    except Exception as exc:  # noqa: BLE001
+        failures.record("researcher", "gather_search_failed", f"{query[:60]}: {exc}")
+        return ""
+    if not sources:
+        failures.record("researcher", "no_results", f"{query[:60]}: 0 web results")
+        return ""
+
+    per_page = max(1200, budget // len(sources))
+
+    def _one(item: tuple[str, str]) -> str:
+        title, url = item
+        try:
+            content = fetch_fn(url)
+        except Exception as exc:  # noqa: BLE001 — one dead source must not stop the rest
+            failures.record("researcher", "fetch_failed", f"{url[:70]}: {exc}")
+            return ""
+        return f"[{title}]\n{content[:per_page]}" if content else ""
+
+    import concurrent.futures as _cf
+
+    blocks: list[str] = []
+    with _cf.ThreadPoolExecutor(max_workers=min(len(sources), 6)) as ex:
+        for block in ex.map(_one, sources):  # ex.map preserves source order
+            if block:
+                blocks.append(block)
+    if not blocks:
+        failures.record("researcher", "no_content", f"{query[:60]}: {len(sources)} sources, 0 fetched")
+    text = "\n\n".join(blocks)[:budget]
+    log.info("gather %r: sources=%d fetched=%d chars=%d", query, len(sources), len(blocks), len(text))
+    return text
+
+
 def research(query: str, *, k: int = 4, search_fn=None, fetch_fn=None,
              extract_fn=None, store_fn=None) -> dict:
     """Search → fetch → extract durable facts (grounded) → store in memory. Returns
@@ -213,5 +263,5 @@ def research(query: str, *, k: int = 4, search_fn=None, fetch_fn=None,
             "stored": stored, "fact_list": learned}
 
 
-__all__ = ["search", "fetch", "research", "sanitize_fetched_text", "SearchBlocked",
-           "extract_research_facts"]
+__all__ = ["search", "fetch", "gather", "research", "sanitize_fetched_text",
+           "SearchBlocked", "extract_research_facts"]

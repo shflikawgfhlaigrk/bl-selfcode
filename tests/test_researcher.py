@@ -62,6 +62,36 @@ def test_research_extracts_and_stores_facts():
     assert stored
 
 
+def test_gather_returns_concatenated_web_text_no_brain_calls():
+    # The fast learn primitive: search + fetch top-k → one concatenated context blob,
+    # each source represented, NO per-source brain extraction (the latency win).
+    failures.set_store(FakeFailureStore())
+    text = researcher.gather(
+        "how tall is x",
+        search_fn=lambda q, k=3: [("Wiki", "http://a"), ("Britannica", "http://b")],
+        fetch_fn=lambda u: f"page body from {u} with the answer",
+    )
+    assert "page body from http://a" in text and "page body from http://b" in text
+    assert "[Wiki]" in text and "[Britannica]" in text
+
+
+def test_gather_caps_to_budget_across_sources():
+    failures.set_store(FakeFailureStore())
+    text = researcher.gather(
+        "q",
+        search_fn=lambda q, k=3: [("A", "http://a"), ("B", "http://b")],
+        fetch_fn=lambda u: "x" * 50_000,
+        budget=4000,
+    )
+    assert len(text) <= 4000
+
+
+def test_gather_empty_on_block_or_no_results():
+    store = FakeFailureStore(); failures.set_store(store)
+    assert researcher.gather("q", search_fn=lambda q, k=3: [], fetch_fn=lambda u: "") == ""
+    assert any("result" in row[2] for row in store.rows)
+
+
 def test_research_no_results_is_documented():
     store = FakeFailureStore(); failures.set_store(store)
     r = researcher.research("x", search_fn=lambda q, k=5: [], fetch_fn=lambda u: "",

@@ -41,11 +41,11 @@ def _conversation_context() -> str:
     return "\n".join(f"Michael: {q}\nUtah: {a}" for q, a in _CONVO)
 
 
-def _build_context(hits: list, learned: list[str] | None = None) -> str:
-    """Brain context = core identity facts + conversation thread + freshly researched
-    facts + recalled memory. ``learned`` (the just-fetched web facts) is injected as
-    its own labelled block so a learn-on-miss retry grounds on the COMPLETE fresh
-    evidence — not the post-supersede, top-k recall (which can drop the key fact)."""
+def _build_context(hits: list, web: str = "") -> str:
+    """Brain context = core identity facts + conversation thread + freshly fetched web
+    text + recalled memory. ``web`` (the just-fetched page text from a learn-on-miss)
+    is injected as its own labelled block so the retry grounds on the real source text
+    in ONE pass — no per-source extraction round-trips, which is the latency win."""
     parts: list[str] = []
     core = memory.core_recall()
     if core:
@@ -53,9 +53,8 @@ def _build_context(hits: list, learned: list[str] | None = None) -> str:
     convo = _conversation_context()
     if convo:
         parts.append("RECENT CONVERSATION:\n" + convo)
-    if learned:
-        parts.append("FRESHLY RESEARCHED (grounded web facts):\n"
-                     + "\n".join(f"- {f}" for f in learned))
+    if web:
+        parts.append("FRESHLY RESEARCHED (web sources, grounded):\n" + web)
     if hits:
         parts.append("RECALLED MEMORY:\n" + "\n".join(f"- {h.content}" for h in hits))
     return "\n\n".join(parts)
@@ -152,21 +151,19 @@ def _learnable(text: str) -> bool:
     return config.LEARN_ON_MISS and router.is_factual_recall(text)
 
 
-def _learn(text: str) -> list[str]:
-    """Research *text* on the web and store the grounded facts in memory.
-    Returns the freshly learned fact strings (so the caller can ground the retry on
-    the COMPLETE fresh set, not a lossy recall). Best-effort: every failure (search
-    blocked, dead fetch, no facts, brain down) is swallowed and returns [] — the
-    caller keeps the honest "I don't know"."""
+def _learn(text: str) -> str:
+    """Fetch real web text for *text* to ground the retry — the FAST path: search +
+    parallel fetch, NO per-source brain extraction (that cost ~60s on a cold learn).
+    Returns the fetched page text (brain context) or '' on any failure. Best-effort:
+    a block / dead fetch / nothing fetched is swallowed → the honest refusal stands."""
     try:
         from utah.product import researcher
 
-        result = researcher.research(text, k=config.LEARN_ON_MISS_SOURCES)
+        return researcher.gather(text, k=config.LEARN_ON_MISS_SOURCES)
     except Exception as exc:  # noqa: BLE001 — learning is best-effort, never fatal
-        log.warning("learn-on-miss research failed: %s", exc)
-        failures.record("learn", "research_failed", f"{text[:60]}: {exc}")
-        return []
-    return list(result.get("fact_list") or [])
+        log.warning("learn-on-miss gather failed: %s", exc)
+        failures.record("learn", "gather_failed", f"{text[:60]}: {exc}")
+        return ""
 
 
 def tell(text: str) -> Reply:
@@ -226,13 +223,13 @@ def tell(text: str) -> Reply:
             hits=hits,
         )
 
-    # 4.5 LEARN-ON-MISS: the brain refused a world-knowledge question → go find it,
-    #     store the grounded facts, and re-reason over the COMPLETE fresh evidence.
-    #     (No-fab intact: the brain answers from the new CONTEXT.)
+    # 4.5 LEARN-ON-MISS: the brain refused a world-knowledge question → fetch the real
+    #     web text and re-reason over it in ONE grounded pass. (No-fab intact: the brain
+    #     answers only from the fetched CONTEXT. The answer is remembered → compounds.)
     if brain.is_refusal(reply_text) and _learnable(text):
-        learned = _learn(text)
-        if learned:
-            relearned = brain.think(text, _build_context(hits, learned=learned))
+        web = _learn(text)
+        if web:
+            relearned = brain.think(text, _build_context(hits, web=web))
             if relearned and not brain.is_refusal(relearned):
                 _CONVO.append((text, relearned))
                 _remember_turn(text, relearned)
@@ -323,11 +320,11 @@ def tell_stream(text: str) -> Iterator[tuple[str, str]]:
     if learnable and brain.is_refusal(reply_text):
         yield ("source", "learned")
         yield ("thinking", "I don't have that yet — searching the web and learning it…\n")
-        learned = _learn(text)
-        if learned:
+        web = _learn(text)
+        if web:
             relearned: list[str] = []
             try:
-                for channel, chunk in brain.think_stream(text, _build_context(hits, learned=learned)):
+                for channel, chunk in brain.think_stream(text, _build_context(hits, web=web)):
                     if channel == "answer":
                         relearned.append(chunk)
                     else:

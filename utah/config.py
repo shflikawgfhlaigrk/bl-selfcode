@@ -79,9 +79,10 @@ ROUTER_HEAVY_MIN_WORDS: int = 18
 #: Utah compound: the next identical question is an instant memory recall. Scoped
 #: to factual-recall turns so personal/agentic misses stay fast. 0 disables it.
 LEARN_ON_MISS: bool = os.environ.get("UTAH_LEARN_ON_MISS", "1") not in ("0", "", "false", "no")
-#: How many web sources the learn-on-miss research pass fetches (kept small so a
-#: cold miss costs a few seconds, not a crawl; subsequent asks are free recall).
-LEARN_ON_MISS_SOURCES: int = int(os.environ.get("UTAH_LEARN_ON_MISS_SOURCES", "4"))
+#: How many web sources the learn-on-miss pass fetches (in PARALLEL, no per-source
+#: brain extraction). Kept small so a cold miss costs a few seconds, not a crawl;
+#: subsequent asks are free recall.
+LEARN_ON_MISS_SOURCES: int = int(os.environ.get("UTAH_LEARN_ON_MISS_SOURCES", "3"))
 
 # --- clock capability (time/date — a model cannot know the current instant) ----
 #: Michael's timezone (Gulf Shores, AL = Central). Invalid → system-local fallback.
