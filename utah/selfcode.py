@@ -28,8 +28,9 @@ import pathlib
 import re
 import subprocess
 import sys
+import time
 
-from utah import config, failures
+from utah import config, failures, sica
 from utah.daemon import runtime
 
 log = logging.getLogger("utah.selfcode")
@@ -298,6 +299,62 @@ def propose(task: str, *, run_claude=None, run_tests=None, branch_fn=None,
             "branch": branch, "reason": "suite green"}
 
 
+def _safe_record(arch, entry) -> bool:
+    """Archive an attempt; never let a write failure break the coding run."""
+    try:
+        arch.record(entry)
+        return True
+    except Exception as exc:  # noqa: BLE001
+        log.warning("selfcode archive failed: %s", exc)
+        return False
+
+
+def propose_governed(task: str, *, repo: str | None = None, archive=None, **kw) -> dict:
+    """SICA-governed propose: run the normal gated :func:`propose`, then SCORE the
+    attempt (graded utility per arXiv 2504.15228) and ARCHIVE it. Returns
+    ``propose``'s dict enriched with ``score``/``utility``/``elapsed_s``/``archived``.
+
+    The autonomous lane calls THIS so every self-edit is measured and compounds —
+    the meta-agent (next build) reads the archive and improves from ``argmax
+    utility``. ``propose`` itself is unchanged; governance is purely additive."""
+    arch = archive if archive is not None else sica.Archive()
+    cap = {"output": "", "timed_out": False}
+    base_tests = kw.pop("run_tests", None) or (lambda: _real_tests(cwd=repo or "."))
+    base_claude = kw.pop("run_claude", None) or (lambda t: _real_claude(t, cwd=repo or "."))
+
+    def _capturing_tests():
+        passed, out = base_tests()
+        cap["output"] = out
+        return passed, out
+
+    def _timed_claude(t):
+        try:
+            base_claude(t)
+        except subprocess.TimeoutExpired:
+            cap["timed_out"] = True
+            raise
+
+    t0 = time.monotonic()
+    result = propose(task, run_claude=_timed_claude, run_tests=_capturing_tests,
+                     repo=repo, **kw)
+    elapsed = time.monotonic() - t0
+
+    if result.get("disabled"):
+        return result   # kill switch — not an attempt, nothing to score/archive
+
+    entry = sica.make_attempt(
+        task=task, branch=result.get("branch"), tier=result.get("tier"),
+        passed=bool(result.get("tests_passed")), output=cap["output"],
+        cost_usd=0.0, elapsed_s=elapsed, timed_out=cap["timed_out"],
+        merged=bool(result.get("merged")), sha=result.get("commit"),
+        reason=result.get("reason", ""),
+    )
+    archived = _safe_record(arch, entry)
+    result.update(score=entry.score, utility=entry.utility,
+                  elapsed_s=entry.elapsed_s, archived=archived)
+    return result
+
+
 def _safe(fn) -> None:
     try:
         fn()
@@ -371,6 +428,7 @@ def kill_switch_smoke() -> dict:
     return {"refused": refused, "tier": r.get("tier"), "reason": r.get("reason")}
 
 
-__all__ = ["enabled", "automerge_enabled", "propose", "classify", "tier_allows_automerge",
-           "safety_snapshot", "safety_intact", "kill_switch_smoke", "POLICY", "TIER_ORDER",
-           "SAFETY_PATHS", "KILL_SWITCH", "AUTOMERGE_FLAG", "SUPERVISED_STATE"]
+__all__ = ["enabled", "automerge_enabled", "propose", "propose_governed", "classify",
+           "tier_allows_automerge", "safety_snapshot", "safety_intact", "kill_switch_smoke",
+           "POLICY", "TIER_ORDER", "SAFETY_PATHS", "KILL_SWITCH", "AUTOMERGE_FLAG",
+           "SUPERVISED_STATE"]

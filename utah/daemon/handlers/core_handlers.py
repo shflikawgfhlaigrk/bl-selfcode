@@ -412,11 +412,17 @@ async def panel_detail(ctx: Context, params: object) -> dict:
             hits = await ctx.pool.run(lambda: memory.get_backend().list_memories(20, 0))
         return {"panel": "research", "rows": hits, "note": "facts learned (web -> memory)"}
     if panel == "selfcode":
-        from utah import selfcode
+        from utah import selfcode, sica
         on = selfcode.enabled()
         am = selfcode.automerge_enabled()
         smoke = selfcode.kill_switch_smoke()    # live proof: refuses self-edits to safety
+        _arch = sica.Archive()
+        _best = _arch.best()
         return {"panel": "selfcode",
+                # SICA governance: every attempt is utility-scored + archived.
+                "sica": {"archived": _arch.count(),
+                         "best_utility": (_best or {}).get("utility"),
+                         "time_limit_s": sica.TIME_LIMIT_S, "cost_limit_usd": sica.COST_LIMIT_USD},
                 "status": ("armed" if am else "propose-only") if on else "kill-switch",
                 "enabled": on,
                 "automerge": "ARMED — green merges to main + pushes origin" if am
