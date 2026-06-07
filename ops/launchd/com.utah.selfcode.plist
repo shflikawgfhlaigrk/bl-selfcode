@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  com.utah.selfcode — SICA autonomous self-improvement cycle (scheduled).
+
+  Runs utah.sica_autonomy.run_cycle every 6h: the meta-agent picks the next task
+  from the archive, claude codes it in the ISOLATED dedicated repo
+  (UTAH_SELFCODE_REPO=~/.utah/selfcode-repo) under the overseer, the full suite
+  gates it, the attempt is utility-scored + archived, and a Tier-A green change
+  auto-merges (after the supervised ramp). The kill switch
+  (~/.utah/run/selfcode.disabled) stops it instantly; the automerge flag
+  (~/.utah/run/selfcode.automerge) arms merging. Autonomous git stays OFF the
+  live dev tree — it only touches the dedicated clone.
+
+  Install:
+    cp ops/launchd/com.utah.selfcode.plist ~/Library/LaunchAgents/
+    launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.utah.selfcode.plist
+  Force-run now:  launchctl kickstart -k gui/$(id -u)/com.utah.selfcode
+  Pause:          touch ~/.utah/run/selfcode.disabled   (or bootout the job)
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.utah.selfcode</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/michaelbarber/.utah/venv/bin/python</string>
+    <string>-m</string>
+    <string>utah.sica_autonomy</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>/Users/michaelbarber/Desktop/ProjectUtah</string>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PYTHONPATH</key>
+    <string>/Users/michaelbarber/Desktop/ProjectUtah</string>
+    <key>UTAH_SELFCODE_REPO</key>
+    <string>/Users/michaelbarber/.utah/selfcode-repo</string>
+    <key>PYTHONUNBUFFERED</key>
+    <string>1</string>
+    <key>PATH</key>
+    <string>/Users/michaelbarber/.utah/venv/bin:/opt/homebrew/bin:/usr/local/bin:/Users/michaelbarber/.local/bin:/usr/bin:/bin</string>
+  </dict>
+
+  <key>StartInterval</key>
+  <integer>21600</integer>
+
+  <key>RunAtLoad</key>
+  <false/>
+
+  <key>StandardOutPath</key>
+  <string>/Users/michaelbarber/.utah/logs/selfcode.log</string>
+
+  <key>StandardErrorPath</key>
+  <string>/Users/michaelbarber/.utah/logs/selfcode.err</string>
+</dict>
+</plist>

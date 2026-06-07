@@ -52,8 +52,11 @@ def _brain_answer(prompt: str, timeout: int = 60) -> str:
 
 
 def sync_repo(repo: Path) -> bool:
-    """Make the dedicated repo clean + on origin/main HEAD before a cycle. Returns
-    False if it isn't a git repo (caller should provision it once)."""
+    """Ready the dedicated repo for a cycle WITHOUT losing autonomous work. Force
+    back to a clean main (dropping any in-progress attempt), then fast-forward to
+    origin/main ONLY when the clone is strictly behind — never reset away local
+    autonomous commits (that's what lets self-improvement COMPOUND). Returns False
+    if it isn't a git repo (provision it once with a clone)."""
     if not (repo / ".git").exists():
         return False
 
@@ -61,11 +64,18 @@ def sync_repo(repo: Path) -> bool:
         return subprocess.run(["git", "-C", str(repo), *a], capture_output=True, text=True)
 
     git("fetch", "origin", "main")
-    git("checkout", "main")
-    # Prefer origin/main if the remote is reachable; else just clean the local main.
+    git("checkout", "-f", "main")          # force back to main, drop in-progress attempt
+    git("clean", "-fd")                     # remove untracked leftovers
     if git("rev-parse", "--verify", "origin/main").returncode == 0:
-        git("reset", "--hard", "origin/main")
-    git("clean", "-fd")
+        ahead = (git("rev-list", "--count", "origin/main..main").stdout.strip() or "0")
+        behind = (git("rev-list", "--count", "main..origin/main").stdout.strip() or "0")
+        if ahead == "0" and behind != "0":
+            git("reset", "--hard", "origin/main")   # purely behind → safe to pull dev
+        # ahead/diverged → keep the autonomous main (compounding); dev sync via push/pull later
+    # prune stale selfcode/* branches so they don't accumulate
+    for b in git("branch", "--list", "selfcode/*").stdout.split():
+        if b and b != "*":
+            git("branch", "-D", b)
     return True
 
 
