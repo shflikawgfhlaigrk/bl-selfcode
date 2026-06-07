@@ -289,6 +289,76 @@ async def shutdown(ctx: Context, params: object) -> dict:
     return {"stopping": True}
 
 
+
+# --- transparency drill-down: real detail behind EVERY deck panel -----------
+def _sys_detail() -> dict:
+    import os
+    import psutil
+    per = [round(x, 1) for x in psutil.cpu_percent(interval=0.15, percpu=True)]
+    procs = []
+    for pr in psutil.process_iter(["pid", "name", "cpu_percent"]):
+        procs.append(pr.info)
+    procs.sort(key=lambda x: -(x.get("cpu_percent") or 0.0))
+    l1, l5, l15 = os.getloadavg()
+    return {"per_core_pct": per, "load1": round(l1, 2), "load5": round(l5, 2),
+            "load15": round(l15, 2),
+            "top_processes": [{"pid": q["pid"], "name": q.get("name"),
+                               "cpu": round(q.get("cpu_percent") or 0.0, 1)} for q in procs[:8]]}
+
+
+def _ledger_recent(domain: str, limit: int) -> list:
+    from utah.product.ledger import get_ledger
+    return get_ledger().recent(domain, limit)
+
+
+def _audit_detail(limit: int) -> list:
+    from utah import failures
+    return [{"ts": r.ts, "source": r.source, "kind": r.kind, "detail": r.detail}
+            for r in failures.recent(limit)]
+
+
+def _memory_detail() -> dict:
+    from utah import memory
+    b = memory.get_backend()
+    return {"counts": b.live_counts(), "rows": b.list_memories(200, 0),
+            "entities": b.list_entities(300)}
+
+
+async def panel_detail(ctx: Context, params: object) -> dict:
+    """Real detail behind a deck panel (the transparency rule: every panel clickable ->
+    underlying truth). pool->16 slots, governor->18 cores+load+top procs, leads/probate/
+    outreach/engines->rows, audit->failures, memory->rows+entities, spine/voice->state."""
+    panel = str(_as_dict(params).get("panel", "")).strip()
+    if panel == "pool":
+        return {"panel": "pool", "limit": ctx.pool.limit, "busy": ctx.pool.borrowed,
+                "idle": ctx.pool.available,
+                "slots": [{"slot": i, "state": "busy" if i < ctx.pool.borrowed else "idle"}
+                          for i in range(ctx.pool.limit)]}
+    if panel == "governor":
+        gov = ctx.governor.snapshot()
+        with ctx.governor.admission():
+            sysd = await ctx.pool.run(_sys_detail)
+        return {"panel": "governor", **gov, **sysd}
+    if panel == "spine":
+        return {"panel": "spine", "version": ctx.version, "uptime_s": round(ctx.uptime_s, 1),
+                "draining": ctx.shutdown.is_set(), "bus_subscribers": ctx.bus.subscribers,
+                "bus_published": ctx.bus.published, "bus_dropped": ctx.bus.dropped}
+    if panel in ("leads", "probate", "outreach", "engines"):
+        dom = "fires" if panel == "engines" else panel
+        with ctx.governor.admission():
+            return {"panel": panel, "rows": await ctx.pool.run(_ledger_recent, dom, 50)}
+    if panel == "audit":
+        with ctx.governor.admission():
+            return {"panel": "audit", "rows": await ctx.pool.run(_audit_detail, 50)}
+    if panel == "memory":
+        with ctx.governor.admission():
+            return {"panel": "memory", **(await ctx.pool.run(_memory_detail))}
+    if panel == "voice":
+        from utah.voice import state
+        return {"panel": "voice", **state.status()}
+    return {"panel": panel, "rows": []}
+
+
 REGISTRY = {
     "ping": ping,
     "status": status,
@@ -306,6 +376,7 @@ REGISTRY = {
     "watchdog_check": watchdog_check,
     "maintenance_run": maintenance_run,
     "run_engines": run_engines,
+    "panel_detail": panel_detail,
     "publish": publish,
     "shutdown": shutdown,
 }

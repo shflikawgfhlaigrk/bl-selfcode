@@ -85,6 +85,17 @@ async def api_memory_entities(request):
         return JSONResponse({"error": str(exc)}, status_code=503)
 
 
+async def api_panel(request):
+    """Real detail behind ANY deck panel — the transparency drill-down (every panel
+    clickable -> underlying truth). pool/governor/spine/leads/probate/outreach/engines/
+    audit/memory/voice."""
+    name = request.path_params["name"]
+    try:
+        return JSONResponse(await ctl.call("panel_detail", {"panel": name}, timeout=8.0))
+    except Exception as exc:
+        return JSONResponse({"error": str(exc)}, status_code=503)
+
+
 async def api_tell(request):
     body = await request.json()
     text = str(body.get("text", "")).strip()
@@ -229,6 +240,7 @@ def build_app() -> Starlette:
         Route("/memory", api_memory),
         Route("/memory/list", api_memory_list),
         Route("/memory/entities", api_memory_entities),
+        Route("/panel/{name}", api_panel),
         Route("/api/tell", api_tell, methods=["POST"]),
         Route("/api/tell/stream", api_tell_stream),
         Route("/events", events),

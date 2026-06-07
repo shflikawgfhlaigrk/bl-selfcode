@@ -140,9 +140,9 @@
 <main>
   <!-- LEFT: system spine (real) -->
   <div class="col">
-    <div class="card"><h2>SYSTEM SPINE <span class="tag" id="spine-tag">—</span></h2><div id="spine"></div></div>
-    <div class="card"><h2>WORKER POOL</h2><div id="pool"></div></div>
-    <div class="card"><h2>GOVERNOR</h2><div id="gov"></div></div>
+    <div class="card drillable" data-drill="spine"><h2>SYSTEM SPINE <span class="tag" id="spine-tag">—</span></h2><div id="spine"></div></div>
+    <div class="card drillable" data-drill="pool"><h2>WORKER POOL</h2><div id="pool"></div></div>
+    <div class="card drillable" data-drill="governor"><h2>GOVERNOR</h2><div id="gov"></div></div>
     <div class="card"><h2>SYNC &amp; INGEST</h2><div class="dormbody" id="p-sync">DORMANT</div></div>
   </div>
 
@@ -165,24 +165,24 @@
       </div>
     </div>
     <div class="grid3">
-      <div class="card"><h2>ENGINES</h2><div class="dormbody" id="p-engines">DORMANT</div></div>
+      <div class="card drillable" data-drill="engines"><h2>ENGINES</h2><div class="dormbody" id="p-engines">DORMANT</div></div>
       <div class="card"><h2>RISK KERNEL</h2><div class="dormbody" id="p-risk">DORMANT</div></div>
       <div class="card"><h2>TICK FLOW</h2><div class="dormbody" id="p-tick">DORMANT</div></div>
     </div>
     <div class="grid3">
-      <div class="card"><h2>LEADS</h2><div class="dormbody" id="p-leads">DORMANT</div></div>
-      <div class="card"><h2>PROBATE</h2><div class="dormbody" id="p-probate">DORMANT</div></div>
-      <div class="card"><h2>OUTREACH</h2><div class="dormbody" id="p-outreach">DORMANT</div></div>
+      <div class="card drillable" data-drill="leads"><h2>LEADS</h2><div class="dormbody" id="p-leads">DORMANT</div></div>
+      <div class="card drillable" data-drill="probate"><h2>PROBATE</h2><div class="dormbody" id="p-probate">DORMANT</div></div>
+      <div class="card drillable" data-drill="outreach"><h2>OUTREACH</h2><div class="dormbody" id="p-outreach">DORMANT</div></div>
     </div>
   </div>
 
   <!-- RIGHT: daemon/socket + memory + bus + dormant functions -->
   <div class="col">
-    <div class="card"><h2>LOCAL DAEMON &amp; SOCKET <span class="tag" id="dae-tag">—</span></h2><div id="daemon"></div></div>
+    <div class="card drillable" data-drill="spine"><h2>LOCAL DAEMON &amp; SOCKET <span class="tag" id="dae-tag">—</span></h2><div id="daemon"></div></div>
     <div class="card drillable" data-drill="memory"><h2>MEMORY · BRAIN</h2><div id="memory"></div></div>
     <div class="card"><h2>EVENT BUS · LIVE</h2><div class="ticker" id="ticker"><div>awaiting events…</div></div></div>
-    <div class="card"><h2>VOICE PIPELINE</h2><div class="dormbody" id="p-voice">DORMANT</div></div>
-    <div class="card"><h2>AUDIT LEDGER</h2><div class="dormbody" id="p-audit">DORMANT</div></div>
+    <div class="card drillable" data-drill="voice"><h2>VOICE PIPELINE</h2><div class="dormbody" id="p-voice">DORMANT</div></div>
+    <div class="card drillable" data-drill="audit"><h2>AUDIT LEDGER</h2><div class="dormbody" id="p-audit">DORMANT</div></div>
   </div>
 </main>
 
@@ -321,23 +321,41 @@ async function openDrill(title,render){
   try{ await render($("drill-body")); }
   catch(e){ $("drill-body").innerHTML='<div style="color:#c66">drill failed: '+esc(String(e))+'</div>'; }
 }
-async function drillMemory(body){
-  const [mem,ent]=await Promise.all([
-    fetch("/memory/list?limit=300").then(r=>r.json()),
-    fetch("/memory/entities").then(r=>r.json())
-  ]);
-  const rws=mem.rows||[], ents=ent.entities||[];
-  body.innerHTML=
-    '<div class="drill-sec">'+rws.length+' LIVE MEMORY ROWS (newest first)</div>'+
-    rws.map(r=>'<div class="drill-row"><span class="drill-tag">'+esc(r.source)+'</span>'+
-      '<span class="drill-meta">#'+r.id+' · conf '+r.confidence+' · ×'+r.reinforcement+' · '+esc(r.ts)+'</span>'+
-      '<div class="drill-content">'+esc(r.content)+'</div></div>').join('')+
-    '<div class="drill-sec">'+ents.length+' ENTITIES (by links)</div>'+
-    '<div class="drill-ents">'+ents.map(e=>'<span class="drill-ent">'+esc(e.name)+' <b>'+e.mentions+'</b></span>').join('')+'</div>';
+// one row -> html, shaped by what kind of row it is (memory/audit/ledger)
+function drillRow(r){
+  if(r.content!==undefined) return '<div class="drill-row"><span class="drill-tag">'+esc(r.source||'')+'</span>'+
+    '<span class="drill-meta">#'+(r.id||'')+(r.confidence!==undefined?' · conf '+r.confidence:'')+(r.reinforcement!==undefined?' · ×'+r.reinforcement:'')+(r.ts?' · '+esc(r.ts):'')+'</span>'+
+    '<div class="drill-content">'+esc(r.content)+'</div></div>';
+  if(r.detail!==undefined) return '<div class="drill-row"><span class="drill-tag">'+esc((r.source||'')+'/'+(r.kind||''))+'</span> <span class="drill-meta">'+esc(r.ts||'')+'</span>'+
+    '<div class="drill-content">'+esc(r.detail)+'</div></div>';
+  const main=r.name||r.case_name||r.recipient||r.engine||JSON.stringify(r);
+  const meta=[r.kind,r.region,r.county,r.campaign,r.direction,r.status,r.ts].filter(Boolean).join(' · ');
+  return '<div class="drill-row"><div class="drill-content">'+esc(main)+'</div><span class="drill-meta">'+esc(meta)+'</span></div>';
 }
-const DRILLS={ memory: ["MEMORY · BRAIN — live rows + entities", drillMemory] };
+// GENERIC: fetch /panel/<name> and render whatever real detail it carries
+async function drillPanel(name, body){
+  const d=await fetch("/panel/"+name).then(r=>r.json());
+  if(d.error){ body.innerHTML='<div style="color:#c66">drill failed: '+esc(d.error)+'</div>'; return; }
+  let html="";
+  const skip=["panel","per_core_pct","top_processes","slots","rows","entities","counts"];
+  const kv=Object.entries(d).filter(([k,v])=>!skip.includes(k)&&(typeof v!=="object"||v===null));
+  if(kv.length) html+='<div class="drill-sec">STATE</div>'+kv.map(([k,v])=>'<div class="row"><span class="k">'+esc(k)+'</span><span class="v">'+esc(String(v))+'</span></div>').join('');
+  if(d.counts) html+='<div class="drill-sec">COUNTS</div>'+Object.entries(d.counts).map(([k,v])=>'<div class="row"><span class="k">'+esc(k)+'</span><span class="v">'+v+'</span></div>').join('');
+  if(d.slots) html+='<div class="drill-sec">'+d.limit+' WORKER SLOTS ('+d.busy+' busy / '+d.idle+' idle)</div><div class="drill-ents">'+
+    d.slots.map(s=>'<span class="drill-ent">#'+s.slot+' <b>'+s.state+'</b></span>').join('')+'</div>';
+  if(d.per_core_pct) html+='<div class="drill-sec">'+d.per_core_pct.length+' CPU CORES (% busy)</div><div class="drill-ents">'+
+    d.per_core_pct.map((p,i)=>'<span class="drill-ent">c'+i+' <b>'+p+'%</b></span>').join('')+'</div>';
+  if(d.top_processes) html+='<div class="drill-sec">TOP PROCESSES</div>'+
+    d.top_processes.map(p=>'<div class="drill-row"><span class="drill-meta">pid '+p.pid+' · '+p.cpu+'% cpu</span><div class="drill-content">'+esc(p.name||'')+'</div></div>').join('');
+  if(d.rows) html+='<div class="drill-sec">'+d.rows.length+' ROWS</div>'+d.rows.map(drillRow).join('');
+  if(d.entities) html+='<div class="drill-sec">'+d.entities.length+' ENTITIES</div><div class="drill-ents">'+
+    d.entities.map(e=>'<span class="drill-ent">'+esc(e.name)+' <b>'+e.mentions+'</b></span>').join('')+'</div>';
+  body.innerHTML = html || '<div style="color:#8a8470">DORMANT — no producer wired for this panel yet.</div>';
+}
 document.querySelectorAll(".drillable").forEach(card=>{
-  card.addEventListener("click",()=>{ const d=DRILLS[card.dataset.drill]; if(d) openDrill(d[0],d[1]); });
+  const name=card.dataset.drill;
+  const title=(card.querySelector("h2")?.textContent||name).replace(/⤢/,"").trim();
+  card.addEventListener("click",()=>openDrill(title+" — live detail", body=>drillPanel(name, body)));
 });
 function clock(){$("clock").textContent=new Date().toLocaleTimeString([],{hour:"2-digit",minute:"2-digit",second:"2-digit"})+" · ET";}
 poll();setInterval(poll,2000);clock();setInterval(clock,1000);
