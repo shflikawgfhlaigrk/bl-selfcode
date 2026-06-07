@@ -342,6 +342,42 @@ def test_learn_on_miss_streams_grounded_answer(mem, fake_brain, monkeypatch):
     assert any(r.source == "turn" and "330 metres" in r.content for r in mem.store.rows.values())
 
 
+def test_learn_first_skips_the_cold_refuse_brain_call(mem, fake_brain, monkeypatch):
+    # Latency: a factual cold miss must NOT pay a refusal round-trip AND a grounded
+    # call — memory already said it can't answer, so fetch first and answer in ONE pass.
+    fake_brain.respond = lambda prompt: _EIFFEL if "330 metres" in prompt else brain.I_DONT_KNOW
+    fake_gather, _ = _stub_gather()
+    monkeypatch.setattr("utah.product.researcher.gather", fake_gather)
+
+    reply = core.tell(_EIFFEL_Q)
+
+    assert reply.source is ReplySource.LEARNED
+    assert len(fake_brain.calls) == 1  # one grounded brain pass, no certain cold refuse
+
+
+def test_learn_first_streaming_skips_the_cold_refuse_brain_call(mem, fake_brain, monkeypatch):
+    from tests.fakes import ScriptedStreamRunner
+
+    def _answer_lines(prompt: str) -> list[str]:
+        text = _EIFFEL if "330 metres" in prompt else brain.I_DONT_KNOW
+        return [
+            json.dumps({"type": "stream_event", "event": {
+                "type": "content_block_start", "index": 1, "content_block": {"type": "text"}}}),
+            json.dumps({"type": "stream_event", "event": {
+                "type": "content_block_delta", "index": 1,
+                "delta": {"type": "text_delta", "text": text}}}),
+        ]
+
+    runner = ScriptedStreamRunner(_answer_lines)
+    brain.set_stream_runner(runner)
+    fake_gather, _ = _stub_gather()
+    monkeypatch.setattr("utah.product.researcher.gather", fake_gather)
+
+    list(core.tell_stream(_EIFFEL_Q))
+
+    assert len(runner.calls) == 1  # one grounded stream pass, no certain cold refuse
+
+
 # --- CLI entrypoint -------------------------------------------------------------------
 
 def test_cli_remember(mem, fake_brain, capsys):

@@ -166,6 +166,38 @@ def _learn(text: str) -> str:
         return ""
 
 
+def _memory_grounds(text: str, hits: list) -> bool:
+    """True if the best recalled hit confidently AND on-entity answers *text* — the same
+    decision :func:`memory.answer` makes, computed on already-recalled hits so the
+    streaming path can choose learn-first WITHOUT a second recall. When this is False
+    for a factual question, the brain would refuse (no-fab), so we skip that round-trip
+    and learn straight away."""
+    if not hits:
+        return False
+    best = hits[0]
+    if not memory.passes_gate(getattr(best, "sim", 0.0), memory.lexical_overlap(text, best.content)):
+        return False
+    return memory.entity_grounds(text, best.content) is not False
+
+
+def _stream_brain_buffered(text: str, context: str) -> Iterator[tuple[str, str]]:
+    """Stream the brain with thinking live and the answer BUFFERED; return the answer
+    text via ``StopIteration.value`` (``""`` on :class:`BrainUnavailable`, logged). The
+    caller decides whether/how to commit the answer (e.g. learn on a refusal first)."""
+    parts: list[str] = []
+    try:
+        for channel, chunk in brain.think_stream(text, context):
+            if channel == "answer":
+                parts.append(chunk)
+            else:
+                yield (channel, chunk)
+    except BrainUnavailable as exc:
+        log.error("brain unavailable: %s", exc)
+        failures.record("brain", "unavailable", str(exc))
+        return ""
+    return "".join(parts).strip()
+
+
 def tell(text: str) -> Reply:
     """One full turn: recall -> ground -> reason -> remember."""
     text = (text or "").strip()
@@ -211,6 +243,23 @@ def tell(text: str) -> Reply:
             return Reply(text=local_text, source=ReplySource.LOCAL, hits=hits)
         # miss (refusal / Ollama down) → escalate to the brain below.
 
+    # 3.5 LEARN-FIRST: a factual question that memory could not confidently answer
+    #     (we are past the memory gate) WILL be refused by the brain (no-fab, cold) —
+    #     so skip that certain round-trip: fetch the web and answer in ONE grounded
+    #     pass. Falls through to the plain brain below if the web yields nothing or the
+    #     brain still can't answer it, so the honest "I don't know" is preserved.
+    if _learnable(text):
+        web = _learn(text)
+        if web:
+            try:
+                grounded = brain.think(text, _build_context(hits, web=web))
+            except BrainUnavailable:
+                grounded = ""
+            if grounded and not brain.is_refusal(grounded):
+                _CONVO.append((text, grounded))
+                _remember_turn(text, grounded)
+                return Reply(text=grounded, source=ReplySource.LEARNED, hits=hits)
+
     # 4. REASON: Claude CLI brain, grounded in the conversation thread + recall.
     try:
         reply_text = brain.think(text, context)
@@ -222,19 +271,6 @@ def tell(text: str) -> Reply:
             source=ReplySource.UNAVAILABLE,
             hits=hits,
         )
-
-    # 4.5 LEARN-ON-MISS: the brain refused a world-knowledge question → fetch the real
-    #     web text and re-reason over it in ONE grounded pass. (No-fab intact: the brain
-    #     answers only from the fetched CONTEXT. The answer is remembered → compounds.)
-    if brain.is_refusal(reply_text) and _learnable(text):
-        web = _learn(text)
-        if web:
-            relearned = brain.think(text, _build_context(hits, web=web))
-            if relearned and not brain.is_refusal(relearned):
-                _CONVO.append((text, relearned))
-                _remember_turn(text, relearned)
-                return Reply(text=relearned, source=ReplySource.LEARNED, hits=hits)
-            # the web didn't actually answer it → fall through to the honest refusal.
 
     # 5. REMEMBER (best-effort): store the exchange so future recall compounds.
     #    Refusals ("I don't know…", verbose or not) carry nothing durable → skip.
@@ -290,12 +326,31 @@ def tell_stream(text: str) -> Iterator[tuple[str, str]]:
             return
         # miss (refusal / Ollama down) → escalate to the brain below.
 
+    learnable = _learnable(text)
+
+    # 1.7 LEARN-FIRST — a factual question with NO entity-grounded memory hit WILL be
+    #     refused by the brain (no-fab, cold). Skip that certain round-trip: fetch the
+    #     web and stream a grounded answer directly (the cold-learn latency win for
+    #     chat/voice). Falls through to the normal brain pass if the web yields nothing.
+    if learnable and not _memory_grounds(text, hits):
+        web = _learn(text)
+        if web:
+            yield ("source", "learned")
+            yield ("thinking", "I don't have that yet — searching the web and learning it…\n")
+            grounded = yield from _stream_brain_buffered(text, _build_context(hits, web=web))
+            if grounded and not brain.is_refusal(grounded):
+                yield ("answer", grounded)
+                _CONVO.append((text, grounded))
+                _remember_turn(text, grounded)
+                yield ("done", grounded)
+                return
+            # the web didn't answer it → fall through to the honest brain pass below.
+
     # 2. REASON — stream the Claude CLI brain, grounded in the conversation + hits.
     #    Thinking always streams live (chat box reasons like Claude). For a factual
-    #    question the ANSWER is BUFFERED so a refusal can trigger learn-on-miss before
-    #    anything is committed to the box — no "I don't know" flash that we'd correct.
+    #    question the ANSWER is BUFFERED so a refusal can trigger the learn fallback
+    #    before anything is committed to the box — no "I don't know" flash to correct.
     yield ("source", "brain")
-    learnable = _learnable(text)
     parts: list[str] = []
     try:
         for channel, chunk in brain.think_stream(text, context):
@@ -315,23 +370,15 @@ def tell_stream(text: str) -> Iterator[tuple[str, str]]:
         return
     reply_text = "".join(parts).strip()
 
-    # 2.5 LEARN-ON-MISS — the brain REFUSED a factual question → find it on the web,
-    #     ground on the COMPLETE fresh evidence, and reason again. (No-fab intact.)
+    # 2.5 LEARN-ON-MISS fallback — a factual question that LOOKED memory-grounded but
+    #     the brain still refused (learn-first did not run). Find it on the web and
+    #     reason again. (No-fab intact; learn-first already covers the cold case.)
     if learnable and brain.is_refusal(reply_text):
         yield ("source", "learned")
         yield ("thinking", "I don't have that yet — searching the web and learning it…\n")
         web = _learn(text)
         if web:
-            relearned: list[str] = []
-            try:
-                for channel, chunk in brain.think_stream(text, _build_context(hits, web=web)):
-                    if channel == "answer":
-                        relearned.append(chunk)
-                    else:
-                        yield (channel, chunk)  # second-pass thinking live
-            except BrainUnavailable as exc:
-                log.error("brain unavailable on learn retry: %s", exc)
-            grounded = "".join(relearned).strip()
+            grounded = yield from _stream_brain_buffered(text, _build_context(hits, web=web))
             if grounded and not brain.is_refusal(grounded):
                 reply_text = grounded  # commit the grounded answer
         # else (nothing learned / retry refused) → the honest refusal stands.
