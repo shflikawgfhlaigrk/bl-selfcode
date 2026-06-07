@@ -18,7 +18,7 @@ import sys
 from collections import deque
 from typing import Iterator
 
-from utah import brain, config, failures, local, memory, router
+from utah import brain, config, failures, local, memory, router, social
 from utah.brain import BrainUnavailable
 from utah.embed import EmbedError
 from utah.memory import AdmissionDenied, MemoryUnavailable
@@ -205,6 +205,16 @@ def tell(text: str) -> Reply:
         return Reply(text="I didn't catch that.", source=ReplySource.UNAVAILABLE)
 
     route = router.route(text)
+
+    # 0. SOCIAL fast-path — a whole-message greeting/ack/thanks is answered by a
+    #    deterministic canned reply (no model, no memory write, no fabrication) in
+    #    microseconds. Before this, "hello" cost 9.6 s and "thanks" 23 s. Threaded for
+    #    follow-up continuity but never stored (a pleasantry is not a durable fact).
+    if route is Route.SOCIAL:
+        canned = social.reply(text)
+        if canned:
+            _CONVO.append((text, canned))
+            return Reply(text=canned, source=ReplySource.SOCIAL)
 
     # 1. CAPABILITY / KNOWLEDGE first — these are LIVE (weather, brief) or
     #    AUTHORITATIVE (curated packs). They must NOT be shadowed by a stale or

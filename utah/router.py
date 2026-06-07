@@ -21,6 +21,7 @@ from utah import config
 class Route(enum.Enum):
     """The tier a turn is routed to (cheapest-that-can-answer)."""
 
+    SOCIAL = "social"            # a greeting/ack/thanks — answered instantly, no model
     BRIEF = "brief"              # the morning-brief capability (live Postgres state)
     WEATHER = "weather"          # the weather capability (free API + cache)
     TIME = "time"                # the clock capability (time/date, grounded)
@@ -99,6 +100,13 @@ def route(text: str) -> Route:
     t = (text or "").strip()
     if not t:
         return Route.LOCAL_QUICK
+    # A whole-message greeting/ack/thanks → instant canned reply, no model. Anchored
+    # to the FULL message, so "hello, debug X" is not social (it falls through to the
+    # brain) and bare "yes"/"no"/"ok" stay normal turns (they continue a thread).
+    from utah import social
+
+    if social.matches(t):
+        return Route.SOCIAL
     if _ASK_CLAUDE.search(t):
         return Route.BRAIN
     if _AGENTIC.search(t):

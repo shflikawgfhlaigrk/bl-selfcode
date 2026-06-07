@@ -11,6 +11,28 @@ from utah.router import Route, route
 
 
 @pytest.mark.parametrize("text", [
+    "hi", "hello", "hey", "yo", "good morning", "hey ace",
+    "thanks", "thank you", "thx", "cheers",
+    "bye", "good night", "see ya",
+    "how are you", "what's up", "cool", "nice", "got it", "sounds good",
+])
+def test_social_intents_take_the_fast_path(text):
+    assert route(text) is Route.SOCIAL
+
+
+def test_social_only_matches_a_whole_social_message():
+    # A greeting glued to a real task is NOT social — it still routes to the handler.
+    assert route("hello can you debug the parser") is Route.BRAIN
+    assert route("good morning what's the weather") is Route.WEATHER
+
+
+@pytest.mark.parametrize("text", ["yes", "no", "ok", "okay", "yeah"])
+def test_ambiguous_answers_are_not_hijacked_by_social(text):
+    # Bare yes/no/ok usually CONTINUE a thread — they must not become a canned reply.
+    assert route(text) is not Route.SOCIAL
+
+
+@pytest.mark.parametrize("text", [
     "what's the weather",
     "weather in gulf shores",
     "is it raining right now?",
