@@ -49,6 +49,34 @@ class UtahApi {
     return const [];
   }
 
+  /// Stream a real brain turn from `/api/tell/stream` as ordered (channel, chunk)
+  /// events — the SAME SSE the web deck consumes. Channels: source | thinking |
+  /// answer | done. The brain reasons live; nothing is fabricated.
+  Stream<(String, String)> tellStream(String q) async* {
+    final uri = Uri.parse('$base/api/tell/stream?q=${Uri.encodeQueryComponent(q)}');
+    final req = http.Request('GET', uri)..headers['Accept'] = 'text/event-stream';
+    final resp = await _client.send(req);
+    if (resp.statusCode != 200) {
+      throw UtahApiException('tell stream → ${resp.statusCode}');
+    }
+    var event = 'message';
+    await for (final line
+        in resp.stream.transform(utf8.decoder).transform(const LineSplitter())) {
+      if (line.isEmpty) {
+        event = 'message';
+        continue;
+      }
+      if (line.startsWith('event:')) {
+        event = line.substring(6).trim();
+      } else if (line.startsWith('data:')) {
+        // Strip exactly one leading space after the colon (SSE), keep the rest.
+        final raw = line.substring(5);
+        final data = raw.startsWith(' ') ? raw.substring(1) : raw;
+        yield (event, data);
+      }
+    }
+  }
+
   void close() => _client.close();
 }
 

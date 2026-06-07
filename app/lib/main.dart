@@ -26,6 +26,16 @@ const _warn = Color(0xFFE7A93B);
 const _err = Color(0xFFE2554B);
 const _mono = 'monospace';
 
+/// One chat turn: the user's text plus the brain's streamed source/thinking/answer.
+class _Turn {
+  final String user;
+  String source = '';
+  String thinking = '';
+  String answer = '';
+  bool done = false;
+  _Turn({required this.user});
+}
+
 class UtahApp extends StatelessWidget {
   const UtahApp({super.key});
   @override
@@ -61,6 +71,12 @@ class _DeckState extends State<Deck> {
   List<Map<String, dynamic>> _rows = [];
   bool _rowsLoading = false;
 
+  // chat (streamed brain turns)
+  final TextEditingController _chatCtrl = TextEditingController();
+  final ScrollController _chatScroll = ScrollController();
+  final List<_Turn> _chat = [];
+  StreamSubscription<(String, String)>? _chatSub;
+
   @override
   void initState() {
     super.initState();
@@ -72,8 +88,50 @@ class _DeckState extends State<Deck> {
   @override
   void dispose() {
     _timer?.cancel();
+    _chatSub?.cancel();
+    _chatCtrl.dispose();
+    _chatScroll.dispose();
     _api.close();
     super.dispose();
+  }
+
+  // --- chat: stream a real brain turn ---
+  void _ask() {
+    final q = _chatCtrl.text.trim();
+    if (q.isEmpty) return;
+    _chatCtrl.clear();
+    _chatSub?.cancel();
+    final turn = _Turn(user: q);
+    setState(() => _chat.add(turn));
+    _scrollChat();
+    _chatSub = _api.tellStream(q).listen(
+      (e) {
+        final (channel, chunk) = e;
+        setState(() {
+          if (channel == 'source') {
+            turn.source = chunk;
+          } else if (channel == 'thinking') {
+            turn.thinking += chunk;
+          } else if (channel == 'answer') {
+            turn.answer += chunk;
+          }
+        });
+        _scrollChat();
+      },
+      onError: (err) => setState(() {
+        if (turn.answer.isEmpty) turn.answer = '[brain unreachable: $err]';
+        turn.done = true;
+      }),
+      onDone: () => setState(() => turn.done = true),
+    );
+  }
+
+  void _scrollChat() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_chatScroll.hasClients) {
+        _chatScroll.jumpTo(_chatScroll.position.maxScrollExtent);
+      }
+    });
   }
 
   Future<void> _poll() async {
@@ -122,30 +180,120 @@ class _DeckState extends State<Deck> {
     final up = _status != null;
     return Scaffold(
       body: SafeArea(
-        child: RefreshIndicator(
-          color: _gold,
-          onRefresh: () async {
-            await _poll();
-            await _loadTab(_tab);
-          },
-          child: ListView(
-            padding: const EdgeInsets.fromLTRB(14, 10, 14, 28),
-            children: [
-              _header(up),
-              const SizedBox(height: 14),
-              _core(up),
-              const SizedBox(height: 16),
-              _kpis(),
-              const SizedBox(height: 16),
-              _spine(up),
-              const SizedBox(height: 18),
-              _tabStrip(),
-              const SizedBox(height: 10),
-              _tabBody(),
-            ],
-          ),
+        child: Column(
+          children: [
+            Expanded(
+              child: RefreshIndicator(
+                color: _gold,
+                onRefresh: () async {
+                  await _poll();
+                  await _loadTab(_tab);
+                },
+                child: ListView(
+                  padding: const EdgeInsets.fromLTRB(14, 10, 14, 16),
+                  children: [
+                    _header(up),
+                    const SizedBox(height: 14),
+                    _core(up),
+                    const SizedBox(height: 16),
+                    _kpis(),
+                    const SizedBox(height: 16),
+                    _spine(up),
+                    const SizedBox(height: 18),
+                    _tabStrip(),
+                    const SizedBox(height: 10),
+                    _tabBody(),
+                  ],
+                ),
+              ),
+            ),
+            if (_chat.isNotEmpty) _chatPanel(),
+            _inputBar(),
+          ],
         ),
       ),
+    );
+  }
+
+  // --- chat conversation panel (fixed height, scrolls; never reflows the deck) ---
+  Widget _chatPanel() {
+    return Container(
+      constraints: const BoxConstraints(maxHeight: 240),
+      decoration: const BoxDecoration(
+        color: _panel2,
+        border: Border(top: BorderSide(color: _line)),
+      ),
+      child: ListView.builder(
+        controller: _chatScroll,
+        padding: const EdgeInsets.fromLTRB(14, 10, 14, 10),
+        itemCount: _chat.length,
+        itemBuilder: (_, i) {
+          final t = _chat[i];
+          return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Padding(
+              padding: const EdgeInsets.only(top: 8, bottom: 4),
+              child: Text('▸ ${t.user}', style: const TextStyle(color: Color(0xFFCFC9B6), fontSize: 13)),
+            ),
+            if (t.source.isNotEmpty)
+              Text('[${t.source}]', style: const TextStyle(color: _mut, fontSize: 9, letterSpacing: 1.5)),
+            if (t.thinking.isNotEmpty)
+              Container(
+                margin: const EdgeInsets.symmetric(vertical: 4),
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(color: const Color(0xFF15130D), borderRadius: BorderRadius.circular(7), border: Border.all(color: const Color(0xFF2A2620))),
+                child: Text(t.thinking, style: const TextStyle(color: Color(0xFF9A937C), fontSize: 11, height: 1.4)),
+              ),
+            Text(
+              t.answer.isEmpty && !t.done ? '…' : t.answer,
+              style: const TextStyle(color: Color(0xFFECE6D4), fontSize: 13, height: 1.5),
+            ),
+          ]);
+        },
+      ),
+    );
+  }
+
+  // --- command input (pinned at the very bottom) ---
+  Widget _inputBar() {
+    return Container(
+      decoration: const BoxDecoration(
+        border: Border(top: BorderSide(color: _line)),
+      ),
+      padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
+      child: Row(children: [
+        Expanded(
+          child: TextField(
+            controller: _chatCtrl,
+            style: const TextStyle(color: _txt, fontSize: 13, fontFamily: _mono),
+            cursorColor: _gold,
+            textInputAction: TextInputAction.send,
+            onSubmitted: (_) => _ask(),
+            decoration: InputDecoration(
+              isDense: true,
+              hintText: 'Ask UTAH…  (real reasoning · no fabrication)',
+              hintStyle: const TextStyle(color: _mut, fontSize: 12),
+              filled: true,
+              fillColor: _panel,
+              contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
+              enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(9), borderSide: const BorderSide(color: _line)),
+              focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(9), borderSide: const BorderSide(color: _gold)),
+            ),
+          ),
+        ),
+        const SizedBox(width: 10),
+        GestureDetector(
+          onTap: _ask,
+          child: Container(
+            height: 40,
+            padding: const EdgeInsets.symmetric(horizontal: 20),
+            decoration: BoxDecoration(
+              gradient: const LinearGradient(colors: [_gold2, _gold]),
+              borderRadius: BorderRadius.circular(9),
+            ),
+            child: const Center(child: Text('SEND', style: TextStyle(color: Color(0xFF1A1407), fontWeight: FontWeight.w700, letterSpacing: 1))),
+          ),
+        ),
+      ]),
     );
   }
 
