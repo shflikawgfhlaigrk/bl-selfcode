@@ -165,6 +165,20 @@ async def scout_leads(ctx: Context, params: object) -> dict:
         return await ctx.pool.run(_scout_leads_blocking)
 
 
+def _scout_frontier_blocking() -> dict:
+    from utah.product import leads
+    from utah.product.ledger import get_ledger
+
+    return leads.scout_frontier(get_ledger())
+
+
+async def scout_frontier(ctx: Context, params: object) -> dict:
+    """Capability: tile the metro frontier and scout each tile -> record_lead.
+    Ungated (free OSM); dedup at the ledger UNIQUE(name, region)."""
+    with ctx.governor.admission():
+        return await ctx.pool.run(_scout_frontier_blocking)
+
+
 def _scout_probate_blocking() -> dict:
     from utah.product import probate
     from utah.product.ledger import get_ledger
@@ -356,6 +370,39 @@ async def panel_detail(ctx: Context, params: object) -> dict:
     if panel == "voice":
         from utah.voice import state
         return {"panel": "voice", **state.status()}
+    if panel == "tasks":
+        from utah.product import tasks
+        with ctx.governor.admission():
+            return {"panel": "tasks", "rows": await ctx.pool.run(lambda: tasks.list_tasks("open", 50))}
+    if panel == "trackers":
+        from utah.product import trackers
+        with ctx.governor.admission():
+            return {"panel": "trackers", "rows": await ctx.pool.run(lambda: trackers.recent("journal", 30))}
+    if panel == "watchdog":
+        from utah import watchdog
+        with ctx.governor.admission():
+            return {"panel": "watchdog", **(await ctx.pool.run(watchdog.check))}
+    if panel == "trading":
+        from utah.product import trading
+        live = trading.feed_available()
+        return {"panel": "trading", "feed": "live" if live else "gated",
+                "note": "live WealthCharts feed" if live else "GATED: WealthCharts login (Michael)"}
+    if panel == "mail":
+        from utah import mail
+        rdy = mail.creds_available()
+        return {"panel": "mail", "status": "ready" if rdy else "gated",
+                "note": "ready" if rdy else "GATED: drop ~/.utah/secrets/gmail.json"}
+    if panel == "marketer":
+        from utah.product import marketer
+        return {"panel": "marketer",
+                "instagram": "ready" if marketer.creds_available("instagram") else "gated",
+                "tiktok": "ready" if marketer.creds_available("tiktok") else "gated",
+                "note": "GATED: IG/TikTok creds in ~/.utah/secrets/"}
+    if panel == "research":
+        from utah import memory
+        with ctx.governor.admission():
+            hits = await ctx.pool.run(lambda: memory.get_backend().list_memories(20, 0))
+        return {"panel": "research", "rows": hits, "note": "facts learned (web -> memory)"}
     return {"panel": panel, "rows": []}
 
 
@@ -369,6 +416,7 @@ REGISTRY = {
     "memory_entities": memory_entities,
     "ledger_snapshot": ledger_snapshot,
     "scout_leads": scout_leads,
+    "scout_frontier": scout_frontier,
     "scout_probate": scout_probate,
     "queue_outreach": queue_outreach,
     "research": research,

@@ -201,5 +201,24 @@ def scout(ledger, bbox: tuple[float, float, float, float] = COWETA_BBOX,
     return {"found": len(found), "new": new, "region": region}
 
 
+def scout_frontier(ledger, bbox=METRO_BBOX, region="Atlanta Metro Ring",
+                   fetch=None, max_tiles=12):
+    """Scale leads: tile a metro bbox, scout each tile, dedup at the ledger.
+
+    Each tile is a separate Overpass query (avoids the single-big-box timeout).
+    Dedup is the ledger's UNIQUE(name, region) — same lead across tiles counts once.
+    Returns {tiles_scanned, found, new, region}.
+    """
+    tiles = frontier_tiles(bbox)[:max_tiles]
+    found = 0
+    new = 0
+    for tile in tiles:
+        res = scout(ledger, bbox=tile, region=region, fetch=fetch)
+        found += res["found"]
+        new += res["new"]
+    return {"tiles_scanned": len(tiles), "found": found, "new": new, "region": region}
+
+
 __all__ = ["is_national_chain", "build_query", "find_no_website_smbs", "scout",
-           "frontier_tiles", "COWETA_BBOX", "METRO_BBOX", "TILE_STEP", "NATIONAL_CHAINS"]
+           "scout_frontier", "frontier_tiles", "COWETA_BBOX", "METRO_BBOX", "TILE_STEP",
+           "NATIONAL_CHAINS"]

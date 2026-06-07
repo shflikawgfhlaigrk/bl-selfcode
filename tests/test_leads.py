@@ -81,3 +81,26 @@ def test_frontier_tiles_handles_nondivisible_remainder():
     tiles = leads.frontier_tiles((33.0, -85.0, 33.5, -84.3), step=0.5)
     east_edges = sorted({t[3] for t in tiles})
     assert east_edges[-1] == -84.3  # last column clamps to parent east edge
+
+
+def test_scout_frontier_iterates_tiles_and_dedupes():
+    # two adjacent tiles; second returns a lead already seen in the first
+    import json as _json
+    calls = {"n": 0}
+    SAMPLE_A = _json.dumps({"elements": [{"tags": {"name": "Joe Plumbing", "shop": "trade"}}]})
+    SAMPLE_B = _json.dumps({"elements": [{"tags": {"name": "Joe Plumbing", "shop": "trade"}},
+                                         {"tags": {"name": "Acme Welding", "craft": "welder"}}]})
+
+    def fake_fetch(query):
+        calls["n"] += 1
+        return SAMPLE_A if calls["n"] == 1 else SAMPLE_B
+
+    lg = _RecLedger()
+    r = leads.scout_frontier(
+        lg, bbox=(33.0, -85.0, 33.0 + leads.TILE_STEP * 2, -85.0 + leads.TILE_STEP),
+        region="Test Metro", fetch=fake_fetch, max_tiles=2,
+    )
+    assert r["tiles_scanned"] == 2
+    assert r["found"] >= 3          # 1 + 2 across tiles
+    assert r["new"] == 2            # Joe deduped on the second tile
+    assert r["region"] == "Test Metro"
