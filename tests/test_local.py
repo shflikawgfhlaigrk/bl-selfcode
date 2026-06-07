@@ -55,6 +55,18 @@ def test_heavy_requests_native_thinking_quick_does_not():
     assert not seen["p"].get("think")  # quick model is not a reasoner
 
 
+def test_payload_caps_num_ctx_to_avoid_giant_kv_cache():
+    """Ollama defaults a model to its MAX context (deepseek/llama = 131072) which
+    allocates a huge KV cache — llama3.2:3b ballooned to ~17GB resident. Ace caps
+    input at BRAIN_CONTEXT_MAX_CHARS (~2K tokens), so we pin num_ctx small; the model
+    loads at a few GB, not tens."""
+    seen = {}
+    local.set_runner(lambda payload, timeout: seen.update(p=payload) or {"content": "x", "thinking": ""})
+    local.think("q", heavy=False)
+    assert seen["p"]["options"]["num_ctx"] == config.LOCAL_NUM_CTX
+    assert config.LOCAL_NUM_CTX <= 16384            # sane — never the 128K default
+
+
 def test_think_truncates_oversized_context():
     seen = {}
     local.set_runner(lambda payload, timeout: seen.update(p=payload) or {"content": "x", "thinking": ""})

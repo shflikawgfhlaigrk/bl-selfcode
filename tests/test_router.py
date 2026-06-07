@@ -93,13 +93,18 @@ def test_agentic_intents_go_to_brain(text):
     "analyze my last 10 trades",
     "compare deepseek and llama",
 ])
-def test_reasoning_intents_go_to_heavy_local(text):
-    assert route(text) is Route.LOCAL_HEAVY
+def test_reasoning_intents_go_to_the_cli_brain(text):
+    """Real reasoning goes to the Claude CLI, NOT the local 32B reasoner. The heavy
+    local model (deepseek-r1:32b) pinned ~54GB resident (128K KV cache) for a slower,
+    weaker answer than the CLI — so anything substantive uses the CLI; the local lane
+    is only for trivially-fast/deterministic turns."""
+    assert route(text) is Route.BRAIN
 
 
-def test_long_query_leans_heavy():
+def test_long_query_goes_to_the_cli_brain():
+    """A long (non-fast) query is substantive → the CLI brain, not the 32B reasoner."""
     long_q = " ".join(["word"] * config.ROUTER_HEAVY_MIN_WORDS) + " please"
-    assert route(long_q) is Route.LOCAL_HEAVY
+    assert route(long_q) is Route.BRAIN
 
 
 @pytest.mark.parametrize("text", [

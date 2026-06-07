@@ -108,7 +108,10 @@ def _payload(question: str, context: str, *, heavy: bool, stream: bool) -> dict:
         "stream": stream,
         "keep_alive": config.LOCAL_KEEP_ALIVE,
         "options": {
-            "num_predict": config.LOCAL_HEAVY_MAX_TOKENS if heavy else config.LOCAL_QUICK_MAX_TOKENS
+            "num_predict": config.LOCAL_HEAVY_MAX_TOKENS if heavy else config.LOCAL_QUICK_MAX_TOKENS,
+            # Cap the context window so Ollama doesn't allocate the model's 128K-token
+            # default KV cache (which ballooned llama3.2:3b to ~17GB resident).
+            "num_ctx": config.LOCAL_NUM_CTX,
         },
     }
     if heavy:

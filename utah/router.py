@@ -3,8 +3,9 @@
 Pure and table-driven (every mapping has a unit test). Order encodes priority:
 explicit "use the paid lane" and agentic work go straight to the brain; exact
 grounded capabilities (weather, brief) beat everything else because they are
-cheapest and exact; reasoning verbs or long queries lean to the heavy local tier;
-everything else is a quick local turn.
+cheapest and exact; reasoning verbs or long queries go to the Claude CLI brain
+(the local 32B reasoner is retired from routing — it pinned ~54GB resident for a
+slower, weaker answer); everything else is a quick local turn.
 
 The router is *allowed* to be imperfect: a local refusal or an unreachable Ollama
 escalates to the Claude CLI at runtime (:mod:`utah.core`), so a mis-route is only
@@ -26,9 +27,10 @@ class Route(enum.Enum):
     WEATHER = "weather"          # the weather capability (free API + cache)
     TIME = "time"                # the clock capability (time/date, grounded)
     KNOWLEDGE = "knowledge"      # a curated knowledge pack, verbatim (no model)
-    LOCAL_QUICK = "local_quick"  # llama3.2:3b — fast instruct, most quick things
-    LOCAL_HEAVY = "local_heavy"  # deepseek-r1:32b — the free resident reasoner
-    BRAIN = "brain"              # the Claude CLI (the one paid lane)
+    LOCAL_QUICK = "local_quick"  # llama3.2:3b — fast instruct, the trivially-fast lane
+    LOCAL_HEAVY = "local_heavy"  # deepseek-r1:32b — RETIRED from routing (~54GB resident);
+    #                              kept for compat, but reasoning now goes to BRAIN
+    BRAIN = "brain"              # the Claude CLI — anything substantive (the one paid lane)
 
 
 #: Explicit "use the paid lane."
@@ -149,6 +151,11 @@ def route(text: str) -> Route:
     # the local tiers so "what is Project Utah" / "what do you remember about X" ground.
     if _SELF_OR_PROJECT.search(t):
         return Route.BRAIN
+    # Anything SUBSTANTIVE — reasoning verbs (why/explain/analyze/compare) or a long
+    # query — goes to the Claude CLI brain, NOT the local 32B reasoner. deepseek-r1:32b
+    # pinned ~54GB resident (a 128K-token KV cache) to give a slower, weaker answer than
+    # the CLI. The local lane is reserved for trivially-fast turns; the heavy tier is
+    # retired from routing (its model loads only if something still asks for it).
     if _REASONING.search(t) or len(t.split()) >= config.ROUTER_HEAVY_MIN_WORDS:
-        return Route.LOCAL_HEAVY
+        return Route.BRAIN
     return Route.LOCAL_QUICK

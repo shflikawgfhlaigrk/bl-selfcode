@@ -220,19 +220,21 @@ def test_tell_stream_local_quick_answers_without_brain(monkeypatch):
     assert ("source", "brain") not in evs
 
 
-def test_tell_stream_heavy_streams_thinking_live(monkeypatch):
+def test_tell_stream_reasoning_goes_to_brain_streams_thinking_live(monkeypatch):
+    """A reasoning query streams the CLI brain's thinking live (chat 'reasoning like
+    Claude') — the local 32B reasoner is retired from routing, so local must not run."""
     monkeypatch.setattr(memory, "recall", lambda t, *a, **k: [])
     monkeypatch.setattr(memory, "store", lambda *a, **k: None)
-    chunks = [
-        {"content": "", "thinking": "weighing "},
-        {"content": "", "thinking": "options"},
-        {"content": "Because chop.", "thinking": ""},
-    ]
-    local.set_stream_runner(lambda payload, timeout: iter(chunks))
+    def _local_must_not_run(payload, timeout):
+        raise AssertionError("local must not run for reasoning")
+    local.set_stream_runner(_local_must_not_run)
+    brain.set_stream_runner(ScriptedStreamRunner(_brain_lines("weighing options", "Because chop.")))
     evs = list(core.tell_stream("why does the engine lose money on ranges"))
     thinking = "".join(t for k, t in evs if k == "thinking")
-    assert "weighing options" in thinking          # heavy reasoner's thinking shown live
-    assert ("answer", "Because chop.") in evs
+    answer = "".join(t for k, t in evs if k == "answer")
+    assert "weighing options" in thinking          # the CLI brain's thinking shown live
+    assert "Because chop." in answer               # answer streams live (char by char)
+    assert ("source", "brain") in evs
 
 
 def test_tell_stream_local_refusal_escalates_to_brain(monkeypatch):

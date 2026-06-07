@@ -149,14 +149,17 @@ def test_knowledge_pack_answers_verbatim_never_a_model(mem, fake_brain):
     assert all(r.source != "turn" for r in mem.store.rows.values())  # not stored as a turn
 
 
-def test_reasoning_query_uses_the_heavy_local_model(mem, fake_brain):
-    fake_brain.respond = AssertionError("brain must not be used")
-    seen = {}
-    local.set_runner(lambda payload, timeout: seen.update(model=payload["model"]) or {"content": "Because chop.", "thinking": "t"})
-    from utah import config
+def test_reasoning_query_goes_to_the_cli_brain_not_the_32b(mem, fake_brain):
+    """Reasoning ('why…') goes to the Claude CLI, NOT the local 32B reasoner — the heavy
+    local tier is retired from routing (it pinned ~54GB resident for a slower, weaker
+    answer). The local model must never be asked for a reasoning turn."""
+    def _local_must_not_run(payload, timeout):
+        raise AssertionError("local must not be used for reasoning")
+    local.set_runner(_local_must_not_run)
+    fake_brain.respond = "Because the range chops the entries."
     reply = core.tell("why does the engine lose money on ranges")
-    assert reply.source is ReplySource.LOCAL
-    assert seen["model"] == config.LOCAL_HEAVY_MODEL
+    assert reply.source is ReplySource.BRAIN
+    assert reply.text == "Because the range chops the entries."
 
 
 def test_local_refusal_escalates_to_the_brain(mem, fake_brain):

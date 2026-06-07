@@ -65,6 +65,11 @@ LOCAL_SKIP_LOAD_PER_CORE: float = float(os.environ.get("UTAH_LOCAL_SKIP_LOAD", "
 #: Answer-token caps (the heavy reasoner needs room for its thinking + answer).
 LOCAL_QUICK_MAX_TOKENS: int = int(os.environ.get("UTAH_LOCAL_QUICK_MAX", "512"))
 LOCAL_HEAVY_MAX_TOKENS: int = int(os.environ.get("UTAH_LOCAL_HEAVY_MAX", "1024"))
+#: Context-window size for local models. Ollama otherwise defaults to the model's MAX
+#: (131072 for llama3.2/deepseek), allocating a giant KV cache — llama3.2:3b ballooned
+#: to ~17GB resident on an unused 128K window. Ace caps input at BRAIN_CONTEXT_MAX_CHARS
+#: (~2K tokens) + a <=1024-token answer, so 8K is ample and the model loads at a few GB.
+LOCAL_NUM_CTX: int = int(os.environ.get("UTAH_LOCAL_NUM_CTX", "8192"))
 
 # --- router doctrine (the cheapest tier that can answer; misses escalate) -----
 #: At/above this word count, a non-capability query leans to the heavy local tier.
@@ -148,14 +153,14 @@ SUPERSEDE_SCAN: int = 8
 #: ``core`` = always-injected identity/creed; ``knowledge`` = curated reference
 #: corpus (the books) — recalled on demand, but never superseded or decayed.
 ALLOWED_SOURCES: frozenset[str] = frozenset(
-    {"user", "turn", "fact", "consolidation", "sensor", "core", "knowledge"}
+    {"user", "turn", "fact", "consolidation", "sensor", "core", "knowledge", "code"}
 )
 
 #: Authoritative sources a later write must NEVER supersede — curated ground truth
 #: (the identity creed and the reference library). A distinct fact about an evolving
 #: attribute still supersedes another fact (the Newman path); it just can't collapse
 #: these. Without this, loading the 13 "Think and Grow Rich" principles collapsed to 3.
-NEVER_SUPERSEDE_SOURCES: frozenset[str] = frozenset({"core", "knowledge"})
+NEVER_SUPERSEDE_SOURCES: frozenset[str] = frozenset({"core", "knowledge", "code"})
 
 #: Admission: reject degenerate content beyond this many characters
 #: (callers must chunk; a memory row is an atomic fact or one exchange).
@@ -179,7 +184,7 @@ ENTITY_BOOST: float = 0.5
 #: Curated sources (the identity creed + the reference library) are ~150 high-value
 #: rows competing against thousands of facts. Two mechanisms keep them reachable:
 #: a guaranteed retrieval lane and a small ranking prior.
-CURATED_SOURCES: frozenset[str] = frozenset({"core", "knowledge"})
+CURATED_SOURCES: frozenset[str] = frozenset({"core", "knowledge", "code"})
 
 #: Top-N nearest curated rows are ALWAYS merged into the candidate pool (as their own
 #: RRF lane), so they reach the reranker even when the general pool is swamped by the
