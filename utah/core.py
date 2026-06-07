@@ -83,7 +83,7 @@ def _capability_reply(text: str, route: Route, hits: list) -> Reply | None:
     if route is Route.WEATHER:
         from utah.product import weather
 
-        return Reply(text=weather.current(), source=ReplySource.CAPABILITY, hits=hits)
+        return Reply(text=weather.answer(text), source=ReplySource.CAPABILITY, hits=hits)
     if route is Route.TIME:
         from utah.product import clock
 
