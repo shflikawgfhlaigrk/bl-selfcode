@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  com.utah.mailcheck — Gmail SMTP auth watchdog (every 2h).
+
+  Runs utah.mail.verify() (login-only probe, no send). When auth is REJECTED (a dead/wrong
+  app-password — e.g. the old-Ace 'mthburnsbarber' h-typo that broke it before), it records a
+  deck failure AND pushes the phone immediately, so a broken app-password surfaces in minutes
+  instead of being discovered hours later. Silent when healthy. Gated (no creds) stays quiet.
+
+  Install:
+    cp ops/launchd/com.utah.mailcheck.plist ~/Library/LaunchAgents/
+    launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.utah.mailcheck.plist
+  Force-run now:  launchctl kickstart gui/$(id -u)/com.utah.mailcheck
+  Stop:           launchctl bootout  gui/$(id -u)/com.utah.mailcheck
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.utah.mailcheck</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/michaelbarber/.utah/venv/bin/python</string>
+    <string>-c</string>
+    <string>from utah import mail, failures; from utah.integrations import pushover; r=mail.verify(); (failures.record('mail','auth_check_failed', 'SMTP auth REJECTED — brief & outreach email down: '+str(r.get('error'))[:200]) or pushover.send('Gmail SMTP auth is REJECTED — brief & outreach email are down until you drop a fresh app-password in ~/.utah/secrets/gmail.json.', title='Utah: email auth DOWN', priority=0)) if (not r.get('ok') and not r.get('gated')) else None; print(r)</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>/Users/michaelbarber/Desktop/ProjectUtah</string>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PYTHONPATH</key>
+    <string>/Users/michaelbarber/Desktop/ProjectUtah</string>
+    <key>PYTHONUNBUFFERED</key>
+    <string>1</string>
+    <key>PATH</key>
+    <string>/Users/michaelbarber/.utah/venv/bin:/opt/homebrew/bin:/usr/local/bin:/Users/michaelbarber/.local/bin:/usr/bin:/bin</string>
+  </dict>
+
+  <key>StartInterval</key>
+  <integer>7200</integer>
+
+  <key>RunAtLoad</key>
+  <true/>
+
+  <key>StandardOutPath</key>
+  <string>/Users/michaelbarber/.utah/logs/mailcheck.log</string>
+
+  <key>StandardErrorPath</key>
+  <string>/Users/michaelbarber/.utah/logs/mailcheck.err</string>
+</dict>
+</plist>

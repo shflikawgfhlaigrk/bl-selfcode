@@ -38,31 +38,31 @@ def test_baseline_signal_reads_verifier():
     assert "state=green" in sig and "coverage" in sig.lower()
 
 
-def test_frontend_signal_renders_live_deck_and_grounds_in_the_dom():
-    """Ace uses its OWN browser: when the live deck renders, its real DOM markers are
-    summarized into the prompt so the brain targets a real frontend optimization."""
+def test_frontend_signal_renders_sim_twin_and_grounds_in_the_dom():
+    """Ace uses its OWN browser, but renders the quiescent /sim twin — the live deck's
+    persistent SSE stops headless --dump-dom settling, so force-dumping it every cycle just
+    spammed render_failed. The twin's real DOM markers still ground the brain."""
+    seen = []
     def fake_render(url):
-        assert url == sica_goals.DASHBOARD_URL
+        seen.append(url)
         return {"rendered": True, "html": "<div>DORMANT</div><div>GATED</div> awaiting events…",
                 "chars": 48, "url": url}
     sig = sica_goals.gather_signals("frontend", render_fn=fake_render)
-    assert "rendered its OWN live deck" in sig
+    assert seen == [sica_goals.DASHBOARD_SIM_URL]    # ONLY the twin — the live deck is not dumped
+    assert "structural twin" in sig
     assert "dormant" in sig.lower()                 # observed marker fed to the brain
     assert "live.html" in sig and "web.py" in sig    # the editable frontend surface
 
 
-def test_frontend_signal_falls_back_to_the_sim_twin_when_live_wont_settle():
-    """The real case: the live deck's persistent SSE stops --dump-dom settling, so the
-    browser renders the quiescent /sim twin instead and still grounds the brain — AND
-    reports the live render-hang as its own finding."""
+def test_frontend_signal_carries_the_live_deck_render_gap_note():
+    """No doomed live render each cycle, but the known live-deck SSE render gap is still
+    carried as a static note so the brain can target it."""
     def fake_render(url):
-        if url == sica_goals.DASHBOARD_URL:
-            return {"rendered": False, "error": "timed out after 8s", "url": url}
         assert url == sica_goals.DASHBOARD_SIM_URL
         return {"rendered": True, "html": "<div class='card'>panels here</div>", "url": url}
     sig = sica_goals.gather_signals("frontend", render_fn=fake_render)
-    assert "structural twin" in sig                  # rendered the /sim fallback
-    assert "persistent SSE" in sig                   # live render-hang flagged as a finding
+    assert "structural twin" in sig                  # rendered the /sim twin
+    assert "persistent SSE" in sig                   # live-deck render gap still flagged
     assert "live.html" in sig
 
 

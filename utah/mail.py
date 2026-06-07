@@ -44,6 +44,33 @@ def _gmail_send(to: str, subject: str, body: str) -> None:
         s.send_message(msg)
 
 
+def _gmail_login_probe() -> None:
+    """Auth-only probe: open SMTP/SSL, log in, hang up — proves the creds without sending."""
+    import json
+    import smtplib
+    import ssl
+
+    creds = json.loads(GMAIL_CREDS.read_text())
+    with smtplib.SMTP_SSL(creds.get("smtp_host", "smtp.gmail.com"), 465,
+                          context=ssl.create_default_context(), timeout=15) as s:
+        s.login(creds["from"], creds["app_password"])
+
+
+def verify(*, probe_fn=None) -> dict:
+    """Probe SMTP auth WITHOUT sending (login then disconnect). Returns
+    ``{ok, gated?, error?}``; never raises. The ``com.utah.mailcheck`` cron calls this and
+    pages the phone the instant auth breaks — so a dead app-password surfaces immediately
+    instead of being discovered hours later on the deck."""
+    if probe_fn is None and not creds_available():
+        return {"ok": False, "gated": True}
+    prober = probe_fn or _gmail_login_probe
+    try:
+        prober()
+        return {"ok": True, "gated": False}
+    except Exception as exc:  # noqa: BLE001
+        return {"ok": False, "gated": False, "error": str(exc)}
+
+
 def send(to: str, subject: str, body: str, *, send_fn=None) -> dict:
     """Send an email. With an injected ``send_fn`` or real creds present, it sends; with
     neither it documents the gate and returns ``sent=False`` (never fabricates). Never raises."""
@@ -62,4 +89,4 @@ def send(to: str, subject: str, body: str, *, send_fn=None) -> dict:
         return {"sent": False, "gated": False, "error": str(exc), "to": to}
 
 
-__all__ = ["send", "creds_available", "GMAIL_CREDS"]
+__all__ = ["send", "verify", "creds_available", "GMAIL_CREDS"]

@@ -32,3 +32,20 @@ def test_send_failure_is_documented():
     assert r["sent"] is False and r.get("gated") is False
     assert any("send_failed" in row[2] for row in store.rows)
     assert any("smtp auth failed" in row[3] for row in store.rows)
+
+
+def test_verify_ok_with_passing_probe():
+    r = mail.verify(probe_fn=lambda: None)            # login probe succeeds
+    assert r["ok"] is True and r["gated"] is False
+
+
+def test_verify_reports_auth_failure_without_raising():
+    r = mail.verify(probe_fn=lambda: (_ for _ in ()).throw(RuntimeError("535 BadCredentials")))
+    assert r["ok"] is False and r.get("gated") is False
+    assert "535" in r["error"]                         # surfaced, never raised
+
+
+def test_verify_gated_without_creds(monkeypatch):
+    monkeypatch.setattr(mail, "creds_available", lambda: False)
+    r = mail.verify()                                  # no probe, no creds
+    assert r["ok"] is False and r["gated"] is True

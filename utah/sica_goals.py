@@ -152,20 +152,18 @@ def _frontend_signal(render_fn=None) -> str:
         except Exception as exc:  # noqa: BLE001 — discovery is best-effort
             return {"rendered": False, "error": f"{type(exc).__name__}: {exc}", "url": url}
 
-    live = _try(DASHBOARD_URL, timeout=_LIVE_RENDER_TIMEOUT_S)
-    if live.get("rendered"):
-        return (f"Ace rendered its OWN live deck through headless Chrome at {DASHBOARD_URL} and "
-                f"observed: {_summarize_dom(live.get('html', ''))}. " + _FRONTEND_ASK)
-
-    # Live deck didn't settle (its persistent SSE keeps --dump-dom busy) — a real finding —
-    # so render the quiescent /sim twin to still ground the brain in the deck's real markup.
-    live_note = ("the live deck did not render headlessly (its persistent SSE connection keeps "
-                 "--dump-dom from settling — a real robustness gap worth fixing)")
+    # The LIVE deck (/) holds a persistent SSE connection, so headless --dump-dom never settles
+    # on it. Trying it every cycle only spawned a doomed 8s Chrome render and spammed
+    # browser/render_failed for a gap we ALREADY know about. Render the quiescent /sim twin (same
+    # panel structure) instead, and carry the known live-deck render gap as a static note so the
+    # brain can still target it — without manufacturing a failure each cycle.
+    live_note = ("the live deck (/) holds a persistent SSE connection, so headless --dump-dom "
+                 "won't settle on it — a known robustness gap worth fixing")
     twin = _try(DASHBOARD_SIM_URL)
     if twin.get("rendered"):
-        return (f"Ace's browser found that {live_note}; it then rendered the deck's structural "
-                f"twin {DASHBOARD_SIM_URL} and observed: {_summarize_dom(twin.get('html', ''))}. "
-                + _FRONTEND_ASK)
+        return (f"Ace rendered the deck's quiescent structural twin {DASHBOARD_SIM_URL} through "
+                f"headless Chrome and observed: {_summarize_dom(twin.get('html', ''))}. "
+                f"(Note: {live_note}.) " + _FRONTEND_ASK)
     why = "no headless Chrome installed" if twin.get("gated") else twin.get("error", "render failed")
     return (f"(browser frontend discovery unavailable: {why}; also {live_note}). Propose a small, "
             "safe frontend robustness fix to utah/interface/static/live.html or utah/interface/web.py.")
