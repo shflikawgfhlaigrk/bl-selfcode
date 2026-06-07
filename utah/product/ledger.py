@@ -204,9 +204,11 @@ class Ledger:
     #: output JSON-safe (ts as text, no raw datetime/Decimal) and stable.
     _RECENT = {
         "leads": ("leads",
-                  "id, name, kind, region, source, status, to_char(ts,'YYYY-MM-DD HH24:MI') ts"),
+                  "id, name, kind, region, source, status, contact, "
+                  "to_char(ts,'YYYY-MM-DD HH24:MI') ts"),
         "probate": ("probate",
-                    "id, case_name, county, status, to_char(ts,'YYYY-MM-DD HH24:MI') ts"),
+                    "id, case_name, county, status, arv::float8 arv, heir_contact, "
+                    "to_char(filed,'YYYY-MM-DD') filed, to_char(ts,'YYYY-MM-DD HH24:MI') ts"),
         "outreach": ("outreach_ledger",
                      "id, recipient, campaign, channel, to_char(ts,'YYYY-MM-DD HH24:MI') ts"),
         "fires": ("fires",

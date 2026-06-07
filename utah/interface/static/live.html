@@ -220,6 +220,52 @@
   .drill-tag{color:#1a1407;background:var(--gold2);border-radius:4px;padding:1px 6px;font-size:9px;letter-spacing:1px}
   .drill-meta{color:var(--mut);font-size:10px;margin-left:6px}
   .drill-content{color:#cfc8ad;white-space:pre-wrap;margin-top:3px;font-size:12px;line-height:1.45}
+
+  /* ---- plain-language transparency layer (everything explained in simple words) ---- */
+  /* drillable affordance — anything you can click to see the full detail */
+  .drillable{cursor:pointer;transition:background .12s ease,border-color .12s ease}
+  .drillable:hover{background:#15140d}
+  .sysrow.drillable:hover,.fn.drillable:hover{border-color:#2a2415}
+  .hint{color:#5b5647;font-size:8px;letter-spacing:1.2px;margin-left:7px}
+  .hstat .m.drillable{cursor:pointer;border-radius:7px;padding:2px 7px;margin:-2px -7px}
+  .hstat .m.drillable:hover{background:#15140d}
+  .item.drillable .nm::after{content:" ›";color:var(--gold);opacity:.5}
+
+  /* "what this is" explainer card at the top of every drill */
+  .xp{background:#0e1419;border:1px solid #15303a;border-radius:9px;padding:11px 13px;margin-bottom:13px}
+  .xp-what{color:#cfe6ef;font-size:13px;line-height:1.5}
+  .xp-line{color:#9fb6bf;font-size:11px;line-height:1.45;margin-top:7px}
+  .xp-line span{display:block;color:#5f94a8;font-size:8.5px;letter-spacing:1.6px;margin-bottom:1px}
+  .xp.gold{background:#15130b;border-color:#2c2614}.xp.gold .xp-what{color:#ecd9a8}
+  .xp.gold .xp-line{color:#b7ab86}.xp.gold .xp-line span{color:#9a833f}
+
+  /* big readable stat grid inside drills */
+  .dstats{display:grid;grid-template-columns:repeat(auto-fill,minmax(118px,1fr));gap:9px;margin-bottom:13px}
+  .dstat{background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:9px 11px}
+  .dstat b{color:var(--gold2);font-size:19px;display:block;line-height:1.1}
+  .dstat span{color:var(--mut);font-size:9px;letter-spacing:1.3px;display:block;margin-top:2px}
+  .dstat i{color:#6f6957;font-size:9.5px;font-style:normal;display:block;margin-top:4px;line-height:1.35}
+
+  /* plain health verdict line */
+  .verdict{display:flex;align-items:center;gap:9px;padding:9px 12px;border-radius:8px;margin-bottom:13px;font-size:12px}
+  .verdict.good{background:#0c1a12;border:1px solid #1c3a28;color:#9fe0bb}
+  .verdict.warn{background:#1a1407;border:1px solid #2c2614;color:#ecd9a8}
+  .verdict.bad{background:#1a0b09;border:1px solid #3a1714;color:#e8a59d}
+  .verdict .vled{width:9px;height:9px;border-radius:50%;flex:none}
+  .verdict.good .vled{background:var(--ok);box-shadow:0 0 9px var(--okglow)}
+  .verdict.warn .vled{background:var(--warn)}.verdict.bad .vled{background:var(--err)}
+
+  /* full record view (one lead / fact / etc. — every field, plain labels) */
+  .frec{display:grid;grid-template-columns:max-content 1fr;gap:6px 16px;align-items:baseline}
+  .frec dt{color:#5f94a8;font-size:9px;letter-spacing:1.4px;text-transform:uppercase;white-space:nowrap}
+  .frec dd{margin:0;color:#e8e3d4;font-size:12.5px;line-height:1.4;word-break:break-word}
+  .frec dd.big{color:var(--gold2);font-size:14px;font-weight:600}
+  .contact{display:flex;flex-wrap:wrap;gap:7px;margin-top:2px}
+  .cpill{display:inline-flex;align-items:center;gap:5px;background:#0c1a12;border:1px solid #1c3a28;border-radius:6px;padding:3px 9px;font-size:11.5px;color:#bfe6cf}
+  .cpill .ci{color:#5cae86;font-size:8.5px;letter-spacing:1px}
+  .nocontact{color:var(--mut);font-size:11px}
+  .cell-bar{height:5px;border-radius:3px;background:#1c1b24;overflow:hidden;margin-top:5px}
+  .cell-bar i{display:block;height:100%;background:linear-gradient(90deg,#caa24a,#ecd08a)}
 </style>
 </head>
 <body>
@@ -234,10 +280,10 @@
       <span class="chip"><span class="led" id="led-voice"></span>VOICE</span>
     </div>
     <div class="hstat">
-      <div class="m"><b id="h-load">—</b><span>CORE LOAD</span></div>
-      <div class="m"><b id="h-mem">—</b><span>MEMORY ROWS</span></div>
-      <div class="m"><b id="h-bus">—</b><span>BUS EVENTS</span></div>
-      <div class="m"><b id="h-gates">—</b><span>GATED</span></div>
+      <div class="m drillable" onclick="drill('governor')" title="click for CPU detail"><b id="h-load">—</b><span>CORE LOAD</span></div>
+      <div class="m drillable" onclick="drill('memory')" title="click for memory detail"><b id="h-mem">—</b><span>MEMORY ROWS</span></div>
+      <div class="m drillable" onclick="drill('bus')" title="click for event-bus detail"><b id="h-bus">—</b><span>BUS EVENTS</span></div>
+      <div class="m drillable" onclick="drillGated()" title="what's gated and why"><b id="h-gates">—</b><span>GATED</span></div>
       <div class="m" id="clock">—</div>
     </div>
   </header>
@@ -368,18 +414,18 @@ async function poll(){
   // ---- SYSTEM SPINE rows (real fields only; gated where no producer) ----
   const g=s.governor, p=s.pool, b=s.bus;
   const sys=[
-    {nm:"Local Core Daemon", big:fmtUp(s.uptime_s), sub:"unix · ~/.utah/run · v"+s.version, st:"UPTIME", led:"ok"},
-    {nm:"Event Bus", big:b.published, sub:b.subscribers+" subs · "+b.dropped+" dropped", st:"PUBLISHED", led:"ok"},
-    {nm:"Worker Pool", big:p.borrowed+"/"+p.limit, sub:p.available+" available", st:"BORROWED", led:p.borrowed>0?"warn":"ok"},
-    {nm:"Governor", big:g.load_per_core, sub:"load1 "+g.load1+" · "+g.ncpu+" cores", st:"LOAD/CORE", led:g.load_per_core>1.2?"warn":"ok"},
-    {nm:"Memory Forge", big:(m&&m.live!=null)?m.live:"—", sub:m?("total "+m.total+" · "+m.entities+" ents"):"recall · consolidation", st:"LIVE FACTS", led:m?"ok":"off"},
-    {nm:"Voice Loop", big:(voice.status||"—").toUpperCase(), sub:voice.segments!=null?(voice.segments+" segs · wake-armed"):"vad · stt · brain · tts", st:"PIPELINE", led:vlive?"ok":(voice.status?"warn":"off")},
-    {nm:"Risk Firewall", big:"GATED", sub:"trade kernel · pre-exec", st:"NO PRODUCER", led:"off", gated:true},
-    {nm:"Sync & Ingest", big:"GATED", sub:"wealthcharts rx · cdp", st:"NO PRODUCER", led:"off", gated:true},
+    {nm:"Local Core Daemon", drill:"daemon", big:fmtUp(s.uptime_s), sub:"unix · ~/.utah/run · v"+s.version, st:"UPTIME", led:"ok"},
+    {nm:"Event Bus", drill:"bus", big:b.published, sub:b.subscribers+" subs · "+b.dropped+" dropped", st:"PUBLISHED", led:"ok"},
+    {nm:"Worker Pool", drill:"pool", big:p.borrowed+"/"+p.limit, sub:p.available+" available", st:"BORROWED", led:p.borrowed>0?"warn":"ok"},
+    {nm:"Governor", drill:"governor", big:g.load_per_core, sub:"load1 "+g.load1+" · "+g.ncpu+" cores", st:"LOAD/CORE", led:g.load_per_core>1.2?"warn":"ok"},
+    {nm:"Memory Forge", drill:"memory", big:(m&&m.live!=null)?m.live:"—", sub:m?("total "+m.total+" · "+m.entities+" ents"):"recall · consolidation", st:"LIVE FACTS", led:m?"ok":"off"},
+    {nm:"Voice Loop", drill:"voice", big:(voice.status||"—").toUpperCase(), sub:voice.segments!=null?(voice.segments+" segs · wake-armed"):"vad · stt · brain · tts", st:"PIPELINE", led:vlive?"ok":(voice.status?"warn":"off")},
+    {nm:"Risk Firewall", drill:"risk", big:"GATED", sub:"trade kernel · pre-exec", st:"NO PRODUCER", led:"off", gated:true},
+    {nm:"Sync & Ingest", drill:"sync", big:"GATED", sub:"wealthcharts rx · cdp", st:"NO PRODUCER", led:"off", gated:true},
   ];
   $("spine").innerHTML=sys.map(r=>
-    `<div class="sysrow${r.gated?' gated':''}"><span class="led ${r.led}"></span>`+
-    `<div><div class="nm">${esc(r.nm)}</div><div class="sub">${esc(r.sub)}</div></div>`+
+    `<div class="sysrow drillable${r.gated?' gated':''}" onclick="drill('${r.drill}')"><span class="led ${r.led}"></span>`+
+    `<div><div class="nm">${esc(r.nm)}<span class="hint">TAP</span></div><div class="sub">${esc(r.sub)}</div></div>`+
     `<div><div class="big">${esc(r.big)}</div><div class="st">${esc(r.st)}</div></div></div>`).join("");
   // core orb reflects voice
   const orb=document.querySelector(".orb"); if(orb) orb.classList.toggle("listen", vlive && !orb.classList.contains("heard"));
@@ -396,18 +442,18 @@ function renderFns(s,m,st,voice){
   const audit=(st&&st.audit&&st.audit.length)||0;
   const lead=(st&&st.ledger&&st.ledger.leads)||0;
   const fns=[
-    {nm:"Voice Loop", sub:"wake · barge-in · TTS", st:voice.status?voice.status.toUpperCase():"DOWN", cls:(voice.status==="listening")?"":(voice.status?"warn":"off")},
-    {nm:"Agent Mesh", sub:up?(s.pool.borrowed+" running · "+s.pool.available+" ready"):"worker pool", st:up?(s.pool.borrowed>0?"RUNNING":"READY"):"DOWN", cls:up?"":"off"},
-    {nm:"Memory Holograph", sub:m?(m.entities+" entities · graph"):"pgvector · hnsw", st:m?"INDEXED":"DOWN", cls:m?"":"off"},
-    {nm:"Black Box Ledger", sub:audit+" audit events", st:up?"RECORDING":"DOWN", cls:up?"":"off"},
-    {nm:"Sensor Array", sub:up?(s.bus.subscribers+" subscribers"):"world-model bus", st:up?"RX":"DOWN", cls:up?"":"off"},
+    {nm:"Voice Loop", sub:"wake · barge-in · TTS", st:voice.status?voice.status.toUpperCase():"DOWN", cls:(voice.status==="listening")?"":(voice.status?"warn":"off"), click:"drill('voice')"},
+    {nm:"Agent Mesh", sub:up?(s.pool.borrowed+" running · "+s.pool.available+" ready"):"worker pool", st:up?(s.pool.borrowed>0?"RUNNING":"READY"):"DOWN", cls:up?"":"off", click:"drill('agents')"},
+    {nm:"Memory Holograph", sub:m?(m.entities+" entities · graph"):"pgvector · hnsw", st:m?"INDEXED":"DOWN", cls:m?"":"off", click:"drill('memory')"},
+    {nm:"Black Box Ledger", sub:audit+" audit events", st:up?"RECORDING":"DOWN", cls:up?"":"off", click:"drill('audit')"},
+    {nm:"Sensor Array", sub:up?(s.bus.subscribers+" subscribers"):"world-model bus", st:up?"RX":"DOWN", cls:up?"":"off", click:"drill('sensor')"},
     {nm:"Trading Engine Lab", sub:"paper / sim · fires "+((st&&st.ledger&&st.ledger.fires)||0), st:"GATED", cls:"dim", gated:true, click:"openLab()"},
-    {nm:"Risk / Threat Kernel", sub:"pre-exec gate", st:"GATED", cls:"dim", gated:true},
-    {nm:"Self-Coding Bay", sub:"bounded autonomy", st:"LOCKED · APPROVAL", cls:"dim", gated:true},
+    {nm:"Risk / Threat Kernel", sub:"pre-exec gate", st:"GATED", cls:"dim", gated:true, click:"drill('risk')"},
+    {nm:"Self-Coding Bay", sub:"bounded autonomy", st:"LOCKED · APPROVAL", cls:"dim", gated:true, click:"openConsole('selfcode','🤖 SELF-CODING BAY')"},
   ];
   $("fns").innerHTML=fns.map(f=>
-    `<div class="fn${f.gated?' gated':''}"${f.click?` onclick="${f.click}" style="cursor:pointer"`:""}><span class="led ${f.cls==='off'?'off':(f.cls==='warn'?'warn':(f.cls==='dim'?'':'ok'))}"></span>`+
-    `<div><div class="nm">${esc(f.nm)}</div><div class="sub">${esc(f.sub)}</div></div>`+
+    `<div class="fn drillable${f.gated?' gated':''}"${f.click?` onclick="${f.click}"`:""}><span class="led ${f.cls==='off'?'off':(f.cls==='warn'?'warn':(f.cls==='dim'?'':'ok'))}"></span>`+
+    `<div><div class="nm">${esc(f.nm)}${f.click?'<span class="hint">TAP</span>':""}</div><div class="sub">${esc(f.sub)}</div></div>`+
     `<div class="st ${f.cls}">${esc(f.st)}</div></div>`).join("");
   $("fn-count").textContent=fns.filter(f=>!f.gated).length+" LIVE";
   $("h-gates").textContent=fns.filter(f=>f.gated).length;
@@ -418,6 +464,7 @@ const TABS=[
   {id:"overview", label:"OVERVIEW"},
   {id:"memory",   label:"MEMORY"},
   {id:"leads",    label:"LEADS"},
+  {id:"probate",  label:"PROBATE"},
   {id:"outreach", label:"OUTREACH"},
   {id:"research", label:"RESEARCH"},
   {id:"audit",    label:"AUDIT"},
@@ -433,15 +480,32 @@ function renderTabs(){
   document.querySelectorAll(".dtab").forEach(b=>b.onclick=()=>{curTab=b.dataset.tab;renderTabs();loadDash(curTab);});
 }
 function metaOf(r){return [r.kind,r.region,r.county,r.campaign,r.channel,r.source,r.status,r.direction,r.ts].filter(Boolean).join(" · ");}
-function itemRows(arr,nameKey){
+/* plain-English one-liner shown at the top of every center tab */
+const TAB_INTRO={
+  overview:"A quick snapshot of everything. Tap any tile or row for the full story.",
+  memory:"Everything Utah has learned and remembers. Tap a fact to read it in full.",
+  leads:"Local businesses with no website — your prospects. Tap one for its type, location and contact info.",
+  outreach:"Everyone Utah has already messaged. It never contacts the same prospect twice.",
+  research:"Facts Utah taught itself from the web. Tap one to read it.",
+  audit:"Every real failure, recorded plainly. An empty list means nothing has broken.",
+  system:"Your Mac's CPU and Utah's worker team, right now.",
+  voice:"Utah's hands-free ears and mouth — all on-device."};
+let _tabRows={};   // remembers the rows behind the open tab so a click can resolve the full record
+function intro(tab){ return TAB_INTRO[tab]?`<div class="xp" style="margin-bottom:10px"><div class="xp-what" style="font-size:12px">${esc(TAB_INTRO[tab])}</div></div>`:""; }
+function itemRows(arr,tab){
   if(!arr||!arr.length) return '<div class="empty">DORMANT — 0 ROWS (NO PRODUCER WIRED)</div>';
-  return arr.map(r=>{
-    const nm=r[nameKey]||r.name||r.case_name||r.recipient||r.title||("#"+(r.id||""));
+  _tabRows[tab]=arr;
+  return arr.map((r,i)=>{
+    const nm=r.name||r.case_name||r.recipient||r.title||("#"+(r.id||""));
     const meta=metaOf(r);
     const body=r.content?`<div class="body">${esc(r.content)}</div>`:"";
-    return `<div class="item"><div class="h"><span class="nm">${esc(nm)}</span><span class="meta">${esc(meta)}</span></div>${body}</div>`;
+    const cc=(r.contact&&Object.keys(r.contact).length)?'<div class="contact" style="margin-top:5px">'+contactBlock(r.contact)+'</div>':"";
+    return `<div class="item drillable" data-row="${i}" data-tab="${tab}"><div class="h"><span class="nm">${esc(nm)}</span><span class="meta">${esc(meta)}</span></div>${cc}${body}</div>`;
   }).join("");
 }
+/* after a tab renders, wire each row to open its full record in the drill drawer */
+function wireRows(){ document.querySelectorAll("#dbody .item[data-row]").forEach(el=>el.onclick=()=>{
+  const arr=_tabRows[el.dataset.tab]; if(arr) recordDrill(el.dataset.tab, arr[+el.dataset.row]); }); }
 async function getPanel(name){ const d=await fetch("/panel/"+name).then(r=>r.json()); if(d.error)throw new Error(d.error); return d; }
 async function loadDash(tab, quiet){
   const body=$("dbody"); if(!quiet) body.innerHTML='<div class="empty">LOADING…</div>';
@@ -451,30 +515,30 @@ async function loadDash(tab, quiet){
       if(!s){ body.innerHTML='<div class="empty">CORE OFFLINE</div>'; return; }
       const L=(st&&st.ledger)||{}; const voice=(st&&st.voice)||{};
       const kpi=[
-        ["MEMORY · LIVE", m?m.live:"—"], ["ENTITIES", m?m.entities:"—"],
-        ["LEADS", L.leads!=null?L.leads:"—"], ["OUTREACH", L.outreach_ledger!=null?L.outreach_ledger:"—"],
-        ["BUS EVENTS", s.bus.published], ["CPU CORES", s.governor.ncpu],
-        ["LOAD / CORE", s.governor.load_per_core], ["VOICE", (voice.status||"—").toUpperCase()],
+        ["MEMORY · LIVE", m?m.live:"—","memory"], ["ENTITIES", m?m.entities:"—","memory"],
+        ["LEADS", L.leads!=null?L.leads:"—","leads"], ["OUTREACH", L.outreach_ledger!=null?L.outreach_ledger:"—","outreach"],
+        ["BUS EVENTS", s.bus.published,"bus"], ["CPU CORES", s.governor.ncpu,"governor"],
+        ["LOAD / CORE", s.governor.load_per_core,"governor"], ["VOICE", (voice.status||"—").toUpperCase(),"voice"],
       ];
-      let h='<div class="kpis">'+kpi.map(k=>`<div class="kpi"><b>${esc(k[1])}</b><span>${esc(k[0])}</span></div>`).join("")+"</div>";
-      h+='<div class="drill-sec">RECENT AUDIT</div>';
+      let h=intro("overview")+'<div class="kpis">'+kpi.map(k=>`<div class="kpi drillable" onclick="drill('${k[2]}')"><b>${esc(k[1])}</b><span>${esc(k[0])}</span></div>`).join("")+"</div>";
+      h+='<div class="drill-sec">RECENT ACTIVITY (BLACK-BOX LEDGER) — tap for all</div>';
       const aud=(st&&st.audit)||[];
-      h+= aud.length? aud.slice(0,8).map(a=>`<div class="item"><div class="body" style="-webkit-line-clamp:2">${esc(a)}</div></div>`).join("") : '<div class="empty">no events</div>';
+      h+= aud.length? `<div onclick="drill('audit')" style="cursor:pointer">`+aud.slice(0,8).map(a=>`<div class="item"><div class="body" style="-webkit-line-clamp:2">${esc(a)}</div></div>`).join("")+`</div>` : '<div class="verdict good"><span class="vled"></span>Clean — nothing has broken.</div>';
       body.innerHTML=h; return;
     }
     if(tab==="memory"){
-      const d=await getPanel("memory"); tabCounts.memory=(d.rows||[]).length;
-      let h="";
+      const d=await getPanel("memory"); tabCounts.memory=(d.rows||[]).length; _tabRows.memory=d.rows||[];
+      let h=intro("memory");
       if(d.counts) h+='<div class="kpis">'+Object.entries(d.counts).map(([k,v])=>`<div class="kpi"><b>${esc(v)}</b><span>${esc(k)}</span></div>`).join("")+"</div>";
-      if(d.entities&&d.entities.length) h+='<div class="drill-sec">'+d.entities.length+' TOP ENTITIES</div><div class="ents">'+d.entities.slice(0,40).map(e=>`<span class="ent">${esc(e.name)} <b>${esc(e.mentions)}</b></span>`).join("")+"</div>";
-      h+='<div class="drill-sec">'+(d.rows||[]).length+' RECENT FACTS</div>';
-      h+= (d.rows||[]).map(r=>`<div class="item"><div class="h"><span class="pill">${esc(r.source||"fact")}</span><span class="meta">#${esc(r.id)} · conf ${esc(r.confidence)} · ${esc(r.ts||"")}</span></div><div class="body">${esc(r.content)}</div></div>`).join("");
-      body.innerHTML=h||'<div class="empty">DORMANT</div>'; renderTabs(); return;
+      if(d.entities&&d.entities.length) h+='<div class="drill-sec">'+d.entities.length+' TOP ENTITIES (THINGS UTAH TRACKS)</div><div class="ents">'+d.entities.slice(0,40).map(e=>`<span class="ent">${esc(e.name)} <b>${esc(e.mentions)}</b></span>`).join("")+"</div>";
+      h+='<div class="drill-sec">'+(d.rows||[]).length+' RECENT FACTS — tap to read in full</div>';
+      h+= (d.rows||[]).map((r,i)=>`<div class="item drillable" data-row="${i}" data-tab="memory"><div class="h"><span class="pill">${esc(r.source||"fact")}</span><span class="meta">#${esc(r.id)} · conf ${esc(r.confidence)} · ${esc(r.ts||"")}</span></div><div class="body">${esc(r.content)}</div></div>`).join("");
+      body.innerHTML=h||'<div class="empty">DORMANT</div>'; renderTabs(); wireRows(); return;
     }
     if(tab==="system"){
       const [pool,gov]=await Promise.all([getPanel("pool"),getPanel("governor")]);
-      let h='<div class="kpis">'+
-        `<div class="kpi"><b>${esc(gov.load1)}</b><span>LOAD (1m)</span></div>`+
+      let h=intro("system")+'<div class="kpis">'+
+        `<div class="kpi drillable" onclick="drill('governor')"><b>${esc(gov.load1)}</b><span>LOAD (1m)</span></div>`+
         `<div class="kpi"><b>${esc(gov.load_per_core)}</b><span>PER CORE</span></div>`+
         `<div class="kpi"><b>${esc(pool.busy)}/${esc(pool.limit)}</b><span>POOL BUSY</span></div>`+
         `<div class="kpi"><b>${esc(gov.ncpu)}</b><span>CORES</span></div></div>`;
@@ -485,8 +549,8 @@ async function loadDash(tab, quiet){
     }
     if(tab==="voice"){
       const v=await getPanel("voice");
-      let h='<div class="kpis">'+
-        `<div class="kpi"><b>${esc((v.status||"—").toUpperCase())}</b><span>STATE</span></div>`+
+      let h=intro("voice")+'<div class="kpis">'+
+        `<div class="kpi drillable" onclick="drill('voice')"><b>${esc((v.status||"—").toUpperCase())}</b><span>STATE</span></div>`+
         `<div class="kpi"><b>${esc(v.segments)}</b><span>SEGMENTS</span></div>`+
         `<div class="kpi"><b>${v.listening?"YES":"no"}</b><span>LISTENING</span></div>`+
         `<div class="kpi"><b>${v.speaking?"YES":"no"}</b><span>SPEAKING</span></div></div>`;
@@ -497,14 +561,16 @@ async function loadDash(tab, quiet){
     // generic row panels: leads / outreach / research / audit
     const d=await getPanel(tab);
     const arr=d.rows||[]; tabCounts[tab]=arr.length;
-    let h="";
+    let h=intro(tab);
     if(d.note) h+=`<div class="rail-title" style="margin-bottom:8px">${esc(d.note)}</div>`;
     if(tab==="audit"){
-      h+= arr.length? arr.map(a=>`<div class="item"><div class="body" style="-webkit-line-clamp:2">${esc(typeof a==="object"?(a.detail||JSON.stringify(a)):a)}</div></div>`).join("") : '<div class="empty">no events</div>';
+      h+= arr.length? arr.map(a=>{const o=typeof a==="object"?a:{detail:a};
+        return `<div class="item"><div class="h"><span class="pill">${esc((o.source||"")+(o.kind?"/"+o.kind:""))}</span><span class="meta">${esc(o.ts||"")}</span></div><div class="body" style="-webkit-line-clamp:2">${esc(o.detail||JSON.stringify(o))}</div></div>`;}).join("")
+        : '<div class="empty">no failures — nothing has broken</div>';
     } else {
-      h+=itemRows(arr, tab==="leads"?"name":(tab==="outreach"?"recipient":"name"));
+      h+=itemRows(arr, tab);
     }
-    body.innerHTML=h; renderTabs();
+    body.innerHTML=h; renderTabs(); wireRows();
   }catch(e){ body.innerHTML='<div class="empty">unavailable — '+esc(String(e.message||e))+'</div>'; }
 }
 
@@ -627,6 +693,251 @@ function drillClose(){ $("drill").classList.remove("open"); $("drill-body").inne
 function drillOpen(title,html){ $("drill-title").textContent=title; $("drill-body").innerHTML=html; $("drill").classList.add("open"); }
 function toggleMenu(){ $("menu").classList.toggle("open"); }
 function closeMenu(){ $("menu").classList.remove("open"); }
+
+/* ============================ PLAIN-LANGUAGE TRANSPARENCY LAYER ============================ */
+/* Every panel, number and row on this deck can be opened to its FULL underlying detail,
+   each explained in simple words: WHAT it is, WHY it matters, HOW to read the number.
+   Nothing is just a bare figure anymore — click anything and Utah tells you the truth. */
+const EXPLAIN={
+  daemon:{what:"This is Utah itself — the always-on program living on your Mac. Everything else (memory, voice, leads) runs inside it.",
+    why:"If this is up, Utah is awake and working with zero dependence on the cloud. If it dies, the supervisor restarts it automatically.",
+    read:"Uptime = how long it has run without crashing. Bigger is healthier."},
+  bus:{what:"The internal messenger. When any part of Utah does something (finds a lead, hears your voice), it shouts it on the bus and every interested part listens.",
+    why:"It's how the screen you're looking at stays live — events flow over the bus to this deck in real time.",
+    read:"Published = total messages sent. Subscribers = how many parts are listening. Dropped should stay at 0."},
+  pool:{what:"Utah's team of workers. Heavy jobs (thinking, database reads) are handed to a worker so the main program never freezes.",
+    why:"It's why Utah can answer you and scout leads at the same time without stalling.",
+    read:"Busy/total = workers in use right now. If busy is near the limit for long, Utah is under heavy load."},
+  governor:{what:"The traffic cop for your Mac's CPU. It refuses new heavy work when the machine is already maxed out, instead of piling on and freezing.",
+    why:"This is what stops Utah from melting your laptop when many things run at once.",
+    read:"Load-per-core under ~1.0 is relaxed; 1–2 is busy; over 2 means the CPU is oversubscribed (other apps are competing too)."},
+  memory:{what:"Utah's long-term memory — every fact it has learned, stored on your Mac and searchable by meaning, not just keywords.",
+    why:"It's why Utah remembers Project Utah, your preferences, and what it researched yesterday across restarts.",
+    read:"Live = facts active right now. Entities = distinct people/things it tracks. Total counts older/superseded rows too."},
+  voice:{what:"The ears and mouth. It listens for the wake word, turns your speech to text, asks the brain, and speaks the answer back — all on-device.",
+    why:"Hands-free control. No audio ever leaves your Mac.",
+    read:"LISTENING = armed and waiting for 'ace'. Segments = chunks of speech it has processed. Last transcript = what it most recently heard."},
+  leads:{what:"Real local businesses with NO website — your prospect list. Pulled live from OpenStreetMap, deduplicated, with contact details where available.",
+    why:"These are people you can sell a website/marketing to. The ones with a phone or address are ready to contact today.",
+    read:"Each row is one business. Click it to see its type, exact location and contact info. 'New' = not yet contacted."},
+  outreach:{what:"The record of who Utah has already messaged, and how. It will never message the same prospect twice for the same campaign.",
+    why:"Protects your reputation and stays CAN-SPAM compliant — suppression is built into the database, not bolted on.",
+    read:"Each row = one message sent. Recipient + campaign + channel + when."},
+  probate:{what:"Probate real-estate cases — inherited properties that often sell below market — pulled statewide from county filings.",
+    why:"A second income lane: motivated heirs, discounted homes you can approach early.",
+    read:"Each row = one case: the estate name, county, filing date, and estimated after-repair value (ARV) where known."},
+  research:{what:"Facts Utah taught itself. When it doesn't know something, it reads the web, grounds the answer, and saves it here forever.",
+    why:"Utah gets smarter the more you use it — every gap it fills is permanent.",
+    read:"Each row = one learned fact, with where it came from."},
+  audit:{what:"The black-box flight recorder. Every real failure anywhere in Utah is written here, plainly, so nothing fails silently.",
+    why:"If something breaks, it shows up here instead of disappearing. An empty list is a healthy Utah.",
+    read:"Each line = source / what went wrong / when. Fewer is better; zero is ideal."},
+  risk:{what:"A pre-execution safety gate for trading — it will vet every trade before money moves.",
+    why:"Protects capital once live trading is on.",
+    read:"GATED = not built yet. It lights up when the trading feed and risk kernel land."},
+  sync:{what:"The live market-data intake (WealthCharts) and web ingestion that feeds the trading engines.",
+    why:"No engine can trade without a price feed; this is that pipe.",
+    read:"GATED = the WealthCharts feed isn't connected yet. Lands when the feed is wired."},
+  selfcode:{what:"Utah's ability to improve its OWN code. It writes a change on an isolated copy, runs the full test suite, scores it, and only the best survive.",
+    why:"This is how Utah compounds — it fixes and extends itself, safely, behind a kill-switch.",
+    read:"Propose-only = writes a branch for you to merge. Armed = top-tier green changes merge automatically."},
+  trading:{what:"The lab of trading engines (paper/simulation for now). Each engine is a different strategy.",
+    why:"Tests strategies on real candles without risking money, until proven.",
+    read:"GATED until the WealthCharts feed is live. Fires = trades an engine has taken."},
+  browser:{what:"A headless Chrome Utah can drive to read JavaScript-heavy pages the simple fetcher can't.",
+    why:"Lets research and scouting reach modern sites that need a real browser.",
+    read:"READY = Chrome found and usable. GATED = no Chrome installed."},
+  agents:{what:"The same worker pool, seen as Utah's capabilities running concurrently (leads, research, brief, etc.).",
+    why:"Shows how many jobs Utah is actively working right now.",
+    read:"Running = jobs in flight. Ready = spare capacity."},
+  sensor:{what:"The bus seen as Utah's senses — every signal coming in from the world and from inside Utah.",
+    why:"More subscribers = more parts of Utah paying attention to live events.",
+    read:"RX = receiving. The number is how many listeners are attached."},
+  gated:{what:"GATED means the screen is honest: that feature has no live data source wired yet, so Utah shows nothing rather than faking a number.",
+    why:"You can always trust every number on this deck is real. Gated/dormant = real-but-empty, never simulated.",
+    read:"It turns on by itself the moment a producer (a feed or capability) starts publishing."},
+};
+function xpBlock(key,gold){ const e=EXPLAIN[key]; if(!e) return "";
+  return `<div class="xp${gold?' gold':''}"><div class="xp-what">${esc(e.what)}</div>`+
+    (e.why?`<div class="xp-line"><span>WHY IT MATTERS</span>${esc(e.why)}</div>`:"")+
+    (e.read?`<div class="xp-line"><span>HOW TO READ IT</span>${esc(e.read)}</div>`:"")+`</div>`; }
+function dstats(pairs){ return '<div class="dstats">'+pairs.map(p=>
+  `<div class="dstat"><b>${esc(p[1])}</b><span>${esc(p[0])}</span>${p[2]?`<i>${esc(p[2])}</i>`:""}</div>`).join("")+"</div>"; }
+function verdict(level,text){ return `<div class="verdict ${level}"><span class="vled"></span>${esc(text)}</div>`; }
+function sec(t){ return `<div class="drill-sec">${esc(t)}</div>`; }
+
+/* one full record, every field in plain labels (leads / facts / outreach / etc.) */
+const FIELD_LABELS={name:"Business",case_name:"Estate",recipient:"Sent to",kind:"Type",region:"Where",
+  county:"County",source:"Found via",status:"Status",campaign:"Campaign",channel:"Channel",
+  direction:"Direction",outcome:"Outcome",engine:"Engine",arv:"Est. value (ARV)",filed:"Filed",
+  confidence:"Confidence",ts:"When",id:"Record #",subject:"Subject",post_id:"Post id",rows_in:"Rows in"};
+function contactBlock(c){
+  if(!c||typeof c!=="object"||!Object.keys(c).length) return '<span class="nocontact">— no phone/email/address on file yet</span>';
+  const order=["phone","email","address","website"];
+  const keys=Object.keys(c).sort((a,b)=>order.indexOf(a)-order.indexOf(b));
+  return '<div class="contact">'+keys.map(k=>`<span class="cpill"><span class="ci">${esc(k.toUpperCase())}</span>${esc(c[k])}</span>`).join("")+"</div>";
+}
+function recordDrill(key,r){
+  if(!r) return;
+  const title=r.name||r.case_name||r.recipient||r.engine||("Record #"+(r.id||""));
+  const hasContact = key==="leads"||key==="probate"||r.contact||r.heir_contact;
+  let h=xpBlock(key);
+  h+=sec("FULL RECORD");
+  h+='<dl class="frec">';
+  const c=r.contact||r.heir_contact;
+  for(const [k,v] of Object.entries(r)){
+    if(k==="contact"||k==="heir_contact"||k==="content"||v==null||v==="") continue;
+    h+=`<dt>${esc(FIELD_LABELS[k]||k)}</dt><dd${k==="name"||k==="case_name"?' class="big"':""}>${esc(v)}</dd>`;
+  }
+  if(hasContact) h+=`<dt>Contact</dt><dd>${contactBlock(c)}</dd>`;
+  h+="</dl>";
+  if(r.content) h+=sec("WHAT IT SAYS")+`<div class="drill-content">${esc(r.content)}</div>`;
+  drillOpen(title, h);
+}
+
+/* TITLE + which /panel each drill key fetches (some are derived from poll state) */
+const DRILL_TITLE={daemon:"◆ LOCAL CORE DAEMON",bus:"◆ EVENT BUS",pool:"◆ WORKER POOL",
+  governor:"◆ CPU GOVERNOR",memory:"◆ MEMORY FORGE",voice:"◆ VOICE LOOP",leads:"◆ LEADS",
+  outreach:"◆ OUTREACH",probate:"◆ PROBATE",research:"◆ RESEARCH",audit:"◆ BLACK-BOX LEDGER",
+  risk:"🛡 RISK FIREWALL",sync:"📡 SYNC & INGEST",agents:"◆ AGENT MESH",sensor:"◆ SENSOR ARRAY"};
+
+async function drill(key){
+  closeMenu();
+  drillOpen(DRILL_TITLE[key]||key, '<div class="empty">LOADING…</div>');
+  try{
+    if(key==="daemon"){
+      const d=await getPanel("spine"); const s=LAST.s||{};
+      let h=xpBlock("daemon",true);
+      h+=verdict("good", "Utah is alive — running "+fmtUp(d.uptime_s)+" with no crashes.");
+      h+=dstats([["UPTIME",fmtUp(d.uptime_s),"time since last restart"],["VERSION","v"+d.version],
+        ["DRAINING",d.draining?"YES":"no","shutting down?"],["BUS SUBS",d.bus_subscribers,"parts listening"]]);
+      h+=sec("WHERE IT LIVES");
+      h+='<dl class="frec"><dt>Runtime</dt><dd>~/.utah/run · unix socket (owner-only)</dd>'+
+         '<dt>Store</dt><dd>Postgres + pgvector (on this Mac)</dd>'+
+         '<dt>Cloud</dt><dd>none — fully local</dd>'+
+         '<dt>Restart guard</dt><dd>launchd com.utah.supervisor (auto-restarts on death)</dd></dl>';
+      return drillOpen(DRILL_TITLE.daemon, h);
+    }
+    if(key==="bus"||key==="sensor"){
+      const d=await getPanel("spine");
+      let h=xpBlock(key,true);
+      const dropped=d.bus_dropped||0;
+      h+=verdict(dropped>0?"warn":"good", dropped>0?(dropped+" events were dropped — a listener fell behind."):"Healthy — every event delivered, none dropped.");
+      h+=dstats([["PUBLISHED",d.bus_published,"total messages sent"],["SUBSCRIBERS",d.bus_subscribers,"parts listening"],
+        ["DROPPED",dropped,"should be 0"]]);
+      h+=sec("LIVE CHANNELS (most recent first)");
+      h+='<div class="ticker" style="height:auto;max-height:240px">'+($("ticker").innerHTML||'<div>awaiting events…</div>')+'</div>';
+      return drillOpen(DRILL_TITLE[key], h);
+    }
+    if(key==="pool"||key==="agents"){
+      const d=await getPanel("pool");
+      let h=xpBlock(key,true);
+      const heavy=d.busy>=d.limit*0.8;
+      h+=verdict(heavy?"warn":"good", heavy?"Running hot — most workers are busy.":(d.busy+" of "+d.limit+" workers busy — plenty of spare capacity."));
+      h+=dstats([["BUSY",d.busy,"jobs running now"],["IDLE",d.idle,"workers free"],["TOTAL",d.limit,"team size"]]);
+      h+=sec(d.limit+" WORKER SLOTS");
+      h+='<div class="cores">'+(d.slots||[]).map(s=>`<span class="core-cell">#${esc(s.slot)} <b>${esc(s.state)}</b></span>`).join("")+"</div>";
+      return drillOpen(DRILL_TITLE[key], h);
+    }
+    if(key==="governor"){
+      const d=await getPanel("governor");
+      let h=xpBlock("governor",true);
+      const lpc=d.load_per_core, lvl=lpc>2?"bad":(lpc>1?"warn":"good");
+      h+=verdict(lvl, lpc>2?("CPU oversubscribed at "+lpc+"× per core — other apps are competing for the chip too."):
+        (lpc>1?("Busy at "+lpc+"× per core — working hard but coping."):("Relaxed at "+lpc+"× per core.")));
+      h+=dstats([["LOAD / CORE",lpc],["LOAD 1m",d.load1],["LOAD 5m",d.load5],["LOAD 15m",d.load15],
+        ["CORES",d.ncpu],["IN-FLIGHT",d.inflight+"/"+d.max_inflight,"admitted heavy jobs"]]);
+      if(d.per_core_pct){ h+=sec(d.per_core_pct.length+" CPU CORES — % BUSY RIGHT NOW");
+        h+='<div class="cores">'+d.per_core_pct.map((p,i)=>`<span class="core-cell">c${i} <b>${esc(p)}%</b></span>`).join("")+"</div>"; }
+      if(d.top_processes){ h+=sec("TOP PROCESSES USING THE CPU");
+        h+=d.top_processes.map(p=>`<div class="item"><div class="h"><span class="nm">${esc(p.name||"?")}</span><span class="meta">pid ${esc(p.pid)} · ${esc(p.cpu)}% cpu</span></div></div>`).join(""); }
+      return drillOpen(DRILL_TITLE.governor, h);
+    }
+    if(key==="memory"){
+      const d=await getPanel("memory"); const cc=d.counts||{};
+      let h=xpBlock("memory",true);
+      h+=verdict("good", (cc.live||0).toLocaleString()+" live facts across "+(cc.entities||0).toLocaleString()+" things Utah tracks.");
+      h+=dstats([["LIVE FACTS",cc.live,"active now"],["ENTITIES",cc.entities,"people/things"],["TOTAL ROWS",cc.total,"incl. history"]]);
+      if(d.entities&&d.entities.length){ h+=sec("TOP "+Math.min(40,d.entities.length)+" THINGS UTAH TRACKS (by mentions)");
+        h+='<div class="ents">'+d.entities.slice(0,40).map(e=>`<span class="ent">${esc(e.name)} <b>${esc(e.mentions)}</b></span>`).join("")+"</div>"; }
+      h+=sec((d.rows||[]).length+" MOST RECENT FACTS — click any to read it in full");
+      h+=(d.rows||[]).slice(0,60).map((r,i)=>`<div class="item drillable" data-mem="${i}"><div class="h"><span class="pill">${esc(r.source||"fact")}</span><span class="meta">#${esc(r.id)} · conf ${esc(r.confidence)} · ${esc(r.ts||"")}</span></div><div class="body">${esc(r.content)}</div></div>`).join("");
+      drillOpen(DRILL_TITLE.memory, h);
+      const rows=d.rows||[];
+      document.querySelectorAll("#drill-body .item[data-mem]").forEach(el=>el.onclick=()=>{
+        const r=rows[+el.dataset.mem]; drillOpen("MEMORY FACT #"+(r.id||""),
+          xpBlock("memory")+sec("THE FULL FACT")+`<div class="drill-content">${esc(r.content)}</div>`+
+          '<dl class="frec" style="margin-top:12px"><dt>Source</dt><dd>'+esc(r.source||"fact")+'</dd><dt>Confidence</dt><dd>'+esc(r.confidence)+'</dd><dt>When</dt><dd>'+esc(r.ts||"")+'</dd></dl>');
+      });
+      return;
+    }
+    if(key==="voice"){
+      const v=await getPanel("voice");
+      let h=xpBlock("voice",true);
+      const live=v.listening||v.status==="listening";
+      h+=verdict(live?"good":(v.status?"warn":"bad"), live?"Listening now — say “ace” to wake it.":(v.status?("State: "+v.status):"Voice loop is down."));
+      h+=dstats([["STATE",(v.status||"—").toUpperCase()],["SEGMENTS",v.segments,"speech chunks heard"],
+        ["LISTENING",v.listening?"YES":"no"],["SPEAKING",v.speaking?"YES":"no"]]);
+      h+=sec("THE PIPELINE (every stage on-device)");
+      h+='<dl class="frec"><dt>1 · Wake</dt><dd>Silero VAD listens for the word “ace”</dd>'+
+         '<dt>2 · Hear</dt><dd>Whisper turns your speech → text</dd>'+
+         '<dt>3 · Think</dt><dd>the grounded brain answers</dd>'+
+         '<dt>4 · Speak</dt><dd>Piper voices the reply (streamed)</dd></dl>';
+      if(v.last_transcript){ h+=sec("LAST THING IT HEARD"+(v.age_s!=null?" ("+v.age_s+"s ago)":""));
+        h+=`<div class="drill-content">${esc(v.last_transcript)}</div>`; }
+      return drillOpen(DRILL_TITLE.voice, h);
+    }
+    if(key==="risk"||key==="sync"){
+      let h=xpBlock(key,true);
+      h+=verdict("warn","GATED — no live producer wired yet. This stays empty (never faked) until it lands.");
+      h+=xpBlock("gated");
+      return drillOpen(DRILL_TITLE[key], h);
+    }
+    if(key==="leads"||key==="outreach"||key==="probate"||key==="research"){
+      const d=await getPanel(key); const arr=d.rows||[];
+      let h=xpBlock(key,true);
+      const L=(LAST.st&&LAST.st.ledger)||{};
+      const tot = key==="leads"?L.leads : key==="outreach"?L.outreach_ledger : key==="probate"?L.probate : arr.length;
+      if(key==="leads"){ const withC=arr.filter(r=>r.contact&&Object.keys(r.contact).length).length;
+        h+=dstats([["TOTAL LEADS",tot!=null?tot:arr.length,"in the database"],["SHOWING",arr.length,"most recent"],["WITH CONTACT",withC,"phone/address ready"]]); }
+      else h+=dstats([["TOTAL",tot!=null?tot:arr.length],["SHOWING",arr.length,"most recent"]]);
+      h+=sec(arr.length+" "+key.toUpperCase()+" — click any row for the full record");
+      h+= arr.length? arr.map((r,i)=>{
+        const nm=r.name||r.case_name||r.recipient||("#"+r.id);
+        const meta=metaOf(r);
+        const cc=(r.contact&&Object.keys(r.contact).length)?'<div class="contact" style="margin-top:5px">'+contactBlock(r.contact)+'</div>':"";
+        return `<div class="item drillable" data-row="${i}"><div class="h"><span class="nm">${esc(nm)}</span><span class="meta">${esc(meta)}</span></div>${cc}${r.content?`<div class="body">${esc(r.content)}</div>`:""}</div>`;
+      }).join("") : '<div class="empty">DORMANT — 0 ROWS (NO PRODUCER WIRED)</div>';
+      drillOpen(DRILL_TITLE[key], h);
+      document.querySelectorAll("#drill-body .item[data-row]").forEach(el=>el.onclick=()=>recordDrill(key, arr[+el.dataset.row]));
+      return;
+    }
+    if(key==="audit"){
+      const d=await getPanel("audit"); const arr=d.rows||[];
+      let h=xpBlock("audit",true);
+      h+=verdict(arr.length?"warn":"good", arr.length?(arr.length+" recorded failures — see below."):"Clean — no failures recorded. Healthy Utah.");
+      h+= arr.length? arr.map(a=>{const o=typeof a==="object"?a:{detail:a};
+        return `<div class="item"><div class="h"><span class="pill">${esc((o.source||"")+(o.kind?"/"+o.kind:""))}</span><span class="meta">${esc(o.ts||"")}</span></div><div class="body" style="-webkit-line-clamp:4">${esc(o.detail||JSON.stringify(o))}</div></div>`;}).join("")
+        : '<div class="empty">no failures — nothing has broken</div>';
+      return drillOpen(DRILL_TITLE.audit, h);
+    }
+  }catch(e){ drillOpen(DRILL_TITLE[key]||key, xpBlock(key)+'<div class="empty">unavailable — '+esc(String(e.message||e))+'</div>'); }
+}
+
+/* "GATED" header metric — explain, in plain words, exactly what is dormant and why */
+function drillGated(){
+  closeMenu();
+  const items=[
+    {nm:"Risk Firewall",why:"trade safety gate — needs the risk kernel + live trades",drill:"risk"},
+    {nm:"Sync & Ingest",why:"market-data intake — needs the WealthCharts feed connected",drill:"sync"},
+    {nm:"Trading Engine Lab",why:"strategies run on paper until the price feed is live",drill:"trading"},
+    {nm:"Probate",why:"inherited-property cases — needs the county filing feed",drill:"probate"},
+  ];
+  let h=xpBlock("gated",true);
+  h+=sec(items.length+" FEATURES WAITING ON A DATA SOURCE — tap any to learn more");
+  h+=items.map(it=>`<div class="item drillable" onclick="${it.drill==='trading'?"openLab()":"drill('"+it.drill+"')"}"><div class="h"><span class="nm">${esc(it.nm)}<span class="hint">TAP</span></span><span class="meta">GATED</span></div><div class="body" style="-webkit-line-clamp:2">${esc(it.why)}</div></div>`).join("");
+  drillOpen("◆ WHAT'S GATED & WHY", h);
+}
 
 /* Generic console drill — render any capability panel's live state (selfcode/browser). */
 async function openConsole(panel, title){
