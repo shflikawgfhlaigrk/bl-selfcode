@@ -414,12 +414,18 @@ async def panel_detail(ctx: Context, params: object) -> dict:
     if panel == "selfcode":
         from utah import selfcode
         on = selfcode.enabled()
+        am = selfcode.automerge_enabled()
         return {"panel": "selfcode",
-                "status": "armed" if on else "kill-switch",
+                "status": ("armed" if am else "propose-only") if on else "kill-switch",
                 "enabled": on,
-                "mode": "propose-only · isolated branch · suite-gated · never main",
+                "automerge": "ARMED — green merges to main + pushes origin" if am
+                             else "OFF — proposes on a branch (human merges)",
+                "mode": "auto-merge on green · suite-gated · kill-switch" if am
+                        else "propose-only · isolated branch · suite-gated · never main",
                 "kill_switch": str(selfcode.KILL_SWITCH),
-                "note": "bounded autonomy (stop@13): proposes a change on a branch, never merges"}
+                "note": ("autonomy: green proposals auto-merge to main; a red suite never "
+                         "merges, kill-switch overrides") if am
+                        else "bounded: proposes a change on a branch, never merges"}
     if panel == "browser":
         from utah.integrations import browser
         b = browser.chrome_binary()
