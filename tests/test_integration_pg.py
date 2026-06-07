@@ -167,7 +167,11 @@ def test_unavailable_store_is_structured():
         bad.nearest([0.0] * config.EMBED_DIM, 1)
 
 
-def test_reset_schema_clean_slate(pg):
+def test_reset_schema_clean_slate(pg, monkeypatch):
+    # reset_schema() refuses without an explicit opt-in (production-safety guard).
+    # The fixture's DSN points at the disposable utah_test db, so wiping is safe here.
+    # monkeypatch scopes the opt-in to this test only — it never leaks to prod paths.
+    monkeypatch.setenv("UTAH_ALLOW_RESET", "1")
     memory.store("Michael lives in Utah", source="fact")
     pg.reset_schema()
     assert memory.recall("Michael") == []

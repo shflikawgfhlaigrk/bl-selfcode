@@ -31,6 +31,43 @@ def test_think_prompt_contains_no_fab_contract_and_context(fake_brain):
     assert "where does Michael live?" in prompt
 
 
+def test_no_fab_forbids_basic_knowledge_and_guessing():
+    """The contract must answer ONLY from context — no outside/'basic' knowledge,
+    no guessing. A loophole here let the brain fabricate trivia (swallow airspeed,
+    Super Bowl) that then poisoned memory."""
+    contract = brain.NO_FAB.lower()
+    assert "only from the context" in contract
+    assert "basic" in contract  # explicitly names + forbids 'basic' knowledge
+    assert "guess" in contract
+    assert "i don't know." in contract
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "I don't know.",
+        "i don't know",
+        "I do not know who won.",
+        "Not in the context. As a rough estimate, ~11 m/s.",
+        "  not supported by the context  ",
+    ],
+)
+def test_is_refusal_catches_soft_refusals(text):
+    assert brain.is_refusal(text)
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Michael lives in Utah.",
+        "The context says he prefers terse answers.",
+        "Based on the conversation, you decided to rebuild AceOS.",
+    ],
+)
+def test_is_refusal_does_not_flag_real_answers(text):
+    assert not brain.is_refusal(text)
+
+
 def test_think_truncates_oversized_context(fake_brain):
     fake_brain.respond = "ok"
     brain.think("q", "x" * (config.BRAIN_CONTEXT_MAX_CHARS + 5000))

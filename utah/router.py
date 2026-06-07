@@ -66,6 +66,25 @@ _REASONING = re.compile(
     re.I,
 )
 
+#: External factual-recall ("who won…", "when did…", "what was the score").
+#: The small local model answers these unreliably — it invents specifics (it
+#: served a fabricated "2019 Super Bowl … 13-3"). Such questions go straight to
+#: the brain, whose no-fabrication gate is structural: it answers from context or
+#: says "I don't know" — never a 3B guess served as fact. Personal forms ("who is
+#: my realtor") are safe here too: the brain grounds them from recalled memory.
+_FACTUAL_RECALL = re.compile(
+    r"\bwho (won|wrote|invented|discovered|created|directed|founded|painted|composed)\b|"
+    r"\bwhen (did|was|were|is|do|does)\b|"
+    r"\bwhat (year|day|date) (did|was|were|do|does|is|are)\b|"
+    r"\bwhat('?s| is| was| were) the (score|result|outcome|winner)\b|"
+    r"\b(capital|population|currency|language|president|prime minister) of\b|"
+    r"\bhow many\b|"
+    r"\bhow (tall|old|far|long|fast|high|deep|much) (is|are|was|were|did|do|does)\b|"
+    r"\b(super bowl|world cup|world series|olympics|nobel prize|oscar|grammy)\b|"
+    r"\bairspeed velocity\b",
+    re.I,
+)
+
 
 def route(text: str) -> Route:
     """Map a turn to the cheapest tier that can answer it."""
@@ -88,6 +107,11 @@ def route(text: str) -> Route:
 
     if douglas.matches(t):
         return Route.KNOWLEDGE
+    # External factual-recall → the brain (structural no-fab), never the 3B which
+    # invents specifics. Checked before the local tiers; after capabilities/packs
+    # so grounded weather/time/brief/Douglas still win.
+    if _FACTUAL_RECALL.search(t):
+        return Route.BRAIN
     if _REASONING.search(t) or len(t.split()) >= config.ROUTER_HEAVY_MIN_WORDS:
         return Route.LOCAL_HEAVY
     return Route.LOCAL_QUICK

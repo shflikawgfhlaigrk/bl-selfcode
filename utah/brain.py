@@ -24,19 +24,38 @@ log = logging.getLogger("utah.brain")
 I_DONT_KNOW = "I don't know."
 
 
-def is_refusal(text: str) -> bool:
-    """True if *text* is an 'I don't know' refusal (exact OR verbose).
+#: A refusal can arrive as the canonical phrase OR a soft variant the model
+#: improvises ("Not in the context. As a rough estimate…"). All are anchored to
+#: the START so a real answer that merely mentions "the context" is never
+#: misread as a refusal.
+_REFUSAL_PREFIXES = (
+    "i don't know",
+    "i do not know",
+    "not in the context",
+    "not in context",
+    "not supported by the context",
+)
 
-    The brain sometimes elaborates ("I don't know. X isn't in the context…").
-    Such turns carry nothing durable and must NOT be stored — matching only the
-    exact string let verbose refusals leak into memory.
+
+def is_refusal(text: str) -> bool:
+    """True if *text* is a refusal — the canonical "I don't know." or a soft variant.
+
+    The brain/local sometimes soft-refuse and then guess ("Not in the context. As
+    a rough estimate…") instead of refusing outright. Such turns carry nothing
+    durable and must NOT be stored or treated as a real answer — matching only the
+    exact string once let a soft refusal leak a fabricated guess into memory
+    (it then recalled as ``source:memory``). Anchored to the start to avoid false
+    positives on real answers that mention "the context".
     """
-    return text.strip().lower().startswith("i don't know")
+    head = text.strip().lower()
+    return any(head.startswith(prefix) for prefix in _REFUSAL_PREFIXES)
 
 NO_FAB = (
     "You are Utah, Michael's assistant. Answer ONLY from the CONTEXT and the "
-    "question. If the answer is not supported by the context or basic knowledge, "
-    'say "I don\'t know." Be concise. No markdown.'
+    "conversation provided. The CONTEXT is your sole source of truth: do NOT use "
+    "outside or general ('basic') knowledge, and never guess, estimate, or "
+    'approximate. If the CONTEXT does not contain the answer, reply with exactly '
+    '"I don\'t know." and nothing else. Be concise. No markdown.'
 )
 
 #: Elicits the model's real chain-of-thought as a leading ``<thinking>…</thinking>``

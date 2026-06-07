@@ -113,3 +113,29 @@ def test_weather_beats_reasoning_keyword():
     # "why is it raining" contains a reasoning verb AND weather — weather wins
     # (the grounded capability is cheaper and exact).
     assert route("why is it raining") is Route.WEATHER
+
+
+@pytest.mark.parametrize("text", [
+    "who won the 2019 Super Bowl and what was the score?",
+    "who wrote Moby Dick",
+    "when did World War 2 end",
+    "what year did the Titanic sink",
+    "what was the score of the world cup final",
+    "capital of Australia",
+    "how many moons does Jupiter have",
+    "what is the airspeed velocity of an unladen swallow?",
+])
+def test_external_factual_recall_routes_to_brain(text):
+    # The 3B invents specifics; the brain's no-fab is structural ("I don't know"
+    # on unsupported), so world-fact recall goes to the brain, never local.
+    assert route(text) is Route.BRAIN
+
+
+@pytest.mark.parametrize("text", [
+    "summarize this for me",
+    "what's 2+2",
+    "rewrite that more politely",
+])
+def test_quick_tasks_still_go_local_not_brain(text):
+    # The factual-recall guard must not hijack genuine quick tasks.
+    assert route(text) is Route.LOCAL_QUICK
