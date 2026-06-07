@@ -82,7 +82,7 @@ def test_auto_merge_on_green_merges_and_pushes(monkeypatch, tmp_path):
         return "abc1234", True
     r = selfcode.propose("add a helper", run_claude=lambda t: None,
                          run_tests=lambda: (True, ""), branch_fn=bf, discard_fn=df,
-                         merge_fn=merge_fn, auto_merge=True)
+                         merge_fn=merge_fn, auto_merge=True, tree_clean_fn=lambda: True)
     assert r["applied"] is True and r["merged"] is True
     assert r["commit"] == "abc1234" and r["pushed"] is True
     assert merged["branch"] == calls["branch"]           # merged the proposal's own branch
@@ -97,7 +97,7 @@ def test_red_suite_never_merges(monkeypatch, tmp_path):
     r = selfcode.propose("risky change", run_claude=lambda t: None,
                          run_tests=lambda: (False, "1 failed"), branch_fn=bf, discard_fn=df,
                          merge_fn=lambda b, t: merge_called.append(1) or ("x", True),
-                         auto_merge=True)
+                         auto_merge=True, tree_clean_fn=lambda: True)
     assert r["applied"] is False and r.get("merged") in (False, None)
     assert merge_called == [] and calls["discarded"] is True
 
@@ -112,3 +112,19 @@ def test_auto_merge_flag_gates_default(monkeypatch, tmp_path):
                          run_tests=lambda: (True, ""), branch_fn=bf, discard_fn=df,
                          merge_fn=lambda b, t: ("x", True))
     assert r["applied"] is True and r["merged"] is False  # flag absent → propose-only
+
+
+def test_auto_merge_refuses_dirty_tree(monkeypatch, tmp_path):
+    # A dirty tree on the auto-merge path must REFUSE (never sweep uncommitted work into
+    # the autonomous commit). Regression for the 2026-06-07 concurrent-sweep incident.
+    failures.set_store(FakeFailureStore())
+    monkeypatch.setattr(selfcode, "KILL_SWITCH", tmp_path / "nope")
+    calls, bf, df = _vcs()
+    merge_called = []
+    r = selfcode.propose("any change", run_claude=lambda t: None, run_tests=lambda: (True, ""),
+                         branch_fn=bf, discard_fn=df, auto_merge=True,
+                         tree_clean_fn=lambda: False,  # dirty
+                         merge_fn=lambda b, t: merge_called.append(1) or ("x", True))
+    assert r["applied"] is False and r["merged"] is False
+    assert "dirty" in r["reason"].lower()
+    assert calls["branch"] is None and merge_called == []   # never branched, never merged

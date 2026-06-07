@@ -81,7 +81,8 @@ def _real_tests(*, cwd: str, timeout: int = CODE_TIMEOUT_S) -> tuple[bool, str]:
 
 
 def propose(task: str, *, run_claude=None, run_tests=None, branch_fn=None,
-            discard_fn=None, merge_fn=None, auto_merge=None, repo: str | None = None) -> dict:
+            discard_fn=None, merge_fn=None, auto_merge=None, tree_clean_fn=None,
+            repo: str | None = None) -> dict:
     """Propose a change for *task* on an isolated branch, gated by the suite. On a green
     suite, auto-merges to main + pushes when the auto-merge flag is set (``auto_merge``
     overrides for tests); otherwise the change stays a branch proposal. Returns
@@ -90,6 +91,19 @@ def propose(task: str, *, run_claude=None, run_tests=None, branch_fn=None,
         failures.record("selfcode", "disabled", f"kill switch present; skipped: {task[:80]}")
         return {"task": task, "applied": False, "disabled": True,
                 "tests_passed": False, "branch": None, "reason": "kill switch"}
+
+    do_merge = automerge_enabled() if auto_merge is None else auto_merge
+    # On the auto-merge path, REFUSE a dirty tree: branching + `git add -A` would sweep
+    # unrelated/concurrent uncommitted work into the autonomous commit and push it to main
+    # (this happened live 2026-06-07 — a concurrent propose() swept an editor's change).
+    if do_merge:
+        is_clean = tree_clean_fn if tree_clean_fn is not None else (lambda: _tree_clean(repo or "."))
+        if not is_clean():
+            failures.record("selfcode", "tree_dirty",
+                            f"auto-merge refused — dirty tree, would sweep uncommitted work: {task[:60]}")
+            return {"task": task, "applied": False, "tests_passed": False, "merged": False,
+                    "branch": None,
+                    "reason": "working tree dirty — auto-merge refused (would sweep uncommitted work)"}
 
     run_claude = run_claude or (lambda t: _real_claude(t, cwd=repo or "."))
     run_tests = run_tests or (lambda: _real_tests(cwd=repo or "."))
@@ -121,7 +135,6 @@ def propose(task: str, *, run_claude=None, run_tests=None, branch_fn=None,
         return {"task": task, "applied": False, "tests_passed": False,
                 "branch": branch, "reason": tail}
 
-    do_merge = automerge_enabled() if auto_merge is None else auto_merge
     if do_merge:
         merge = merge_fn or (lambda b, t: _real_merge(b, t, repo=repo or "."))
         try:
@@ -162,6 +175,13 @@ def _real_discard(*, repo: str = ".") -> None:
     # run leaves untracked artifacts (uv.lock) that `git reset --hard` alone won't clear.
     subprocess.run(["git", "reset", "--hard"], cwd=repo, capture_output=True, text=True)
     subprocess.run(["git", "clean", "-fd"], cwd=repo, capture_output=True, text=True)
+
+
+def _tree_clean(repo: str = ".") -> bool:
+    """True when the working tree has no uncommitted changes — the precondition for a safe
+    auto-merge (so the autonomous commit captures ONLY what the coding run produced)."""
+    out = subprocess.run(["git", "status", "--porcelain"], cwd=repo, capture_output=True, text=True)
+    return out.returncode == 0 and not out.stdout.strip()
 
 
 def _real_merge(branch: str, task: str, *, repo: str = ".") -> tuple[str, bool]:
