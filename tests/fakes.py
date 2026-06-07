@@ -247,7 +247,7 @@ class FakeStore:
             key=lambda t: t[1],
             reverse=True,
         )
-        return [Neighbor(r.id, r.content, s) for r, s in scored[:limit]]
+        return [Neighbor(r.id, r.content, s, r.source) for r, s in scored[:limit]]
 
     def dense_search(self, embedding: Sequence[float], limit: int) -> list[DenseRow]:
         self._check()

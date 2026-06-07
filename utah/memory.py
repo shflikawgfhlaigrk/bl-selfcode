@@ -61,6 +61,7 @@ class Neighbor(NamedTuple):
     id: int
     content: str
     sim: float  # cosine similarity to the incoming content
+    source: str = ""  # provenance — 'core' rows are authoritative and never superseded
 
 
 class DenseRow(NamedTuple):
@@ -168,6 +169,9 @@ def decide_write(content: str, neighbors: Sequence[Neighbor]) -> WriteDecision:
     new_ents = entities.normalized_set(content)
     supersede: list[int] = []
     for nb in neighbors:
+        if nb.source == "core":
+            continue  # core is authoritative ground truth (Michael's creed) — a later
+            #            fact/turn must NEVER supersede it, or the always-on identity rots
         if nb.sim >= config.SUPERSEDE_SIM:
             supersede.append(nb.id)
         elif nb.sim >= config.SUPERSEDE_ENT and new_ents & entities.normalized_set(nb.content):
@@ -380,12 +384,12 @@ class PostgresStore:
     def nearest(self, embedding: Sequence[float], limit: int) -> list[Neighbor]:
         with self._tx() as conn:
             rows = conn.execute(
-                "SELECT id, content, 1 - (embedding <=> %s) AS sim FROM memory "
+                "SELECT id, content, 1 - (embedding <=> %s) AS sim, source FROM memory "
                 "WHERE superseded_by IS NULL AND NOT archived AND embedding IS NOT NULL "
                 "ORDER BY embedding <=> %s LIMIT %s",
                 (self._vec(embedding), self._vec(embedding), limit),
             ).fetchall()
-        return [Neighbor(int(r[0]), r[1], float(r[2])) for r in rows]
+        return [Neighbor(int(r[0]), r[1], float(r[2]), r[3]) for r in rows]
 
     def dense_search(self, embedding: Sequence[float], limit: int) -> list[DenseRow]:
         with self._tx() as conn:

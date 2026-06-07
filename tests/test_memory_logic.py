@@ -102,6 +102,18 @@ def test_entity_path_supersedes_attribute_change_below_090():
     assert decision.supersede_ids == [4]
 
 
+def test_core_rows_are_never_superseded():
+    """Core is Michael's authoritative creed/identity (always-injected). A later fact
+    or turn that merely paraphrases it must NOT supersede it — even a 0.99 paraphrase or
+    a same-entity attribute change is exempt — or the always-on identity layer rots.
+    (The live bug: 'Law 5: guard your reputation' superseded core 'guard my reputation'.)"""
+    core_para = Neighbor(5, "Power: guard your reputation with your life.", 0.95, "core")
+    core_ent = Neighbor(6, "Michael lives in Gulf Shores", 0.85, "core")
+    decision = decide_write("I guard my reputation with my life.", [core_para, core_ent])
+    assert decision.action is WriteAction.INSERTED
+    assert decision.supersede_ids == []   # neither core row touched
+
+
 def test_entity_path_threshold_is_exact():
     old = "Michael lives in Gulf Shores"
     at = decide_write("Michael lives in Utah", [_nb(5, old, config.SUPERSEDE_ENT)])
