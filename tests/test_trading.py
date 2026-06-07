@@ -52,3 +52,14 @@ def test_run_feed_failure_documented():
     r = trading.run(_RecLedger(), feed_fn=boom)
     assert r["fires"] == 0
     assert any("feed_failed" in row[2] for row in store.rows)
+
+
+def test_lab_state_roster_is_gated_and_dormant():
+    # The merged engine lab lists the full roster; with no WC feed every engine is
+    # DORMANT and the feed is GATED — never a fabricated live engine.
+    st = trading.lab_state(fires=0)
+    assert st["feed"] == "gated"
+    names = {e["name"] for e in st["engines"]}
+    assert {"shadow", "ctx_alpha", "ctx_bravo", "barber", "perp", "research", "bible", "antigrav"} <= names
+    assert all(e["state"] == "dormant" for e in st["engines"])
+    assert st["fires"] == 0

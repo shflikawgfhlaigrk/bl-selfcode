@@ -382,11 +382,19 @@ async def panel_detail(ctx: Context, params: object) -> dict:
         from utah import watchdog
         with ctx.governor.admission():
             return {"panel": "watchdog", **(await ctx.pool.run(watchdog.check))}
-    if panel == "trading":
+    if panel in ("trading", "lab"):
         from utah.product import trading
-        live = trading.feed_available()
-        return {"panel": "trading", "feed": "live" if live else "gated",
-                "note": "live WealthCharts feed" if live else "GATED: WealthCharts login (Michael)"}
+        from utah.product.ledger import Ledger
+        def _lab():
+            try:
+                lg = Ledger()
+                fires = lg.counts().get("fires", 0)
+                rows = lg.recent("fires", 30)
+            except Exception:
+                fires, rows = 0, []
+            return {"panel": "trading", **trading.lab_state(fires), "rows": rows}
+        with ctx.governor.admission():
+            return await ctx.pool.run(_lab)
     if panel == "mail":
         from utah import mail
         rdy = mail.creds_available()

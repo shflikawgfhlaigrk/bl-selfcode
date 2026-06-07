@@ -42,6 +42,21 @@
   .hstat .m{text-align:right} .hstat .m b{color:var(--gold2);font-size:15px} .hstat .m span{color:var(--mut);font-size:9px;display:block;letter-spacing:2px}
   #clock{color:var(--gold2);font-size:13px}
 
+  /* hamburger menu — labs & consoles */
+  .hamb{background:#0f0e0a;border:1px solid var(--line);color:var(--gold2);width:34px;height:34px;border-radius:8px;cursor:pointer;font-size:15px;flex:none}
+  .hamb:hover{border-color:var(--gold);box-shadow:0 0 10px var(--goldglow)}
+  .menu{position:fixed;inset:0;background:rgba(4,4,8,.5);display:none;z-index:70}
+  .menu.open{display:block}
+  .menu-box{position:absolute;top:54px;left:16px;width:312px;background:var(--panel);border:1px solid var(--gold);border-radius:11px;padding:8px;box-shadow:0 18px 70px rgba(0,0,0,.7)}
+  .menu-h{color:var(--gold);font-size:10px;letter-spacing:2px;padding:6px 8px}
+  .menu-item{display:flex;flex-direction:column;gap:2px;width:100%;text-align:left;background:#0f0e0a;border:1px solid var(--line);border-radius:8px;padding:9px 11px;cursor:pointer;margin-top:6px;color:var(--txt);font:inherit}
+  .menu-item:hover{border-color:var(--gold)}
+  .menu-item.dim{opacity:.55}
+  .menu-item b{color:var(--gold2);font-size:12px;letter-spacing:1px} .menu-item span{color:var(--mut);font-size:10px}
+  .lab-banner{padding:9px 12px;border-radius:8px;font-size:11px;letter-spacing:.4px;margin-bottom:10px}
+  .lab-banner.gated{background:#1a1407;border:1px solid #2a2415;color:var(--gold2)}
+  .lab-banner.live{background:#0e1a12;border:1px solid #1c3a28;color:var(--ok)}
+
   /* deck */
   .deck{display:grid;grid-template-columns:262px 1fr 312px;gap:14px;padding:14px 16px;overflow:hidden;min-height:0}
   @media(max-width:1180px){.deck{grid-template-columns:1fr;overflow:auto}}
@@ -162,6 +177,7 @@
 <body>
 <div id="app">
   <header>
+    <button class="hamb" id="hamb" title="labs & consoles" onclick="toggleMenu()">☰</button>
     <div class="logo"><div class="mark"></div><b>UTAH</b><span>LOCAL COMMAND DECK</span></div>
     <div class="chips">
       <span class="chip"><span class="led" id="led-core"></span>LOCAL CORE</span>
@@ -235,6 +251,15 @@
       <button class="send" onclick="ask()">SEND</button>
     </div>
     <div class="footer">LIVE · REAL DATA ONLY · DORMANT/GATED = NO PRODUCER WIRED YET (NEVER SIMULATED) · SOURCE: UTAH CONTROL PLANE · <span id="f-stamp">—</span></div>
+  </div>
+</div>
+
+<div id="menu" class="menu" onclick="if(event.target===this)toggleMenu()">
+  <div class="menu-box">
+    <div class="menu-h">◆ LABS &amp; CONSOLES</div>
+    <button class="menu-item" onclick="openLab()"><b>⚡ Trading Engine Lab</b><span>8 engines · paper/sim · gated on WealthCharts feed (live tmrw)</span></button>
+    <button class="menu-item dim" disabled><b>🛡 Risk / Threat Kernel</b><span>pre-exec gate · gated</span></button>
+    <button class="menu-item dim" disabled><b>🤖 Self-Coding Bay</b><span>bounded autonomy · locked · approval</span></button>
   </div>
 </div>
 
@@ -320,12 +345,12 @@ function renderFns(s,m,st,voice){
     {nm:"Memory Holograph", sub:m?(m.entities+" entities · graph"):"pgvector · hnsw", st:m?"INDEXED":"DOWN", cls:m?"":"off"},
     {nm:"Black Box Ledger", sub:audit+" audit events", st:up?"RECORDING":"DOWN", cls:up?"":"off"},
     {nm:"Sensor Array", sub:up?(s.bus.subscribers+" subscribers"):"world-model bus", st:up?"RX":"DOWN", cls:up?"":"off"},
-    {nm:"Trading Engine Lab", sub:"paper / sim · fires "+((st&&st.ledger&&st.ledger.fires)||0), st:"GATED", cls:"dim", gated:true},
+    {nm:"Trading Engine Lab", sub:"paper / sim · fires "+((st&&st.ledger&&st.ledger.fires)||0), st:"GATED", cls:"dim", gated:true, click:"openLab()"},
     {nm:"Risk / Threat Kernel", sub:"pre-exec gate", st:"GATED", cls:"dim", gated:true},
     {nm:"Self-Coding Bay", sub:"bounded autonomy", st:"LOCKED · APPROVAL", cls:"dim", gated:true},
   ];
   $("fns").innerHTML=fns.map(f=>
-    `<div class="fn${f.gated?' gated':''}"><span class="led ${f.cls==='off'?'off':(f.cls==='warn'?'warn':(f.cls==='dim'?'':'ok'))}"></span>`+
+    `<div class="fn${f.gated?' gated':''}"${f.click?` onclick="${f.click}" style="cursor:pointer"`:""}><span class="led ${f.cls==='off'?'off':(f.cls==='warn'?'warn':(f.cls==='dim'?'':'ok'))}"></span>`+
     `<div><div class="nm">${esc(f.nm)}</div><div class="sub">${esc(f.sub)}</div></div>`+
     `<div class="st ${f.cls}">${esc(f.st)}</div></div>`).join("");
   $("fn-count").textContent=fns.filter(f=>!f.gated).length+" LIVE";
@@ -483,6 +508,32 @@ $("q").addEventListener("keydown",e=>{if(e.key==="Enter")ask();});
 
 /* ============================ DRILL-DOWN (transparency) ============================ */
 function drillClose(){ $("drill").classList.remove("open"); $("drill-body").innerHTML=""; }
+function drillOpen(title,html){ $("drill-title").textContent=title; $("drill-body").innerHTML=html; $("drill").classList.add("open"); }
+function toggleMenu(){ $("menu").classList.toggle("open"); }
+
+/* Trading Engine Lab — merged roster + live fires ledger; honest GATED until WC feed lands. */
+async function openLab(){
+  toggleMenu();
+  drillOpen("⚡ TRADING ENGINE LAB", '<div class="empty">LOADING…</div>');
+  try{
+    const d=await getPanel("trading");
+    const gated=d.feed!=="live";
+    let h=`<div class="lab-banner ${gated?'gated':'live'}">${esc(d.note||"")}</div>`;
+    h+='<div class="kpis">'+
+       `<div class="kpi"><b>${esc((d.engines||[]).length)}</b><span>ENGINES</span></div>`+
+       `<div class="kpi"><b>${esc((d.feed||"—").toUpperCase())}</b><span>WC FEED</span></div>`+
+       `<div class="kpi"><b>${esc(d.fires||0)}</b><span>FIRES (LEDGER)</span></div></div>`;
+    h+='<div class="drill-sec">ENGINE ROSTER</div>';
+    h+=(d.engines||[]).map(e=>
+       `<div class="drill-row"><span class="led ${e.state==='live'?'ok':''}"></span> `+
+       `<b>${esc(e.name)}</b><span class="drill-meta">${esc(e.kind)} · ${esc((e.state||'').toUpperCase())}</span></div>`).join("");
+    h+='<div class="drill-sec">'+((d.rows||[]).length)+' FIRES</div>';
+    h+= (d.rows&&d.rows.length)
+        ? d.rows.map(r=>`<div class="drill-row"><b>${esc(r.engine)}</b><span class="drill-meta">${esc(r.direction)} · ${esc(r.outcome||'open')} · ${esc(r.ts||'')}</span></div>`).join("")
+        : '<div class="empty">DORMANT — 0 FIRES (NO PRODUCER WIRED · WC FEED LANDS TOMORROW)</div>';
+    drillOpen("⚡ TRADING ENGINE LAB", h);
+  }catch(e){ drillOpen("⚡ TRADING ENGINE LAB", '<div class="empty">unavailable — '+esc(String(e.message||e))+'</div>'); }
+}
 document.addEventListener("keydown",e=>{ if(e.key==="Escape")drillClose(); });
 
 /* ============================ BOOT ============================ */

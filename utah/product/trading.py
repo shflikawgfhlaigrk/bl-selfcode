@@ -16,6 +16,36 @@ from utah import failures
 
 log = logging.getLogger("utah.product.trading")
 
+#: The engine roster merged from Ace's live fleet (fleet_grader.ENGINES) plus the
+#: reference ``breakout`` starter. Each drops rules onto the same :func:`evaluate`
+#: interface; all stay DORMANT until the WealthCharts feed lands (no synthetic fires).
+ENGINES = (
+    ("breakout",  "reference · prior-N high/low breakout (live starter)"),
+    ("shadow",    "shadow book · confirmation overlay"),
+    ("ctx_alpha", "context engine — alpha regime"),
+    ("ctx_bravo", "context engine — bravo regime"),
+    ("barber",    "barber regime filter"),
+    ("perp",      "perp / perp_v2 momentum"),
+    ("research",  "research-signal engine"),
+    ("bible",     "rule-bible engine"),
+    ("antigrav",  "antigrav emoji-signal engine"),
+)
+
+
+def lab_state(fires: int = 0) -> dict:
+    """Trading Engine Lab state for the deck — real-or-gated, never fabricated.
+    Lists the engine roster and the live/gated feed status; every engine is DORMANT
+    until :func:`feed_available` flips (Michael's WealthCharts login)."""
+    live = feed_available()
+    return {
+        "feed": "live" if live else "gated",
+        "note": "live WealthCharts feed" if live
+                else "GATED: WealthCharts login (Michael) — engines go live when the feed lands",
+        "fires": fires,
+        "engines": [{"name": n, "kind": k, "state": "live" if live else "dormant"}
+                    for n, k in ENGINES],
+    }
+
 
 def evaluate(closes: list[float], *, lookback: int = 20, engine: str = "breakout") -> dict | None:
     """Reference signal: a close above the prior ``lookback`` high is a LONG fire; below the
@@ -63,4 +93,4 @@ def run(ledger, *, feed_fn=None, lookback: int = 20, engine: str = "breakout") -
     return {"fires": 1, "signal": sig, "fire_id": fire_id}
 
 
-__all__ = ["evaluate", "run", "feed_available"]
+__all__ = ["evaluate", "run", "feed_available", "lab_state", "ENGINES"]
