@@ -5,8 +5,19 @@ heavy boundaries (Claude CLI, pytest, git) are injectable so the gate logic is p
 without spawning anything."""
 from __future__ import annotations
 
+import pytest
+
 from utah import failures, selfcode
 from tests.fakes import FakeFailureStore
+
+
+@pytest.fixture(autouse=True)
+def _isolate_automerge_flag(monkeypatch, tmp_path):
+    """Hermetic gate: tests must NOT depend on the ambient
+    ~/.utah/run/selfcode.automerge flag (armed for live autonomy). Default it
+    ABSENT so propose() is propose-only unless a test passes auto_merge=True. This
+    is what lets the full suite stay green while autonomy has the flag armed."""
+    monkeypatch.setattr(selfcode, "AUTOMERGE_FLAG", tmp_path / "ambient-automerge-off")
 
 
 def _vcs():

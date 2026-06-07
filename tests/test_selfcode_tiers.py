@@ -16,8 +16,17 @@ Boundaries are injected so the policy is proven without spawning git/claude/pyte
 """
 from __future__ import annotations
 
+import pytest
+
 from utah import failures, selfcode
 from tests.fakes import FakeFailureStore
+
+
+@pytest.fixture(autouse=True)
+def _isolate_automerge_flag(monkeypatch, tmp_path):
+    """Hermetic gate: ignore the ambient ~/.utah/run/selfcode.automerge flag
+    (armed for live autonomy). Tests force the merge path via auto_merge=True."""
+    monkeypatch.setattr(selfcode, "AUTOMERGE_FLAG", tmp_path / "ambient-automerge-off")
 
 
 def _vcs():
