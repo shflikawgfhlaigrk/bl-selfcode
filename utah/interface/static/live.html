@@ -38,8 +38,19 @@
   .hstat .m b{color:var(--gold2);font-size:15px} .hstat .m span{color:var(--mut);font-size:9px;display:block;letter-spacing:2px}
   #clock{color:var(--gold2);font-size:13px}
   /* layout */
-  main{display:grid;grid-template-columns:248px 1fr 300px;gap:14px;padding:16px 18px}
+  main{padding:0}
   .col{display:flex;flex-direction:column;gap:14px}
+  /* tabs (top-level pages) */
+  .tabs{display:flex;gap:6px;padding:10px 18px 0;flex-wrap:wrap}
+  .tab{background:transparent;border:1px solid var(--line);border-bottom:0;color:var(--mut);
+    padding:7px 18px;border-radius:8px 8px 0 0;cursor:pointer;font:inherit;font-size:11px;letter-spacing:2px}
+  .tab:hover:not(.active){color:var(--gold2)}
+  .tab.active{color:#1a1407;background:linear-gradient(180deg,var(--gold2),var(--gold));border-color:var(--gold);font-weight:700}
+  .page{display:none;padding:16px 18px;border-top:1px solid var(--line)}
+  .page.active{display:block}
+  .coregrid{display:grid;grid-template-columns:248px 1fr 300px;gap:14px}
+  .pagegrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:14px;align-items:start}
+  @media(max-width:1100px){.coregrid{grid-template-columns:1fr}}
   .card{background:linear-gradient(180deg,var(--panel),var(--panel2));border:1px solid var(--line);
     border-radius:9px;padding:13px 14px;position:relative;overflow:hidden}
   .card::before{content:"";position:absolute;left:0;top:0;height:2px;width:38px;background:var(--gold);opacity:.5}
@@ -137,53 +148,76 @@
   </div>
 </header>
 
-<main>
-  <!-- LEFT: system spine (real) -->
-  <div class="col">
-    <div class="card drillable" data-drill="spine"><h2>SYSTEM SPINE <span class="tag" id="spine-tag">—</span></h2><div id="spine"></div></div>
-    <div class="card drillable" data-drill="pool"><h2>WORKER POOL</h2><div id="pool"></div></div>
-    <div class="card drillable" data-drill="governor"><h2>GOVERNOR</h2><div id="gov"></div></div>
-    <div class="card"><h2>SYNC &amp; INGEST</h2><div class="dormbody" id="p-sync">DORMANT</div></div>
-  </div>
+<nav class="tabs">
+  <button class="tab active" data-tab="core">◆ CORE</button>
+  <button class="tab" data-tab="system">SYSTEM</button>
+  <button class="tab" data-tab="revenue">REVENUE</button>
+  <button class="tab" data-tab="ops">OPS</button>
+  <button class="tab" data-tab="voice">VOICE</button>
+</nav>
 
-  <!-- CENTER: reasoning core + tiles + dormant domains -->
-  <div class="col">
-    <div class="card">
-      <h2>REASONING CORE <span class="tag" id="core-tag">—</span></h2>
-      <div class="core-wrap">
-        <div class="core">
-          <div class="ring r1"></div><div class="ring r2"></div><div class="ring r3"></div>
-          <span class="orbit o-top">MEM</span><span class="orbit o-bot">BUS</span>
-          <span class="orbit o-l">RISK</span><span class="orbit o-r">VOICE</span>
-          <div class="orb"><b id="core-state">ACE</b><span>GROUNDED · NO-FAB</span></div>
-        </div>
-        <div class="tiles">
-          <div class="tile"><b id="t-up">—</b><span>UPTIME s</span></div>
-          <div class="tile"><b id="t-bus">—</b><span>BUS EVENTS</span></div>
-          <div class="tile"><b>ON-DEVICE</b><span>EMBED+RERANK</span></div>
+<main>
+  <!-- CORE: brain + memory + the live spine -->
+  <section class="page active" data-page="core"><div class="coregrid">
+    <div class="col">
+      <div class="card drillable" data-drill="spine"><h2>SYSTEM SPINE <span class="tag" id="spine-tag">—</span></h2><div id="spine"></div></div>
+      <div class="card drillable" data-drill="memory"><h2>MEMORY · BRAIN</h2><div id="memory"></div></div>
+    </div>
+    <div class="col">
+      <div class="card">
+        <h2>REASONING CORE <span class="tag" id="core-tag">—</span></h2>
+        <div class="core-wrap">
+          <div class="core">
+            <div class="ring r1"></div><div class="ring r2"></div><div class="ring r3"></div>
+            <span class="orbit o-top">MEM</span><span class="orbit o-bot">BUS</span>
+            <span class="orbit o-l">RISK</span><span class="orbit o-r">VOICE</span>
+            <div class="orb"><b id="core-state">ACE</b><span>GROUNDED · NO-FAB</span></div>
+          </div>
+          <div class="tiles">
+            <div class="tile"><b id="t-up">—</b><span>UPTIME s</span></div>
+            <div class="tile"><b id="t-bus">—</b><span>BUS EVENTS</span></div>
+            <div class="tile"><b>ON-DEVICE</b><span>EMBED+RERANK</span></div>
+          </div>
         </div>
       </div>
     </div>
-    <div class="grid3">
-      <div class="card drillable" data-drill="engines"><h2>ENGINES</h2><div class="dormbody" id="p-engines">DORMANT</div></div>
-      <div class="card"><h2>RISK KERNEL</h2><div class="dormbody" id="p-risk">DORMANT</div></div>
-      <div class="card"><h2>TICK FLOW</h2><div class="dormbody" id="p-tick">DORMANT</div></div>
+    <div class="col">
+      <div class="card drillable" data-drill="spine"><h2>LOCAL DAEMON &amp; SOCKET <span class="tag" id="dae-tag">—</span></h2><div id="daemon"></div></div>
+      <div class="card"><h2>EVENT BUS · LIVE</h2><div class="ticker" id="ticker"><div>awaiting events…</div></div></div>
+      <div class="card drillable" data-drill="audit"><h2>AUDIT LEDGER</h2><div class="dormbody" id="p-audit">DORMANT</div></div>
     </div>
-    <div class="grid3">
-      <div class="card drillable" data-drill="leads"><h2>LEADS</h2><div class="dormbody" id="p-leads">DORMANT</div></div>
-      <div class="card drillable" data-drill="probate"><h2>PROBATE</h2><div class="dormbody" id="p-probate">DORMANT</div></div>
-      <div class="card drillable" data-drill="outreach"><h2>OUTREACH</h2><div class="dormbody" id="p-outreach">DORMANT</div></div>
-    </div>
-  </div>
+  </div></section>
 
-  <!-- RIGHT: daemon/socket + memory + bus + dormant functions -->
-  <div class="col">
-    <div class="card drillable" data-drill="spine"><h2>LOCAL DAEMON &amp; SOCKET <span class="tag" id="dae-tag">—</span></h2><div id="daemon"></div></div>
-    <div class="card drillable" data-drill="memory"><h2>MEMORY · BRAIN</h2><div id="memory"></div></div>
-    <div class="card"><h2>EVENT BUS · LIVE</h2><div class="ticker" id="ticker"><div>awaiting events…</div></div></div>
+  <!-- SYSTEM: pool / governor / watchdog -->
+  <section class="page" data-page="system"><div class="pagegrid">
+    <div class="card drillable" data-drill="pool"><h2>WORKER POOL</h2><div id="pool"></div></div>
+    <div class="card drillable" data-drill="governor"><h2>GOVERNOR</h2><div id="gov"></div></div>
+    <div class="card drillable" data-drill="watchdog"><h2>WATCHDOG</h2><div class="dormbody" id="p-watchdog">—</div></div>
+    <div class="card"><h2>SYNC &amp; INGEST</h2><div class="dormbody" id="p-sync">DORMANT</div></div>
+  </div></section>
+
+  <!-- REVENUE: the money ledger + producers -->
+  <section class="page" data-page="revenue"><div class="pagegrid">
+    <div class="card drillable" data-drill="leads"><h2>LEADS</h2><div class="dormbody" id="p-leads">DORMANT</div></div>
+    <div class="card drillable" data-drill="probate"><h2>PROBATE</h2><div class="dormbody" id="p-probate">DORMANT</div></div>
+    <div class="card drillable" data-drill="outreach"><h2>OUTREACH</h2><div class="dormbody" id="p-outreach">DORMANT</div></div>
+    <div class="card drillable" data-drill="engines"><h2>ENGINES · FIRES</h2><div class="dormbody" id="p-engines">DORMANT</div></div>
+    <div class="card drillable" data-drill="trading"><h2>TRADING</h2><div class="dormbody" id="p-trading">—</div></div>
+    <div class="card drillable" data-drill="marketer"><h2>MARKETER</h2><div class="dormbody" id="p-marketer">—</div></div>
+  </div></section>
+
+  <!-- OPS: tasks / trackers / research / mail -->
+  <section class="page" data-page="ops"><div class="pagegrid">
+    <div class="card drillable" data-drill="tasks"><h2>TASKS</h2><div class="dormbody" id="p-tasks">—</div></div>
+    <div class="card drillable" data-drill="trackers"><h2>TRACKERS</h2><div class="dormbody" id="p-trackers">—</div></div>
+    <div class="card drillable" data-drill="research"><h2>RESEARCH</h2><div class="dormbody" id="p-research">—</div></div>
+    <div class="card drillable" data-drill="mail"><h2>MAIL</h2><div class="dormbody" id="p-mail">—</div></div>
+  </div></section>
+
+  <!-- VOICE -->
+  <section class="page" data-page="voice"><div class="pagegrid">
     <div class="card drillable" data-drill="voice"><h2>VOICE PIPELINE</h2><div class="dormbody" id="p-voice">DORMANT</div></div>
-    <div class="card drillable" data-drill="audit"><h2>AUDIT LEDGER</h2><div class="dormbody" id="p-audit">DORMANT</div></div>
-  </div>
+  </div></section>
 </main>
 
 <div class="ask">
@@ -357,8 +391,32 @@ document.querySelectorAll(".drillable").forEach(card=>{
   const title=(card.querySelector("h2")?.textContent||name).replace(/⤢/,"").trim();
   card.addEventListener("click",()=>openDrill(title+" — live detail", body=>drillPanel(name, body)));
 });
+// ---- TABS: top-level pages; each tab's capability panels populate on view ----
+const TAB_PANELS={core:["audit"],system:["watchdog"],revenue:["trading","marketer"],
+  ops:["tasks","trackers","research","mail"],voice:[]};
+let curTab="core";
+async function populatePanel(name){
+  const el=$("p-"+name); if(!el) return;
+  try{
+    const d=await fetch("/panel/"+name).then(r=>r.json());
+    if(d.error) throw new Error(d.error);
+    let body="";
+    if(d.rows!==undefined) body='<div class="row"><span class="k">rows</span><span class="v">'+d.rows.length+'</span></div>'+
+      (d.note?'<div class="sub">'+esc(d.note)+'</div>':'')+
+      d.rows.slice(0,3).map(r=>'<div class="row"><span class="v" style="font-size:10px">'+esc((r.text||r.name||r.content||JSON.stringify(r))).slice(0,60)+'</span></div>').join('');
+    else { const kv={}; for(const k in d){ if(k!=='panel'&&(typeof d[k]!=='object'||d[k]===null)) kv[k]=d[k]; } body=rows(kv); }
+    el.className=""; el.innerHTML=body||'<div class="dormbody">—</div>';
+  }catch(e){ el.className="dormbody"; el.textContent="unavailable"; }
+}
+function refreshTab(pg){ (TAB_PANELS[pg]||[]).forEach(populatePanel); }
+document.querySelectorAll(".tab").forEach(t=>t.addEventListener("click",()=>{
+  curTab=t.dataset.tab;
+  document.querySelectorAll(".tab").forEach(x=>x.classList.toggle("active",x===t));
+  document.querySelectorAll(".page").forEach(p=>p.classList.toggle("active",p.dataset.page===curTab));
+  refreshTab(curTab);
+}));
 function clock(){$("clock").textContent=new Date().toLocaleTimeString([],{hour:"2-digit",minute:"2-digit",second:"2-digit"})+" · ET";}
-poll();setInterval(poll,2000);clock();setInterval(clock,1000);
+poll();setInterval(()=>{poll();refreshTab(curTab);},2000);clock();setInterval(clock,1000);refreshTab(curTab);
 </script>
 </body>
 </html>
