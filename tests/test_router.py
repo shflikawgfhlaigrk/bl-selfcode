@@ -34,6 +34,17 @@ def test_brief_intents(text):
 
 
 @pytest.mark.parametrize("text", [
+    "what time is it",
+    "what's the time",
+    "what's today's date",
+    "what day is it",
+    "what's the date right now",
+])
+def test_time_intents(text):
+    assert route(text) is Route.TIME
+
+
+@pytest.mark.parametrize("text", [
     "ask claude what to do",
     "use claude for this",
     "think hard about my portfolio",

@@ -65,6 +65,10 @@ LOCAL_HEAVY_MAX_TOKENS: int = int(os.environ.get("UTAH_LOCAL_HEAVY_MAX", "1024")
 #: At/above this word count, a non-capability query leans to the heavy local tier.
 ROUTER_HEAVY_MIN_WORDS: int = 18
 
+# --- clock capability (time/date — a model cannot know the current instant) ----
+#: Michael's timezone (Gulf Shores, AL = Central). Invalid → system-local fallback.
+TIMEZONE: str = os.environ.get("UTAH_TIMEZONE", "America/Chicago")
+
 # --- weather capability (R-weather: free, grounded, cached) -------------------
 #: Default location (Gulf Shores, AL); env-overridable per machine.
 WEATHER_LAT: float = float(os.environ.get("UTAH_WEATHER_LAT", "30.2460"))

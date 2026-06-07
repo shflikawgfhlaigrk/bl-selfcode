@@ -23,6 +23,7 @@ class Route(enum.Enum):
 
     BRIEF = "brief"              # the morning-brief capability (live Postgres state)
     WEATHER = "weather"          # the weather capability (free API + cache)
+    TIME = "time"                # the clock capability (time/date, grounded)
     KNOWLEDGE = "knowledge"      # a curated knowledge pack, verbatim (no model)
     LOCAL_QUICK = "local_quick"  # llama3.2:3b — fast instruct, most quick things
     LOCAL_HEAVY = "local_heavy"  # deepseek-r1:32b — the free resident reasoner
@@ -51,6 +52,12 @@ _BRIEF = re.compile(
     r"what happened (today|overnight|last night))\b",
     re.I,
 )
+_TIME = re.compile(
+    r"\b(what'?s the (time|date)|what time is it|current time|the time right now|"
+    r"what day is it|what'?s today'?s? (date|day)?|today'?s date|day of the week|"
+    r"what'?s the day)\b",
+    re.I,
+)
 
 #: Reasoning verbs — lean to the heavy (free) local reasoner.
 _REASONING = re.compile(
@@ -71,6 +78,8 @@ def route(text: str) -> Route:
         return Route.BRAIN
     if _WEATHER.search(t):
         return Route.WEATHER
+    if _TIME.search(t):
+        return Route.TIME
     if _BRIEF.search(t):
         return Route.BRIEF
     # Curated knowledge packs answer verbatim — never a model (which hallucinates
