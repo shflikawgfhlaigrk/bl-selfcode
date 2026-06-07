@@ -39,6 +39,8 @@
     <string>/Users/michaelbarber/Desktop/ProjectUtah</string>
     <key>UTAH_SELFCODE_REPO</key>
     <string>/Users/michaelbarber/.utah/selfcode-repo</string>
+    <key>UTAH_SELFCODE_TIME_LIMIT</key>
+    <string>900</string>
     <key>PYTHONUNBUFFERED</key>
     <string>1</string>
     <key>PATH</key>
