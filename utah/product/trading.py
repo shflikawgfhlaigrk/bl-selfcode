@@ -90,6 +90,11 @@ def run(ledger, *, feed_fn=None, lookback: int = 20, engine: str = "breakout") -
         return {"fires": 0, "signal": None}
     fire_id = ledger.record_fire(sig["engine"], sig["direction"], sig["entry"], synthetic=False)
     log.info("trading: %s %s @ %.4f -> fire %s", sig["engine"], sig["direction"], sig["entry"], fire_id)
+    try:  # page the phone on a real fire (gates/dedups itself; never raises here)
+        from utah import alerts
+        alerts.trade_fire(sig["engine"], sig["direction"], sig["entry"], fire_id=fire_id)
+    except Exception as exc:  # noqa: BLE001
+        failures.record("trading", "alert_failed", str(exc))
     return {"fires": 1, "signal": sig, "fire_id": fire_id}
 
 

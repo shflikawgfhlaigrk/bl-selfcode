@@ -51,14 +51,18 @@ def gather() -> dict:
     }
 
 
-def run(*, gather=gather, speak_fn=None, email_fn=None, can_email=False) -> dict:
-    """Compose the brief from live state, speak it (Piper, ungated) and/or email it
-    (gated). Returns ``{brief, spoke, emailed, email_gated}``. Never raises."""
+def run(*, gather=gather, speak_fn=None, email_fn=None, can_email=False,
+        push_fn=None) -> dict:
+    """Compose the brief from live state, speak it (Piper, ungated), optionally email it
+    (gated), and optionally PUSH it to the phone (``push_fn``, e.g. ``alerts.brief`` — the
+    working delivery path while the Gmail app-password is broken). Returns
+    ``{brief, spoke, emailed, email_gated, pushed}``. Never raises."""
     try:
         state = gather()
     except Exception as exc:  # noqa: BLE001
         failures.record("brief", "gather_failed", str(exc))
-        return {"brief": "", "spoke": False, "emailed": False, "email_gated": False}
+        return {"brief": "", "spoke": False, "emailed": False, "email_gated": False,
+                "pushed": False}
 
     text = compose_brief(**state)
 
@@ -81,8 +85,16 @@ def run(*, gather=gather, speak_fn=None, email_fn=None, can_email=False) -> dict
         failures.record("brief", "email_gated",
                         "morning brief email gated: needs Gmail/sending creds (Michael's input)")
 
-    log.info("brief: spoke=%s emailed=%s gated=%s", spoke, emailed, email_gated)
-    return {"brief": text, "spoke": spoke, "emailed": emailed, "email_gated": email_gated}
+    pushed = False
+    if push_fn is not None:
+        try:
+            pushed = bool((push_fn(text) or {}).get("sent"))
+        except Exception as exc:  # noqa: BLE001
+            failures.record("brief", "push_failed", str(exc))
+
+    log.info("brief: spoke=%s emailed=%s gated=%s pushed=%s", spoke, emailed, email_gated, pushed)
+    return {"brief": text, "spoke": spoke, "emailed": emailed,
+            "email_gated": email_gated, "pushed": pushed}
 
 
 __all__ = ["compose_brief", "gather", "run"]

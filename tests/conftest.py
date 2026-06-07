@@ -6,6 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from utah import alerts as alerts_mod
 from utah import brain as brain_mod
 from utah import core as core_mod
 from utah import embed as embed_mod
@@ -15,6 +16,12 @@ from utah import memory as memory_mod
 from utah import rerank as rerank_mod
 from utah import sica as sica_mod
 from tests.fakes import FakeEmbedder, FakeFailureStore, FakeStore, ScriptedRunner, ZeroReranker
+
+
+def _alerts_off(*_a, **_k):
+    """Default test push sender: never touches the network or pages a real phone.
+    Tests that exercise alerts inject their own capturing sender over this."""
+    return {"sent": False, "gated": True, "fake": True}
 
 
 def _local_down(*_a, **_k):
@@ -32,6 +39,12 @@ def _restore_boundaries():
     local lane OFF (so router L1 escalates to the injected brain, never real Ollama),
     and clear the in-memory conversation thread so it never bleeds across tests."""
     failures_mod.set_store(FakeFailureStore())
+    # Pin the push sender OFF for EVERY test so no code path (failures.record's critical
+    # hook, trade fires, brief/leads/probate crons) ever hits the network or pages a real
+    # phone — even though tests run against the real ~/.utah/secrets. Also clear the
+    # in-memory dedup so a prior test's alert can't suppress a later test's.
+    alerts_mod.set_sender(_alerts_off)
+    alerts_mod._SEEN.clear()
     # Pin a fake memory backend for EVERY test so no test ever reads, writes, or resets
     # the real Postgres memory (that pollution added rows to prod; a stray reset once
     # wiped it). Tests that need a configured store override via the `mem`/`fake_store`
@@ -56,6 +69,8 @@ def _restore_boundaries():
     memory_mod.set_backend(None)
     sica_mod.set_archive_backend(None)
     failures_mod.set_store(None)
+    alerts_mod.set_sender(None)
+    alerts_mod._SEEN.clear()
 
 
 @pytest.fixture

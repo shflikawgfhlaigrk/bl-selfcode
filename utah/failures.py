@@ -121,11 +121,22 @@ def set_store(store: FailureStore | None) -> None:
 
 
 def record(source: str, kind: str, detail: str = "") -> None:
-    """Record a failure. NEVER raises — de-silencing must not cause a failure."""
+    """Record a failure. NEVER raises — de-silencing must not cause a failure.
+
+    Genuinely-critical kinds (``config.CRITICAL_FAILURE_KINDS``) ALSO page the phone,
+    fired on a background thread so this hot path never blocks, deduped so a storm
+    (e.g. a Postgres restart) pages once, not forty times. Paging must never cause a
+    failure either, so the whole hook is swallowed."""
     try:
         get_store().insert(str(source), str(kind), str(detail)[:MAX_DETAIL])
     except Exception:  # noqa: BLE001 — the whole point is to never propagate
         log.debug("failure-record swallowed (source=%s kind=%s)", source, kind, exc_info=True)
+    try:
+        if str(kind) in config.CRITICAL_FAILURE_KINDS:
+            from utah import alerts
+            alerts.critical_async(str(source), str(detail), key=f"{source}/{kind}")
+    except Exception:  # noqa: BLE001 — paging must never break recording
+        log.debug("failure-page swallowed (source=%s kind=%s)", source, kind, exc_info=True)
 
 
 def record_silent(source: str, detail: str = "") -> None:
