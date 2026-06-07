@@ -17,6 +17,7 @@ import logging
 import re
 
 from utah import failures
+from utah.product import mail
 
 log = logging.getLogger("utah.product.outreach")
 
@@ -86,11 +87,15 @@ def _recipient(contact: dict, channel: str) -> str:
 
 
 def queue(ledger, campaign: str, leads: list[dict], footer: dict | None = None,
-          can_send: bool = False) -> dict:
-    """Compose + lint + suppression-queue each lead. Returns counts. The SEND is gated:
-    with ``can_send=False`` (no creds/address) nothing is sent and the gate is documented
-    to the failure log. ``recipient`` for suppression is the email or phone."""
-    queued = suppressed = needs_contact = blocked = 0
+          can_send: bool = False, send_fn=None) -> dict:
+    """Compose + lint + suppression-queue each lead, and (when allowed) SEND. The send
+    is gated: with ``can_send=False`` nothing is sent and the gate is documented. With
+    ``can_send=True`` an EMAIL lead is sent via ``mail.send`` (real SMTP if creds are
+    present, else it records its own gate and stays queued — never faked). SMS has no
+    provider yet, so it always stays queued. ``send_fn`` is injectable for tests.
+    ``recipient`` for suppression is the email or phone."""
+    sender = send_fn or mail.send
+    queued = suppressed = needs_contact = blocked = sent = 0
     for lead in leads:
         channel = pick_channel(lead.get("contact"))
         if channel is None:
@@ -103,10 +108,17 @@ def queue(ledger, campaign: str, leads: list[dict], footer: dict | None = None,
                             f"{lead.get('name')}: pitch tripped the spam-content gate")
             continue
         recipient = _recipient(lead.get("contact", {}), channel)
-        if ledger.log_outreach(recipient, campaign, channel):
-            queued += 1
-        else:
-            suppressed += 1
+        if not ledger.log_outreach(recipient, campaign, channel):
+            suppressed += 1          # already contacted for this campaign — never twice
+            continue
+        queued += 1
+        if can_send and channel == "email":
+            res = sender(recipient, msg["subject"], msg["body"])
+            if res.get("sent"):
+                sent += 1
+            else:
+                failures.record("outreach", "send_failed",
+                                f"{recipient}: {res.get('error') or 'gated'}")
 
     gated = ""
     if queued and not can_send:
@@ -114,10 +126,10 @@ def queue(ledger, campaign: str, leads: list[dict], footer: dict | None = None,
                  "CAN-SPAM physical address (Michael's business inputs)")
         failures.record("outreach", "send_gated",
                         f"{campaign}: {queued} queued, 0 sent — {gated}")
-    log.info("outreach %s: queued=%d suppressed=%d needs_contact=%d blocked=%d sent=0",
-             campaign, queued, suppressed, needs_contact, blocked)
+    log.info("outreach %s: queued=%d suppressed=%d needs_contact=%d blocked=%d sent=%d",
+             campaign, queued, suppressed, needs_contact, blocked, sent)
     return {"campaign": campaign, "queued": queued, "suppressed": suppressed,
-            "needs_contact": needs_contact, "blocked": blocked, "sent": 0, "gated": gated}
+            "needs_contact": needs_contact, "blocked": blocked, "sent": sent, "gated": gated}
 
 
 __all__ = ["compose", "content_score", "pick_channel", "queue",
