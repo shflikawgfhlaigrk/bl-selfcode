@@ -107,6 +107,25 @@ NATIONAL_CHAINS: frozenset[str] = frozenset({
     "panera bread", "qdoba", "which wich", "steaknshake", "steak n shake",
     "huddle house", "el pollo loco", "valero", "sunoco", "speedway", "wawa", "sheetz",
     "murphy usa", "golden pantry", "kangaroo express", "the pantry", "spectrum",
+    # --- 2026-06-07: chains that were leaking into the no-website list (OSM left
+    # the per-location node untagged for website, but the brand obviously has one) ---
+    "7 brew", "seven brew", "dutch bros", "scooters coffee", "biggby coffee",
+    "pj's coffee", "pjs coffee", "hunt brothers pizza", "chicken salad chick",
+    "marcos pizza", "your pie", "mellow mushroom", "taco mac", "hibachi express",
+    "longhorn steakhouse", "cracker barrel", "olive garden", "red lobster",
+    "outback steakhouse", "texas roadhouse", "carrabbas", "applebees", "chilis",
+    "buffalo wild wings", "raising canes", "culvers", "freddys", "jasons deli",
+    "panda express", "moe's southwest grill", "newks eatery", "united rentals",
+    "sunbelt rentals", "sunbelt rental", "u haul", "uhaul", "penske",
+    "enterprise rent a car", "enterprise rent-a-car", "hertz", "budget truck rental",
+    "massage envy", "smartstyle", "piggly wiggly", "jcpenney", "jc penney",
+    "ethan allen", "floor decor", "floor and decor", "mavis tires brakes",
+    "mavis tires and brakes", "mavis discount tire", "hobby lobby", "michaels",
+    "petco", "petsmart", "pet supplies plus", "academy sports", "dicks sporting goods",
+    "best buy", "home depot", "lowes", "lowe's home improvement", "office depot",
+    "officemax", "staples", "the ups store", "ups store", "fedex office",
+    "pilot", "pilot travel center", "flying j", "loves travel stop", "loves",
+    "walmart supercenter", "walmart garden center", "walmart neighborhood market",
 })
 
 Fetch = Callable[[str], str]  # Overpass QL -> raw JSON text (injectable boundary)
