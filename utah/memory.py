@@ -169,9 +169,10 @@ def decide_write(content: str, neighbors: Sequence[Neighbor]) -> WriteDecision:
     new_ents = entities.normalized_set(content)
     supersede: list[int] = []
     for nb in neighbors:
-        if nb.source == "core":
-            continue  # core is authoritative ground truth (Michael's creed) — a later
-            #            fact/turn must NEVER supersede it, or the always-on identity rots
+        if nb.source in config.NEVER_SUPERSEDE_SOURCES:
+            continue  # authoritative ground truth (the creed + the curated library) — a
+            #            later fact/turn must NEVER collapse it, or the always-on identity
+            #            rots and distinct reference principles get eaten as "duplicates"
         if nb.sim >= config.SUPERSEDE_SIM:
             supersede.append(nb.id)
         elif nb.sim >= config.SUPERSEDE_ENT and new_ents & entities.normalized_set(nb.content):

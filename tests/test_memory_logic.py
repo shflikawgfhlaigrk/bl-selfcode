@@ -102,16 +102,27 @@ def test_entity_path_supersedes_attribute_change_below_090():
     assert decision.supersede_ids == [4]
 
 
-def test_core_rows_are_never_superseded():
-    """Core is Michael's authoritative creed/identity (always-injected). A later fact
-    or turn that merely paraphrases it must NOT supersede it — even a 0.99 paraphrase or
-    a same-entity attribute change is exempt — or the always-on identity layer rots.
-    (The live bug: 'Law 5: guard your reputation' superseded core 'guard my reputation'.)"""
+def test_core_and_knowledge_rows_are_never_superseded():
+    """Authoritative ground truth — the always-injected creed (source 'core') and the
+    curated reference library (source 'knowledge', e.g. the books) — is never superseded
+    by a later fact/turn, even a 0.99 paraphrase or a same-entity attribute change. Else
+    the identity layer rots and distinct reference principles get eaten as 'duplicates'.
+    (Live bugs: 'Law 5: guard your reputation' collapsed core 'guard my reputation'; the
+    13 'Think and Grow Rich' principles collapsed to 3.)"""
     core_para = Neighbor(5, "Power: guard your reputation with your life.", 0.95, "core")
     core_ent = Neighbor(6, "Michael lives in Gulf Shores", 0.85, "core")
-    decision = decide_write("I guard my reputation with my life.", [core_para, core_ent])
+    know = Neighbor(7, "Think and Grow Rich principle 8 (Persistence): never quit.", 0.93, "knowledge")
+    decision = decide_write("I guard my reputation with my life.", [core_para, core_ent, know])
     assert decision.action is WriteAction.INSERTED
-    assert decision.supersede_ids == []   # neither core row touched
+    assert decision.supersede_ids == []   # no core/knowledge row touched
+
+
+def test_ordinary_facts_still_supersede():
+    """The Newman path is intact for evolving facts (default/non-authoritative source)."""
+    decision = decide_write(
+        "Michael lives in Utah", [Neighbor(8, "Michael lives in Gulf Shores", 0.85, "fact")]
+    )
+    assert decision.supersede_ids == [8]
 
 
 def test_entity_path_threshold_is_exact():

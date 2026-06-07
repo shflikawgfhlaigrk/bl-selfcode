@@ -145,9 +145,17 @@ SUPERSEDE_SCAN: int = 8
 
 #: Sources allowed through the admission gate. Anything else (backfill,
 #: synthetic, scraped) is denied structurally — confabulation dies here.
+#: ``core`` = always-injected identity/creed; ``knowledge`` = curated reference
+#: corpus (the books) — recalled on demand, but never superseded or decayed.
 ALLOWED_SOURCES: frozenset[str] = frozenset(
-    {"user", "turn", "fact", "consolidation", "sensor", "core"}
+    {"user", "turn", "fact", "consolidation", "sensor", "core", "knowledge"}
 )
+
+#: Authoritative sources a later write must NEVER supersede — curated ground truth
+#: (the identity creed and the reference library). A distinct fact about an evolving
+#: attribute still supersedes another fact (the Newman path); it just can't collapse
+#: these. Without this, loading the 13 "Think and Grow Rich" principles collapsed to 3.
+NEVER_SUPERSEDE_SOURCES: frozenset[str] = frozenset({"core", "knowledge"})
 
 #: Admission: reject degenerate content beyond this many characters
 #: (callers must chunk; a memory row is an atomic fact or one exchange).
@@ -193,7 +201,9 @@ DECAY_ARCHIVE_BELOW: float = 0.25
 DECAY_MIN_AGE_DAYS: int = 7
 
 #: Sources that never decay-archive (durable, provenance-marked facts).
-DECAY_PROTECTED_SOURCES: frozenset[str] = frozenset({"fact", "consolidation", "core"})
+DECAY_PROTECTED_SOURCES: frozenset[str] = frozenset(
+    {"fact", "consolidation", "core", "knowledge"}
+)
 
 # --- brain prompt budget --------------------------------------------------------
 #: Hard cap on context characters passed to the CLI (argv size safety).
