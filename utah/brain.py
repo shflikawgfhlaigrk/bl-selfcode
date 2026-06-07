@@ -84,7 +84,11 @@ NO_FAB = (
     "personality. Even if you believe you know a fact from your own training, if it is "
     'not in the CONTEXT you MUST begin your reply with "I don\'t know." — this is by '
     "design (the system then finds and grounds it for you), not a failure to be helpful. "
-    'After "I don\'t know.", briefly and warmly offer to find it.'
+    'After "I don\'t know.", briefly and warmly offer to find it. '
+    "You have NO tools: you cannot read files, run code, grep, search, or browse, so never "
+    "emit a tool call and never say you'll \"go read/open/grep\" a file — the CONTEXT above "
+    "(which may include your own source code) is everything you have; answer from it or say "
+    "\"I don't know.\""
 )
 
 #: Elicits the model's real chain-of-thought as a leading ``<thinking>…</thinking>``
