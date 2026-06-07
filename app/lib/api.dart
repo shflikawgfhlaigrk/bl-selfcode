@@ -11,11 +11,19 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 
 class UtahApi {
-  /// Local default; on the phone this becomes the Tailscale HTTPS host.
+  /// Default = the Tailscale tailnet host, so the app reaches Utah from the phone
+  /// (and the Mac — both are on the tailnet). Tailscale serve proxies this to the
+  /// daemon's loopback :8766, and WireGuard encrypts it in transit. Override with
+  /// `--dart-define=UTAH_BASE=http://127.0.0.1:8766` for local-only runs.
+  static const _defaultBase = String.fromEnvironment(
+    'UTAH_BASE',
+    defaultValue: 'http://michaels-macbook-pro.tailb44439.ts.net:8765',
+  );
   final String base;
   final http.Client _client;
-  UtahApi({this.base = 'http://127.0.0.1:8766', http.Client? client})
-      : _client = client ?? http.Client();
+  UtahApi({String? base, http.Client? client})
+      : base = base ?? _defaultBase,
+        _client = client ?? http.Client();
 
   Future<Map<String, dynamic>> _getJson(String path) async {
     final r = await _client
