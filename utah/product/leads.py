@@ -327,6 +327,25 @@ def _tile_region(base: str, tile: tuple[float, float, float, float]) -> str:
     return f"{base} [{s:.2f},{w:.2f}]"
 
 
+def purge_multi_location_chains(min_locations: int = 3, ledger=None) -> dict:
+    """Self-defending chain filter: a name appearing at ``min_locations``+ DISTINCT
+    regions is a chain (a genuine local SMB has ONE location). Deletes them — catching the
+    chains the hardcoded NATIONAL_CHAINS denylist misses entirely (new brands) or misses
+    via normalization gaps ("AT&T"→"at t"≠"att", "O'Reilly"→"oreilly"≠"o reilly"). Called
+    at the end of each frontier run so the table self-cleans. Returns ``{purged}``."""
+    import psycopg
+
+    from utah import config
+
+    with psycopg.connect(config.DB_DSN, autocommit=True) as c:
+        n = c.execute(
+            "DELETE FROM leads WHERE name IN (SELECT name FROM leads GROUP BY name "
+            "HAVING count(DISTINCT region) >= %s)", (min_locations,)).rowcount
+    if n:
+        log.info("leads: purged %d multi-location (chain) rows", n)
+    return {"purged": n}
+
+
 def _all_frontier_tiles() -> list[tuple[str, tuple[float, float, float, float]]]:
     """Every tile of every FRONTIER_REGIONS region, each tagged with its region name.
     The production cursor is a single int into THIS combined list, so advancing rotates
@@ -380,6 +399,11 @@ def run_scheduled(region: str = "Georgia Frontier", target: int = DAILY_TARGET,
         scanned += 1
         i = (i + 1) % len(tagged)
     save(i)
+    if bbox is None:  # production run — self-clean chains the name denylist missed
+        try:
+            purge_multi_location_chains()
+        except Exception as exc:  # noqa: BLE001 — cleanup must never fail the run
+            log.warning("leads chain-purge skipped: %s", exc)
     out = {"tiles_scanned": scanned, "found": found, "new": new, "target": target,
            "met": new >= target, "region": "+".join(sorted(hit)) or region, "cursor": i}
     log.info("leads cron (self-replenishing frontier): %s", out)

@@ -97,7 +97,7 @@ def run() -> None:
                 level["last_loud"] = time.monotonic()  # not deaf — we muted ourselves
                 continue
             mx = level["max"]; level["max"] = 0.0
-            log.info("voice: audio level (max rms / %ds) = %.4f", MONITOR_S, mx)
+            log.debug("voice: audio level (max rms / %ds) = %.4f", MONITOR_S, mx)
             quiet_for = time.monotonic() - level["last_loud"]
             if quiet_for > SILENCE_ALERT_S and not level["alerted"]:
                 level["alerted"] = True

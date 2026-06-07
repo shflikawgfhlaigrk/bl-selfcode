@@ -33,6 +33,16 @@
     <string>/Users/michaelbarber/Desktop/ProjectUtah</string>
     <key>PYTHONUNBUFFERED</key>
     <string>1</string>
+    <!-- Voice STT (Moonshine via huggingface_hub) revalidated the cached ONNX model
+         against huggingface.co on EVERY transcribe — 2 blocking HEAD requests on the
+         mic-muted critical path, so a slow/unreachable HF made Utah go DEAF (a 26s
+         window observed; an outage => transcript='' => dead-voice while the deck still
+         shows 'listening'). Offline flags force the local cache, zero network. They
+         propagate to the voice loop via supervisor env={**os.environ}. -->
+    <key>HF_HUB_OFFLINE</key>
+    <string>1</string>
+    <key>TRANSFORMERS_OFFLINE</key>
+    <string>1</string>
     <key>PATH</key>
     <string>/Users/michaelbarber/.utah/venv/bin:/opt/homebrew/bin:/usr/local/bin:/Users/michaelbarber/.local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
   </dict>
