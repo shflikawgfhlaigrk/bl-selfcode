@@ -36,7 +36,7 @@ def test_cycle_runs_meta_task_through_governed(monkeypatch, tmp_path):
         return {"utility": e.utility, "tests_passed": True, "merged": False, "cost_usd": 0}
 
     r = sica_autonomy.run_cycle(repo=tmp_path, sync_fn=lambda repo: True,
-                                brain_fn=lambda prompt: "add a docstring to leads.py",
+                                task_fn=lambda: "add a docstring to leads.py",
                                 propose_fn=fake_propose)
     assert r["ran"] is True
     assert r["task"] == "add a docstring to leads.py"
@@ -54,7 +54,7 @@ def test_cycle_falls_back_to_default_task_when_brain_silent(monkeypatch, tmp_pat
         return {"utility": 0.5, "tests_passed": False, "merged": False, "cost_usd": 0}
 
     r = sica_autonomy.run_cycle(repo=tmp_path, sync_fn=lambda repo: True,
-                                brain_fn=lambda prompt: "   ",   # brain returns nothing usable
+                                task_fn=lambda: "   ",   # task source returns nothing usable
                                 propose_fn=fake_propose)
     assert r["task"] == sica_autonomy.DEFAULT_TASK
     assert seen["task"] == sica_autonomy.DEFAULT_TASK

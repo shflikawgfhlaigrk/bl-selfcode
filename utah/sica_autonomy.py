@@ -79,8 +79,13 @@ def sync_repo(repo: Path) -> bool:
     return True
 
 
-def run_cycle(*, repo=None, brain_fn=None, propose_fn=None, sync_fn=None) -> dict:
-    """One autonomous improvement cycle. Boundaries injected for unit-proof."""
+def run_cycle(*, repo=None, brain_fn=None, propose_fn=None, sync_fn=None, task_fn=None) -> dict:
+    """One autonomous improvement cycle. Boundaries injected for unit-proof.
+
+    The task is chosen by the domain-rotating goal source (sica_goals): each cycle
+    targets baseline / leads / autonomy in turn, grounded in live signals — so the
+    loop optimizes the real product, not archive look-alikes. ``task_fn`` overrides
+    the generator (tests / a fixed goal)."""
     if not selfcode.enabled():
         return {"ran": False, "reason": "kill switch"}
     repo = Path(repo) if repo else REPO_DIR
@@ -88,16 +93,23 @@ def run_cycle(*, repo=None, brain_fn=None, propose_fn=None, sync_fn=None) -> dic
         return {"ran": False, "reason": f"dedicated repo not ready: {repo} "
                                         f"(provision with: git clone <origin> {repo})"}
     arch = sica.Archive()
+    brain = brain_fn or _brain_answer
+    if task_fn is not None:
+        domain, task = "injected", task_fn()
+    else:
+        from utah import sica_goals
+        domain = sica_goals.pick_domain(sica_goals.next_cycle_index())
+        task = sica_goals.next_task(domain, brain_fn=brain)
+    task = (task or "").strip() or DEFAULT_TASK   # empty/whitespace → safe default
     default_propose = (lambda t: selfcode.propose_governed(
         t, repo=str(repo), auto_merge=True,
         run_claude=lambda task: sica_overseer.run_claude_supervised(task, cwd=str(repo))))
     loop = MetaLoop(archive=arch, max_steps=1, propose_fn=propose_fn or default_propose)
-    task = loop.next_task_from_archive(brain_fn or _brain_answer) or DEFAULT_TASK
     res = loop.run([task])
-    out = {"ran": True, "task": task, "steps": res.steps,
+    out = {"ran": True, "domain": domain, "task": task, "steps": res.steps,
            "attempts": res.attempts, "best_after": res.best_after}
     _log_cycle(out)
-    log.info("sica cycle: task=%r steps=%d attempts=%s", task[:60], res.steps, res.attempts)
+    log.info("sica cycle: domain=%s task=%r steps=%d", domain, task[:60], res.steps)
     return out
 
 
