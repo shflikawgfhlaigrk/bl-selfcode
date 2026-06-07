@@ -328,3 +328,58 @@ def test_decay_never_deletes(mem):
     mem.store.now += timedelta(days=120)
     memory.decay()
     assert result.id in mem.store.rows  # archived, not gone
+
+
+# --- curated lane + source prior (keep the books/identity from being buried) -------
+
+def test_source_prior_lifts_curated_over_a_tied_fact(mem):
+    """Equal dense similarity + neutral reranker → the source-authority prior decides:
+    a curated 'knowledge' row outranks the 'fact' it would otherwise tie with."""
+    mem.embedder.register("how do I gain power", basis(0))
+    mem.embedder.register("a stray fact about power", blend(basis(0), basis(2), 0.6))
+    mem.embedder.register("48 Laws: conceal your intentions", blend(basis(0), basis(3), 0.6))
+    memory.store("a stray fact about power", source="fact")
+    memory.store("48 Laws: conceal your intentions", source="knowledge")
+    hits = memory.recall("how do I gain power", k=2)
+    assert hits[0].source == "knowledge"                     # the prior tipped the tie
+    assert {h.source for h in hits} == {"knowledge", "fact"}  # both still present
+
+
+def test_curated_lane_rescues_a_row_the_general_pool_drops(mem):
+    """The diagnosed root cause: a relevant curated row never reaching the reranker
+    because the fact pile fills the candidate pool. The curated lane gives it a slot."""
+    mem.embedder.register("seeking power and influence", basis(0))
+    # 25 facts CLOSER to the query than the lone knowledge row → they fill the pool (20).
+    for i in range(25):
+        v = blend(basis(0), basis(i + 4), 0.85)
+        mem.embedder.register(f"fact number {i} about assorted things", v)
+        memory.store(f"fact number {i} about assorted things", source="fact")
+    kv = blend(basis(0), basis(1), 0.5)                      # FARTHER than every fact
+    mem.embedder.register("48 Laws of Power: master your timing", kv)
+    memory.store("48 Laws of Power: master your timing", source="knowledge")
+
+    # the general dense pool DROPS it (25 closer facts > pool of 20)…
+    pool_ids = [r.content for r in mem.store.dense_search(basis(0), 20)]
+    assert "48 Laws of Power: master your timing" not in pool_ids
+    # …but recall surfaces it anyway — it rode the curated lane to the reranker.
+    hits = memory.recall("seeking power and influence", k=5)
+    assert any(h.source == "knowledge" for h in hits)
+
+
+def test_source_prior_never_overrides_a_strong_match(mem):
+    """A strongly-relevant fact (high reranker score) must still beat a weakly-relevant
+    curated row — the prior tips the low-confidence regime, it is not a trump card."""
+    from utah import rerank as rerank_mod
+    from tests.fakes import ScriptedReranker
+
+    mem.embedder.register("where does Michael live", basis(0))
+    mem.embedder.register("Michael lives in Gulf Shores, Alabama", blend(basis(0), basis(2), 0.8))
+    mem.embedder.register("48 Laws: master your timing", blend(basis(0), basis(3), 0.5))
+    memory.store("Michael lives in Gulf Shores, Alabama", source="fact")
+    memory.store("48 Laws: master your timing", source="knowledge")
+    rerank_mod.set_reranker(ScriptedReranker(lambda q, d: 9.0 if "Gulf Shores" in d else -8.0))
+    try:
+        hits = memory.recall("where does Michael live", k=2)
+        assert hits[0].source == "fact" and "Gulf Shores" in hits[0].content
+    finally:
+        rerank_mod.set_reranker(mem.reranker)                # restore the neutral reranker

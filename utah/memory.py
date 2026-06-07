@@ -244,6 +244,8 @@ class StoreBackend(Protocol):
         supersede_ids: Sequence[int],
     ) -> int: ...
     def dense_search(self, embedding: Sequence[float], limit: int) -> list[DenseRow]: ...
+    def curated_search(self, embedding: Sequence[float], limit: int,
+                       sources: Sequence[str]) -> list[DenseRow]: ...
     def sparse_search(self, query: str, limit: int) -> list[SparseRow]: ...
     def entity_names(self, mem_ids: Sequence[int]) -> dict[int, set[str]]: ...
     def touch(self, mem_ids: Sequence[int]) -> None: ...
@@ -399,6 +401,23 @@ class PostgresStore:
                 "WHERE superseded_by IS NULL AND NOT archived AND embedding IS NOT NULL "
                 "ORDER BY embedding <=> %s LIMIT %s",
                 (self._vec(embedding), self._vec(embedding), limit),
+            ).fetchall()
+        return [DenseRow(int(r[0]), r[1], r[2], float(r[3])) for r in rows]
+
+    def curated_search(self, embedding: Sequence[float], limit: int,
+                       sources: Sequence[str]) -> list[DenseRow]:
+        """Top-*limit* nearest live rows restricted to *sources* (the curated lane).
+        Identical to :meth:`dense_search` but source-filtered, so high-value rows
+        (identity + the books) always get a fair shot at the reranker."""
+        if not sources:
+            return []
+        with self._tx() as conn:
+            rows = conn.execute(
+                "SELECT id, content, source, 1 - (embedding <=> %s) AS sim FROM memory "
+                "WHERE superseded_by IS NULL AND NOT archived AND embedding IS NOT NULL "
+                "AND source = ANY(%s) "
+                "ORDER BY embedding <=> %s LIMIT %s",
+                (self._vec(embedding), list(sources), self._vec(embedding), limit),
             ).fetchall()
         return [DenseRow(int(r[0]), r[1], r[2], float(r[3])) for r in rows]
 
@@ -738,20 +757,29 @@ def recall(query: str, k: int = config.RECALL_K) -> list[Hit]:
     pool = recall_pool(k)
 
     dense: list[DenseRow] = []
+    curated: list[DenseRow] = []
     try:
         vector = embed(query)
         dense = backend.dense_search(vector, pool)
+        # Curated lane: the nearest identity/library rows ALWAYS enter the pool (their
+        # own RRF list), so they reach the reranker even when the general pool is full
+        # of facts — the diagnosed miss (a relevant Law never reaching rerank).
+        curated = backend.curated_search(vector, config.CURATED_LANE_K, tuple(config.CURATED_SOURCES))
     except EmbedError as exc:
         log.warning("dense lane down (embed failed), sparse-only recall: %s", exc)
     sparse = backend.sparse_search(query, pool)
 
-    fused = rrf_fuse([[r.id for r in dense], [r.id for r in sparse]])
+    fused = rrf_fuse([[r.id for r in dense], [r.id for r in sparse], [r.id for r in curated]])
     if not fused:
         return []
     meta: dict[int, tuple[str, str]] = {r.id: (r.content, r.source) for r in dense}
     for r in sparse:
         meta.setdefault(r.id, (r.content, r.source))
+    for r in curated:
+        meta.setdefault(r.id, (r.content, r.source))
     sims: dict[int, float] = {r.id: r.sim for r in dense}
+    for r in curated:
+        sims.setdefault(r.id, r.sim)
 
     candidates = sorted(fused, key=lambda i: fused[i], reverse=True)[:pool]
     scores = rerank(query, [meta[i][0] for i in candidates])  # degrades to zeros
@@ -766,7 +794,11 @@ def recall(query: str, k: int = config.RECALL_K) -> list[Hit]:
 
     ranked = sorted(  # stable: ties keep RRF order
         zip(candidates, scores),
-        key=lambda pair: pair[1] + boosts.get(pair[0], 0.0),
+        key=lambda pair: (
+            pair[1]
+            + boosts.get(pair[0], 0.0)                                   # entity (GraphRAG) boost
+            + config.SOURCE_BOOST.get(meta[pair[0]][1], 0.0)             # source-authority prior
+        ),
         reverse=True,
     )
     top = ranked[:k]

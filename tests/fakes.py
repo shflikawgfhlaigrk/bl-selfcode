@@ -258,6 +258,18 @@ class FakeStore:
         )
         return [DenseRow(r.id, r.content, r.source, s) for r, s in scored[:limit]]
 
+    def curated_search(self, embedding: Sequence[float], limit: int,
+                       sources: Sequence[str]) -> list[DenseRow]:
+        self._check()
+        srcs = set(sources)
+        scored = sorted(
+            ((r, cosine(embedding, r.embedding)) for r in self._live()
+             if r.embedding and r.source in srcs),
+            key=lambda t: t[1],
+            reverse=True,
+        )
+        return [DenseRow(r.id, r.content, r.source, s) for r, s in scored[:limit]]
+
     def sparse_search(self, query: str, limit: int) -> list[SparseRow]:
         self._check()
         words = content_words(query)

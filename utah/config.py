@@ -176,6 +176,23 @@ RECALL_POOL_MIN: int = 20
 #: (the GraphRAG boost).
 ENTITY_BOOST: float = 0.5
 
+#: Curated sources (the identity creed + the reference library) are ~150 high-value
+#: rows competing against thousands of facts. Two mechanisms keep them reachable:
+#: a guaranteed retrieval lane and a small ranking prior.
+CURATED_SOURCES: frozenset[str] = frozenset({"core", "knowledge"})
+
+#: Top-N nearest curated rows are ALWAYS merged into the candidate pool (as their own
+#: RRF lane), so they reach the reranker even when the general pool is swamped by the
+#: fact pile — the diagnosed root cause (a relevant Law never even reached rerank).
+CURATED_LANE_K: int = 5
+
+#: Additive ranking prior per source — a source-authority prior on the rerank score.
+#: Bounded (≈ENTITY_BOOST scale) so a STRONG match in ANY source still wins outright;
+#: it only tips the LOW-confidence regime (vague query, nothing scores well) toward
+#: curated wisdom over low-value migrated facts. It shifts rerank ORDER only, never a
+#: hit's ``sim``, so the no-fabrication answer gate (which reads sim) is unaffected.
+SOURCE_BOOST: dict[str, float] = {"core": 1.5, "knowledge": 1.0}
+
 # --- no-fabrication answer gate ----------------------------------------------
 #: Answer straight from memory ONLY when BOTH hold; otherwise fall to the brain
 #: (which itself says "I don't know" when the context doesn't support it).
