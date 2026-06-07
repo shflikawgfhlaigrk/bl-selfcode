@@ -258,8 +258,9 @@
   <div class="menu-box">
     <div class="menu-h">◆ LABS &amp; CONSOLES</div>
     <button class="menu-item" onclick="openLab()"><b>⚡ Trading Engine Lab</b><span>8 engines · paper/sim · gated on WealthCharts feed (live tmrw)</span></button>
+    <button class="menu-item" onclick="openConsole('selfcode','🤖 SELF-CODING BAY')"><b>🤖 Self-Coding Bay</b><span>propose-only · isolated branch · suite-gated · never main</span></button>
+    <button class="menu-item" onclick="openConsole('browser','🌐 BROWSER')"><b>🌐 Browser</b><span>headless Chrome · JS-rendered fetch</span></button>
     <button class="menu-item dim" disabled><b>🛡 Risk / Threat Kernel</b><span>pre-exec gate · gated</span></button>
-    <button class="menu-item dim" disabled><b>🤖 Self-Coding Bay</b><span>bounded autonomy · locked · approval</span></button>
   </div>
 </div>
 
@@ -511,6 +512,22 @@ function drillClose(){ $("drill").classList.remove("open"); $("drill-body").inne
 function drillOpen(title,html){ $("drill-title").textContent=title; $("drill-body").innerHTML=html; $("drill").classList.add("open"); }
 function toggleMenu(){ $("menu").classList.toggle("open"); }
 function closeMenu(){ $("menu").classList.remove("open"); }
+
+/* Generic console drill — render any capability panel's live state (selfcode/browser). */
+async function openConsole(panel, title){
+  closeMenu();
+  drillOpen(title, '<div class="empty">LOADING…</div>');
+  try{
+    const d=await getPanel(panel);
+    const skip=new Set(['panel','rows','engines','html']);
+    const status=(d.status||d.feed||'').toString();
+    let h = status ? `<div class="lab-banner ${/ready|armed|live/i.test(status)?'live':'gated'}">${esc(d.note||status)}</div>` : '';
+    h+='<div class="drill-sec">STATE</div>';
+    h+=Object.entries(d).filter(([k])=>!skip.has(k)).map(([k,v])=>
+       `<div class="drill-row"><b>${esc(k)}</b><span class="drill-meta">${esc(typeof v==='object'?JSON.stringify(v):v)}</span></div>`).join("");
+    drillOpen(title, h);
+  }catch(e){ drillOpen(title, '<div class="empty">unavailable — '+esc(String(e.message||e))+'</div>'); }
+}
 
 /* Trading Engine Lab — merged roster + live fires ledger; honest GATED until WC feed lands.
    Reachable from the hamburger menu AND the right-rail card, so CLOSE the menu (idempotent)

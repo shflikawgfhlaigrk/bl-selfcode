@@ -411,6 +411,23 @@ async def panel_detail(ctx: Context, params: object) -> dict:
         with ctx.governor.admission():
             hits = await ctx.pool.run(lambda: memory.get_backend().list_memories(20, 0))
         return {"panel": "research", "rows": hits, "note": "facts learned (web -> memory)"}
+    if panel == "selfcode":
+        from utah import selfcode
+        on = selfcode.enabled()
+        return {"panel": "selfcode",
+                "status": "armed" if on else "kill-switch",
+                "enabled": on,
+                "mode": "propose-only · isolated branch · suite-gated · never main",
+                "kill_switch": str(selfcode.KILL_SWITCH),
+                "note": "bounded autonomy (stop@13): proposes a change on a branch, never merges"}
+    if panel == "browser":
+        from utah.integrations import browser
+        b = browser.chrome_binary()
+        return {"panel": "browser",
+                "status": "ready" if b else "gated",
+                "engine": "headless chrome · --dump-dom (JS-rendered DOM)",
+                "binary": b or "",
+                "note": "ready — JS-rendered fetch live" if b else "GATED: no Chrome found"}
     return {"panel": panel, "rows": []}
 
 
