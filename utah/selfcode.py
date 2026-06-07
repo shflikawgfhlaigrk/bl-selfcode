@@ -183,6 +183,23 @@ def _real_tests(*, cwd: str, timeout: int = CODE_TIMEOUT_S) -> tuple[bool, str]:
     return proc.returncode == 0, (proc.stdout or "") + (proc.stderr or "")
 
 
+def _real_commit_proposal(task: str, *, repo: str = ".") -> str | None:
+    """Commit the run's working-tree change onto the current proposal branch, so the diff
+    is REAL and SURVIVES the next sync. Without this, a propose-only (auto_merge=False)
+    edit left the change uncommitted — the page showed a branch name but an empty diff, and
+    the next ``checkout -f`` discarded it. Returns the short sha, or None if nothing changed."""
+    def git(*a):
+        return subprocess.run(["git", *a], cwd=repo, capture_output=True, text=True)
+    try:
+        git("add", "-A")
+        if git("commit", "-m", f"selfcode(proposal): {task[:72]}").returncode != 0:
+            return None  # nothing to commit
+        return git("rev-parse", "--short", "HEAD").stdout.strip()
+    except Exception as exc:  # noqa: BLE001 — best-effort; a bad repo path must never raise
+        log.warning("selfcode proposal commit skipped: %s", exc)
+        return None
+
+
 def propose(task: str, *, run_claude=None, run_tests=None, branch_fn=None,
             discard_fn=None, merge_fn=None, auto_merge=None, tree_clean_fn=None,
             repo: str | None = None, safety_snapshot_fn=None, safety_intact_fn=None,
@@ -290,17 +307,19 @@ def propose(task: str, *, run_claude=None, run_tests=None, branch_fn=None,
                     "commit": sha, "pushed": pushed, "branch": branch, "tier": tier,
                     "reason": f"suite green, Tier-{tier} merged to main"
                               + ("" if pushed else " (push rejected — local only)")}
-        # Tier B/C, or Tier-A still under supervision → stays a proposal for review.
+        # Tier B/C, or Tier-A still under supervision → stays a COMMITTED proposal for review.
         (bump_supervised_fn or _bump_supervised)()
+        sha = _real_commit_proposal(task, repo=repo) if (repo and repo != ".") else None
         reason = (f"suite green; Tier-{tier} ({POLICY[tier]['label']}) — proposal kept for "
                   f"review, not auto-merged")
-        log.info("selfcode: %s — Tier-%s GREEN, kept on %s (review)", task[:60], tier, branch)
+        log.info("selfcode: %s — Tier-%s GREEN, committed on %s (review)", task[:60], tier, branch)
         return {"task": task, "applied": True, "tests_passed": True, "merged": False,
-                "branch": branch, "tier": tier, "reason": reason}
+                "branch": branch, "tier": tier, "commit": sha, "reason": reason}
 
-    log.info("selfcode: %s — suite GREEN, kept on %s (proposal, not merged)", task[:60], branch)
+    sha = _real_commit_proposal(task, repo=repo) if (repo and repo != ".") else None
+    log.info("selfcode: %s — suite GREEN, committed on %s (proposal, not merged)", task[:60], branch)
     return {"task": task, "applied": True, "tests_passed": True, "merged": False,
-            "branch": branch, "reason": "suite green"}
+            "branch": branch, "commit": sha, "reason": "suite green"}
 
 
 def _safe_record(arch, entry) -> bool:

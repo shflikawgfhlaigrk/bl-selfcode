@@ -165,6 +165,15 @@ class Ledger:
             self._emit("outreach", {"recipient": recipient, "campaign": campaign, "id": row[0]})
         return bool(row)
 
+    def is_contacted(self, recipient, campaign) -> bool:
+        """Read-only suppression check: was this prospect already contacted for this
+        campaign? Lets a send-now path SEND before committing the never-twice row, so a
+        gated/failed send never burns the prospect's one shot."""
+        with self._conn() as c:
+            return c.execute(
+                "SELECT 1 FROM outreach_ledger WHERE recipient=%s AND campaign=%s",
+                (recipient, campaign)).fetchone() is not None
+
     def record_fire(self, engine, direction, entry=None, synthetic=False) -> int:
         """Record an engine fire (real only on the board; synthetic flagged)."""
         with self._conn() as c:

@@ -108,17 +108,24 @@ def queue(ledger, campaign: str, leads: list[dict], footer: dict | None = None,
                             f"{lead.get('name')}: pitch tripped the spam-content gate")
             continue
         recipient = _recipient(lead.get("contact", {}), channel)
-        if not ledger.log_outreach(recipient, campaign, channel):
-            suppressed += 1          # already contacted for this campaign — never twice
-            continue
-        queued += 1
         if can_send and channel == "email":
+            # SEND-NOW: don't burn the prospect's one shot on a gated/failed send. Check
+            # suppression read-only, send, and commit the never-twice row ONLY on success.
+            if getattr(ledger, "is_contacted", lambda r, c: False)(recipient, campaign):
+                suppressed += 1
+                continue
             res = sender(recipient, msg["subject"], msg["body"])
             if res.get("sent"):
+                ledger.log_outreach(recipient, campaign, channel)   # commit suppression
+                queued += 1
                 sent += 1
             else:
                 failures.record("outreach", "send_failed",
                                 f"{recipient}: {res.get('error') or 'gated'}")
+        elif ledger.log_outreach(recipient, campaign, channel):
+            queued += 1             # queue-only (no creds / SMS): queuing IS the action
+        else:
+            suppressed += 1         # already contacted for this campaign — never twice
 
     gated = ""
     if queued and not can_send:
