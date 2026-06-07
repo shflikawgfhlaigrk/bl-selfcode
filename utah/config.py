@@ -16,12 +16,29 @@ DB_DSN: str = os.environ.get("UTAH_DSN", "host=/tmp port=5433 dbname=utah")
 #: The brain command — Claude CLI on PATH (subscription; the one paid lane).
 BRAIN_CMD: str = os.environ.get("UTAH_BRAIN", "claude")
 
-#: ``--tools ""`` disables ALL built-in tools and ``--strict-mcp-config`` (with no
-#: ``--mcp-config``) loads no MCP servers — so the brain runs as a pure LLM that
-#: ANSWERS, not as the Claude Code agent. Without these, ``claude -p`` goes
-#: agentic: it explores files / runs bash ("the paths") instead of answering, and
-#: a turn times out narrating tool steps. Subscription auth is unaffected.
-BRAIN_NO_AGENT: tuple[str, ...] = ("--tools", "", "--strict-mcp-config")
+#: System prompt that makes the brain a pure reasoning engine. ``--tools ""`` +
+#: ``--strict-mcp-config`` disable the TOOLS, but NOT the Claude Code agent SYSTEM
+#: PROMPT — so on a code/file-shaped question the model still believes it is a coding
+#: agent and narrates "LSP isn't installed, let me read the file directly" (or emits
+#: an ``<invoke name="Read">`` block straight into the answer), because the tools it
+#: wants are gone. Appending this overrides that agent identity. PROVEN to eliminate
+#: the narration AND tool-call emission in both one-shot and streaming paths while the
+#: no-fabrication contract still holds (empty-context world fact still → "I don't know.").
+BRAIN_SYSTEM_PROMPT: str = (
+    "You are a pure text reasoning engine, NOT an agent or coding assistant. You have "
+    "NO tools, NO file access, NO LSP, NO shell, NO ability to read, grep, open, or run "
+    "anything. Never narrate reading/grepping/opening files and never emit a tool call. "
+    "Answer ONLY from the CONTEXT in the user message — you cannot verify anything against "
+    "a live filesystem and must not say you will."
+)
+
+#: ``--tools ""`` disables ALL built-in tools, ``--strict-mcp-config`` loads no MCP
+#: servers, and ``--append-system-prompt`` overrides the agent identity (see above) —
+#: together the brain runs as a pure LLM that ANSWERS, not the Claude Code agent. Used by
+#: one-shot, streaming, AND sica_autonomy's brain path (one source of truth).
+BRAIN_NO_AGENT: tuple[str, ...] = (
+    "--append-system-prompt", BRAIN_SYSTEM_PROMPT, "--tools", "", "--strict-mcp-config",
+)
 
 #: Arguments for one-shot print mode.
 BRAIN_ARGS: tuple[str, ...] = ("-p", *BRAIN_NO_AGENT)
@@ -236,3 +253,49 @@ MAX_FACTS_PER_TURN: int = 8
 
 #: Max characters per extracted fact.
 MAX_FACT_CHARS: int = 500
+
+# --- phone push (Pushover) + alert taxonomy ------------------------------------
+#: Master switch for phone push. Off => the transport gates to a no-op (honest,
+#: never fakes). Creds themselves live OUTSIDE the repo at
+#: ``~/.utah/secrets/pushover.json`` (Michael's input) — absent creds also gate.
+PUSHOVER_ENABLED: bool = os.environ.get("UTAH_PUSHOVER", "1") != "0"
+
+#: Default recipient: ``user`` (Michael's personal devices) or ``group`` (delivery
+#: group → all member phones). The per-call ``target`` and the creds' ``default_target``
+#: both override this.
+PUSHOVER_DEFAULT_TARGET: str = os.environ.get("UTAH_PUSHOVER_TARGET", "user")
+
+#: Tailnet URL of the Utah deck — the tap-through target carried by brief pushes.
+#: Served by ``tailscale serve`` (com.utah.tailserve): tailnet :8765 → Utah :8766.
+DECK_TAILNET_URL: str = os.environ.get(
+    "UTAH_DECK_URL", "http://michaels-macbook-pro.tailb44439.ts.net:8765/")
+
+#: Which alert streams may page the phone (Michael's choice: all four).
+ALERT_STREAMS_ENABLED: frozenset[str] = frozenset(
+    {"critical", "trade", "brief", "leads_probate"})
+
+#: Pushover priority per stream. 2=emergency (retry+ack, bypass quiet hours),
+#: 1=high (bypass quiet hours), 0=normal (respects quiet hours), -1=low (silent).
+ALERT_PRIORITY: dict[str, int] = {
+    "critical": 2,
+    "trade": 1,
+    "brief": 0,
+    "leads_probate": -1,
+}
+
+#: Failure ``kind`` values that page the phone as CRITICAL. Curated on purpose: the
+#: ``dependency_unavailable`` Postgres-restart storm and ``browser/render_failed`` /
+#: ``brain/unavailable`` noise are EXCLUDED — only genuine breakage pages.
+CRITICAL_FAILURE_KINDS: frozenset[str] = frozenset(
+    {"daemon_unreachable", "load_critical", "process_died", "engine_death", "critical"})
+
+#: Quiet hours (local clock). Streams without bypass are suppressed in this window.
+QUIET_HOURS_START: str = os.environ.get("UTAH_QUIET_START", "22:30")
+QUIET_HOURS_END: str = os.environ.get("UTAH_QUIET_END", "06:30")
+
+#: Per-key dedup window (seconds): storm suppression for repeated identical alerts.
+ALERT_DEDUP_SECONDS: int = int(os.environ.get("UTAH_ALERT_DEDUP", "1800"))
+
+#: Emergency (priority 2) re-alert cadence / give-up window, in seconds.
+PUSHOVER_EMERGENCY_RETRY: int = 60
+PUSHOVER_EMERGENCY_EXPIRE: int = 3600
