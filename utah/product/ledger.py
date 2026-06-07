@@ -126,6 +126,32 @@ class Ledger:
             self._emit("probate", {"case_name": case_name, "county": county, "id": row[0]})
         return bool(row)
 
+    def update_probate(self, case_name, county, *, heir_contact=None, arv=None,
+                       filed=None) -> bool:
+        """Write enrichment (resolved property address/parcel/lat/lng/comps in the
+        heir_contact jsonb, plus optional arv/filed) onto an EXISTING probate row.
+        Returns True if a row was updated. Pushes the probate deck channel so the panel
+        refreshes. Never inserts — enrichment only augments what the scout found."""
+        sets, vals = [], []
+        if heir_contact is not None:
+            sets.append("heir_contact=%s"); vals.append(json.dumps(heir_contact))
+        if arv is not None:
+            sets.append("arv=%s"); vals.append(arv)
+        if filed is not None:
+            sets.append("filed=%s"); vals.append(filed)
+        if not sets:
+            return False
+        vals += [case_name, county]
+        with self._conn() as c:
+            row = c.execute(
+                f"UPDATE probate SET {', '.join(sets)} WHERE case_name=%s AND county=%s "
+                "RETURNING id", tuple(vals),
+            ).fetchone()
+        if row:
+            self._emit("probate", {"case_name": case_name, "county": county,
+                                   "id": row[0], "enriched": True})
+        return bool(row)
+
     def log_outreach(self, recipient, campaign, channel="email") -> bool:
         """Record an outreach attempt. Returns True if it may send now, False if
         this prospect was already contacted for this campaign (suppression)."""

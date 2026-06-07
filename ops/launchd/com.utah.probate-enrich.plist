@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  com.utah.probate-enrich — enrich probate rows with the owner's PROPERTY + 3-mile radius.
+
+  Runs utah.product.property.enrich_ledger() daily: for each probate decedent without a
+  resolved address, query the county's open ArcGIS parcel layer for the owner, geocode the
+  address (Google Maps), and attach Places + no-website-SMB comps within 3 miles into the
+  heir_contact jsonb. Degrades HONESTLY per row — a county with no open source records a
+  gate and an 'unresolved' marker, never a fabricated address. Maps key in
+  ~/.utah/secrets/maps.json (Geocoding + Places billable, so the pass is bounded).
+
+  Install:
+    cp ops/launchd/com.utah.probate-enrich.plist ~/Library/LaunchAgents/
+    launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.utah.probate-enrich.plist
+  Force-run now:  launchctl kickstart gui/$(id -u)/com.utah.probate-enrich
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.utah.probate-enrich</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/michaelbarber/.utah/venv/bin/python</string>
+    <string>-c</string>
+    <string>import logging; logging.basicConfig(level=logging.INFO); from utah.product.property import enrich_ledger; print(enrich_ledger(limit=25))</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>/Users/michaelbarber/.utah</string>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PYTHONPATH</key>
+    <string>/Users/michaelbarber/Desktop/ProjectUtah</string>
+    <key>PYTHONUNBUFFERED</key>
+    <string>1</string>
+    <key>PATH</key>
+    <string>/Users/michaelbarber/.utah/venv/bin:/opt/homebrew/bin:/usr/local/bin:/Users/michaelbarber/.local/bin:/usr/bin:/bin</string>
+  </dict>
+
+  <key>StartInterval</key>
+  <integer>86400</integer>
+
+  <key>RunAtLoad</key>
+  <false/>
+
+  <key>StandardOutPath</key>
+  <string>/Users/michaelbarber/.utah/logs/probate-enrich.log</string>
+
+  <key>StandardErrorPath</key>
+  <string>/Users/michaelbarber/.utah/logs/probate-enrich.err</string>
+</dict>
+</plist>
