@@ -39,7 +39,10 @@ def reset_conversation() -> None:
 
 
 def _conversation_context() -> str:
-    return "\n".join(f"Michael: {q}\nUtah: {a}" for q, a in _CONVO)
+    # The assistant turn is labelled "Ace:" — one consistent identity (Utah is the
+    # system; Ace is who Michael talks to). The brain's PERSONA says "You are Ace",
+    # so the thread it reads back must agree, or the name splits and reads non-human.
+    return "\n".join(f"Michael: {q}\nAce: {a}" for q, a in _CONVO)
 
 
 def _build_context(hits: list, web: str = "") -> str:
@@ -181,13 +184,15 @@ def _memory_grounds(text: str, hits: list) -> bool:
     return memory.entity_grounds(text, best.content) is not False
 
 
-def _stream_brain_buffered(text: str, context: str) -> Iterator[tuple[str, str]]:
+def _stream_brain_buffered(
+    text: str, context: str, *, want_thinking: bool = True
+) -> Iterator[tuple[str, str]]:
     """Stream the brain with thinking live and the answer BUFFERED; return the answer
     text via ``StopIteration.value`` (``""`` on :class:`BrainUnavailable`, logged). The
     caller decides whether/how to commit the answer (e.g. learn on a refusal first)."""
     parts: list[str] = []
     try:
-        for channel, chunk in brain.think_stream(text, context):
+        for channel, chunk in brain.think_stream(text, context, want_thinking=want_thinking):
             if channel == "answer":
                 parts.append(chunk)
             else:
@@ -292,13 +297,17 @@ def tell(text: str) -> Reply:
     return Reply(text=reply_text, source=ReplySource.BRAIN, hits=hits)
 
 
-def tell_stream(text: str) -> Iterator[tuple[str, str]]:
+def tell_stream(text: str, *, want_thinking: bool = True) -> Iterator[tuple[str, str]]:
     """Streaming turn: recall → ground → stream the brain's reasoning+answer →
     remember. Same no-fabrication contract as :func:`tell`, but yields ordered
     ``(channel, chunk)`` events so chat AND voice can show reasoning live like
     Claude. Channels: ``source`` (memory|capability|local|brain|unavailable),
     ``thinking``, ``answer``, ``done`` (final answer text). Never raises into the
     caller.
+
+    ``want_thinking`` (default True) drives the live "reasoning like Claude" chat UX.
+    VOICE passes ``False``: it never speaks the thinking block, so requesting it is pure
+    latency before first audio — see :func:`brain.think_stream`.
     """
     text = (text or "").strip()
     if not text:
@@ -306,6 +315,19 @@ def tell_stream(text: str) -> Iterator[tuple[str, str]]:
         yield ("answer", "I didn't catch that.")
         yield ("done", "I didn't catch that.")
         return
+
+    # 0. SOCIAL fast-path — a whole-message greeting/ack/thanks gets an instant canned
+    #    reply in the STREAMING path too (chat box + voice), not just tell(). Without
+    #    this, "hey" fell through to the brain — a ~15s round-trip for a pleasantry.
+    #    No model, no recall, no memory write. Threaded for follow-up continuity.
+    if router.route(text) is Route.SOCIAL:
+        canned = social.reply(text)
+        if canned:
+            yield ("source", "social")
+            yield ("answer", canned)
+            _CONVO.append((text, canned))
+            yield ("done", canned)
+            return
 
     # 1. RECALL — pull memory as GROUNDING for the tiers. Memory feeds cognition;
     #    it never short-circuits the stream. The interactive turn ALWAYS reasons so
@@ -363,7 +385,8 @@ def tell_stream(text: str) -> Iterator[tuple[str, str]]:
         if web:
             yield ("source", "learned")
             yield ("thinking", "I don't have that yet — searching the web and learning it…\n")
-            grounded = yield from _stream_brain_buffered(text, _build_context(hits, web=web))
+            grounded = yield from _stream_brain_buffered(
+                text, _build_context(hits, web=web), want_thinking=want_thinking)
             if grounded and not brain.is_refusal(grounded):
                 yield ("answer", grounded)
                 _CONVO.append((text, grounded))
@@ -379,7 +402,7 @@ def tell_stream(text: str) -> Iterator[tuple[str, str]]:
     yield ("source", "brain")
     parts: list[str] = []
     try:
-        for channel, chunk in brain.think_stream(text, context):
+        for channel, chunk in brain.think_stream(text, context, want_thinking=want_thinking):
             if channel == "answer":
                 parts.append(chunk)
                 if not learnable:
@@ -404,7 +427,8 @@ def tell_stream(text: str) -> Iterator[tuple[str, str]]:
         yield ("thinking", "I don't have that yet — searching the web and learning it…\n")
         web = _learn(text)
         if web:
-            grounded = yield from _stream_brain_buffered(text, _build_context(hits, web=web))
+            grounded = yield from _stream_brain_buffered(
+                text, _build_context(hits, web=web), want_thinking=want_thinking)
             if grounded and not brain.is_refusal(grounded):
                 reply_text = grounded  # commit the grounded answer
         # else (nothing learned / retry refused) → the honest refusal stands.

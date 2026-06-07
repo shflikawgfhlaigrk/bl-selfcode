@@ -145,6 +145,37 @@ def test_tell_stream_carries_recent_conversation(monkeypatch):
     core.reset_conversation()
 
 
+def test_tell_stream_social_is_instant_and_skips_the_brain(monkeypatch):
+    """A greeting in the STREAMING path (chat box + voice) must get an instant canned
+    reply — NOT a ~15s brain round-trip. Before this, the social fast-path lived only in
+    tell(); tell_stream sent 'hey' to the brain. The brain must never run for a greeting."""
+    core.reset_conversation()
+    monkeypatch.setattr(memory, "recall", lambda *a, **k: [])
+    monkeypatch.setattr(memory, "store", lambda *a, **k: None)
+    brain.set_stream_runner(ScriptedStreamRunner(
+        brain.BrainUnavailable("the brain must NOT run for a greeting")))
+    evs = list(core.tell_stream("hey"))
+    assert ("source", "social") in evs
+    answer = "".join(t for c, t in evs if c == "answer")
+    assert answer.strip()                       # a warm canned reply, instantly
+    done = [t for c, t in evs if c == "done"]
+    assert done and done[0].strip()
+    core.reset_conversation()
+
+
+def test_tell_stream_threads_want_thinking_to_the_brain(monkeypatch):
+    """tell_stream forwards want_thinking to the brain so voice can skip the (never
+    spoken) <thinking> block for latency, while chat keeps it on by default."""
+    core.reset_conversation()
+    monkeypatch.setattr(memory, "recall", lambda t, *a, **k: [])
+    monkeypatch.setattr(memory, "store", lambda *a, **k: None)
+    r = ScriptedStreamRunner(_brain_lines("t", "An answer."))
+    brain.set_stream_runner(r)
+    list(core.tell_stream("what is project utah", want_thinking=False))
+    assert brain.THINK_INSTRUCTION not in r.last_prompt
+    core.reset_conversation()
+
+
 def test_reset_conversation_clears_the_thread(monkeypatch):
     core.reset_conversation()
     monkeypatch.setattr(memory, "recall", lambda t, *a, **k: [])

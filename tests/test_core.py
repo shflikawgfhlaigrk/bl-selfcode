@@ -43,6 +43,26 @@ def test_brain_path_grounded_in_recalled_context(mem, fake_brain):
     assert "Get tea" in turns[0].content
 
 
+def test_conversation_thread_labels_the_assistant_as_ace(monkeypatch, fake_brain):
+    """The live thread fed back to the brain labels the assistant 'Ace:', not 'Utah:'
+    — one consistent identity (Utah is the system; Ace is who Michael talks to). A
+    split name (prompt says 'Utah', Michael says 'Ace') reads as non-human."""
+    core.reset_conversation()
+    monkeypatch.setattr(memory, "answer", lambda t: (None, []))
+    monkeypatch.setattr(memory, "store", lambda *a, **k: None)
+    monkeypatch.setattr(memory, "recall", lambda *a, **k: [])
+    monkeypatch.setattr(memory, "core_recall", lambda *a, **k: [])
+
+    fake_brain.respond = "Utah is the rebuild of AceOS."
+    core.tell("what is project utah")          # routes to the brain (self/project)
+    fake_brain.respond = "I'm your partner."
+    core.tell("who are you")                    # turn 2 carries turn 1 as context
+
+    assert "Ace: Utah is the rebuild of AceOS." in fake_brain.last_prompt
+    assert "Utah: Utah is the rebuild of AceOS." not in fake_brain.last_prompt
+    core.reset_conversation()
+
+
 def test_brain_unavailable_is_honest_and_stores_nothing(mem):
     from tests.fakes import unavailable_runner
 

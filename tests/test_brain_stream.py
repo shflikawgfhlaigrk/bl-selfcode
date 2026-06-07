@@ -121,6 +121,39 @@ def test_think_stream_prompt_has_nofab_thinking_instruction_and_context():
     assert "where does Michael live?" in prompt
 
 
+def test_think_stream_prompt_leads_with_persona():
+    """The streamed (chat + voice) path carries the PERSONA layer too, ahead of the
+    grounding rule — so spoken/streamed answers sound like Ace, not a database."""
+    runner = ScriptedStreamRunner(_stream_lines_for("x", "y"))
+    brain.set_stream_runner(runner)
+    list(brain.think_stream("where does Michael live?", "- Michael lives in Utah"))
+    prompt = runner.last_prompt
+    assert brain.PERSONA in prompt
+    assert prompt.index(brain.PERSONA) < prompt.index(brain.NO_FAB)
+
+
+def test_think_stream_omits_thinking_block_when_not_wanted():
+    """want_thinking=False drops THINK_INSTRUCTION so the model streams the ANSWER
+    straight away. Voice never speaks the <thinking> block — requesting it just makes
+    the model generate (and us discard) a whole reasoning pass before the first spoken
+    word (measured: ~2s+ of dead air before first audio). Persona + grounding stay on."""
+    runner = ScriptedStreamRunner(_stream_lines_for("x", "y"))
+    brain.set_stream_runner(runner)
+    list(brain.think_stream("q", "ctx", want_thinking=False))
+    prompt = runner.last_prompt
+    assert brain.THINK_INSTRUCTION not in prompt   # no forced reasoning pass
+    assert brain.PERSONA in prompt                 # still Ace
+    assert brain.NO_FAB in prompt                  # still grounded
+
+
+def test_think_stream_includes_thinking_by_default():
+    """Chat keeps the live reasoning ('thinking like Claude'); default is unchanged."""
+    runner = ScriptedStreamRunner(_stream_lines_for("x", "y"))
+    brain.set_stream_runner(runner)
+    list(brain.think_stream("q", "ctx"))
+    assert brain.THINK_INSTRUCTION in runner.last_prompt
+
+
 def test_think_stream_uses_stream_json_flags():
     runner = ScriptedStreamRunner(_stream_lines_for("x", "y"))
     brain.set_stream_runner(runner)

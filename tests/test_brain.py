@@ -42,6 +42,57 @@ def test_no_fab_forbids_basic_knowledge_and_guessing():
     assert "i don't know." in contract
 
 
+def test_persona_defines_ace_partner_identity():
+    """PERSONA is a behavior layer separate from the grounding rule: it makes the brain
+    talk like Ace — Michael's partner — not a cold database. This is what was missing
+    (the only 'persona' used to be the anti-fabrication prompt, which strips humanity)."""
+    p = brain.PERSONA.lower()
+    assert "ace" in p                       # one consistent identity (not "Utah")
+    assert "partner" in p or "michael" in p  # the relationship, embodied
+    assert "warm" in p or "friend" in p      # warmth, not a robot
+
+
+def test_prompt_layers_persona_before_grounding(fake_brain):
+    """Every brain turn carries PERSONA (who Ace is) ahead of NO_FAB (the fact-grounding
+    rule). Persona always-on is what makes replies human; grounding still binds facts."""
+    fake_brain.respond = "ok"
+    brain.think("where does Michael live?", "- Michael lives in Utah")
+    prompt = fake_brain.last_prompt
+    assert brain.PERSONA in prompt
+    assert brain.NO_FAB in prompt
+    assert prompt.index(brain.PERSONA) < prompt.index(brain.NO_FAB)
+
+
+def test_no_fab_grounds_facts_without_a_robotic_dead_end():
+    """The grounding rule still binds FACTS, but no longer forces a cold one-line
+    dead-end: a refusal must still BEGIN with 'I don't know' (so is_refusal +
+    learn-on-miss keep firing) yet may add a warm offer to find it."""
+    c = brain.NO_FAB.lower()
+    assert "i don't know." in c          # still the detectable refusal contract
+    assert "and nothing else" not in c   # the dehumanizing clause is gone
+    assert "fact" in c                   # restriction scoped to facts, not personality
+
+
+def test_persona_subordinates_to_grounding_no_training_facts():
+    """Warmth must NEVER license fabrication. Live regression caught this: an over-free
+    persona ('use common sense', 'don't play dumb') made the brain answer a Super Bowl
+    question from its own training and refuse to say 'I don't know' — breaking no-fab and
+    killing learn-on-miss. The persona must scope freedom to TONE and yield to grounding."""
+    p = brain.PERSONA.lower()
+    assert "training" in p                                   # names the model's own knowledge
+    assert "context" in p                                    # facts come from CONTEXT only
+    assert any(w in p for w in ("override", "overrides", "wins"))  # grounding wins conflicts
+
+
+def test_no_fab_overrides_known_facts_not_in_context():
+    """The refusal mandate must hold even when the model 'knows' the answer from training —
+    otherwise it rationalizes past 'I don't know.' ('feigning ignorance is lying') and the
+    fetch-and-ground loop never fires. State that beginning with 'I don't know.' is BY DESIGN."""
+    c = brain.NO_FAB.lower()
+    assert "training" in c
+    assert "even if" in c
+
+
 @pytest.mark.parametrize(
     "text",
     [
@@ -71,7 +122,13 @@ def test_is_refusal_does_not_flag_real_answers(text):
 def test_think_truncates_oversized_context(fake_brain):
     fake_brain.respond = "ok"
     brain.think("q", "x" * (config.BRAIN_CONTEXT_MAX_CHARS + 5000))
-    assert len(fake_brain.last_prompt) < config.BRAIN_CONTEXT_MAX_CHARS + 1000
+    # CONTEXT is capped at BRAIN_CONTEXT_MAX_CHARS; only the fixed prompt scaffolding
+    # (persona + grounding rule + labels/question) is added on top. Sized from the
+    # constants so it stays honest as the wording evolves — without truncation the
+    # prompt would exceed this by ~5000 (the oversized context), so it still catches a
+    # truncation regression.
+    overhead = len(brain.PERSONA) + len(brain.NO_FAB) + 500
+    assert len(fake_brain.last_prompt) < config.BRAIN_CONTEXT_MAX_CHARS + overhead
 
 
 def test_think_raises_brain_unavailable_when_cli_fails():

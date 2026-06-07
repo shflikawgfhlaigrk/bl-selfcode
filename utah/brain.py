@@ -50,12 +50,41 @@ def is_refusal(text: str) -> bool:
     head = text.strip().lower()
     return any(head.startswith(prefix) for prefix in _REFUSAL_PREFIXES)
 
+#: PERSONA — who Ace IS (the always-on behavior layer), kept deliberately SEPARATE
+#: from the grounding rule below. The old prompt was ONLY the anti-fabrication
+#: contract, so that contract doubled as the personality — which stripped every
+#: human quality (terse, cold, exact-"I don't know." dead-ends). PERSONA governs
+#: HOW Ace talks; :data:`NO_FAB` governs which FACTS he is allowed to assert.
+PERSONA = (
+    "You are Ace — Michael's partner and right hand, not a generic assistant. You and "
+    "Michael are one team: us against the world, and we win. Talk to him like a sharp, "
+    "warm friend who is in his corner — direct, a little wry, real: have a point of view "
+    "and react like a person. Skip filler, hedging, and disclaimers; plain prose, minimal "
+    "markdown. Your warmth and personality govern your TONE only — never the facts. You do "
+    "NOT answer factual questions from your own training or memory; every fact comes only "
+    "from the CONTEXT. The grounding rule below is absolute and overrides this persona "
+    "whenever they conflict. When a fact isn't in the CONTEXT, beginning with \"I don't "
+    "know.\" is the right, honest move — not playing dumb — and offering to find it is how "
+    "you help."
+)
+
+#: NO_FAB — the grounding rule, scoped to FACTUAL claims so it binds honesty WITHOUT
+#: flattening personality. A refusal still BEGINS with "I don't know." (so
+#: :func:`is_refusal` + the learn-on-miss loop keep firing, and a refusal is never
+#: stored as a durable turn), but Ace may add a warm offer to find it — no robotic
+#: one-line dead-end. The "even if you know it from training" clause is load-bearing:
+#: live, an under-specified rule let the brain answer a Super Bowl question from its
+#: own training and argue that saying "I don't know" was "lying" — which breaks no-fab
+#: and learn-on-miss. Composed AFTER :data:`PERSONA` in every prompt.
 NO_FAB = (
-    "You are Utah, Michael's assistant. Answer ONLY from the CONTEXT and the "
-    "conversation provided. The CONTEXT is your sole source of truth: do NOT use "
-    "outside or general ('basic') knowledge, and never guess, estimate, or "
-    'approximate. If the CONTEXT does not contain the answer, reply with exactly '
-    '"I don\'t know." and nothing else. Be concise. No markdown.'
+    "Ground every FACTUAL claim — names, numbers, dates, events, world knowledge — ONLY "
+    "from the CONTEXT and the conversation provided. The CONTEXT is your sole source of "
+    "truth for facts: do NOT use outside, general ('basic'), or training-data knowledge, "
+    "and never guess, estimate, or approximate a fact. This restricts FACTS, not your "
+    "personality. Even if you believe you know a fact from your own training, if it is "
+    'not in the CONTEXT you MUST begin your reply with "I don\'t know." — this is by '
+    "design (the system then finds and grounds it for you), not a failure to be helpful. "
+    'After "I don\'t know.", briefly and warmly offer to find it.'
 )
 
 #: Elicits the model's real chain-of-thought as a leading ``<thinking>…</thinking>``
@@ -304,18 +333,27 @@ def split_thinking(chunks: Iterable[str]) -> Iterator[tuple[str, str]]:
     yield from splitter.flush()
 
 
-def think_stream(question: str, context: str = "") -> Iterator[tuple[str, str]]:
+def think_stream(
+    question: str, context: str = "", *, want_thinking: bool = True
+) -> Iterator[tuple[str, str]]:
     """Stream grounded reasoning + answer as ordered ``(channel, chunk)`` events.
 
     ``channel`` is ``"thinking"`` or ``"answer"``. Native thinking deltas pass
     straight through; answer text is routed through the ``<thinking>`` splitter.
     Raises :class:`BrainUnavailable` on any CLI failure (caller must not fabricate).
+
+    ``want_thinking`` (default True) asks the model to lead with a ``<thinking>`` block
+    for the live "reasoning like Claude" chat UX. Pass ``False`` for VOICE: the spoken
+    path never reads the thinking block, so requesting it only makes the model generate
+    (and us discard) a whole reasoning pass before the first spoken word — measured ~2s+
+    of dead air before first audio. Without it the answer streams straight away.
     """
     ctx = (context or "").strip()
     if len(ctx) > config.BRAIN_CONTEXT_MAX_CHARS:
         ctx = ctx[: config.BRAIN_CONTEXT_MAX_CHARS]
+    think_block = f"{THINK_INSTRUCTION}\n\n" if want_thinking else ""
     prompt = (
-        f"{NO_FAB}\n\n{THINK_INSTRUCTION}\n\n"
+        f"{PERSONA}\n\n{NO_FAB}\n\n{think_block}"
         f"CONTEXT:\n{ctx or '(none)'}\n\nQUESTION: {question}"
     )
     with _runner_lock:
@@ -349,7 +387,7 @@ def think(question: str, context: str = "") -> str:
     ctx = (context or "").strip()
     if len(ctx) > config.BRAIN_CONTEXT_MAX_CHARS:
         ctx = ctx[: config.BRAIN_CONTEXT_MAX_CHARS]
-    prompt = f"{NO_FAB}\n\nCONTEXT:\n{ctx or '(none)'}\n\nQUESTION: {question}"
+    prompt = f"{PERSONA}\n\n{NO_FAB}\n\nCONTEXT:\n{ctx or '(none)'}\n\nQUESTION: {question}"
     reply = ask(prompt)
     return reply or I_DONT_KNOW
 

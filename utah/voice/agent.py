@@ -62,7 +62,10 @@ def handle_utterance(transcript, *, tell_stream=None, speak_stream=None,
 
     def _answer_chunks():
         try:
-            for channel, chunk in tell_stream(command):
+            # want_thinking=False: voice never speaks the <thinking> block, so asking for
+            # it only makes the model generate (and us discard) a whole reasoning pass
+            # before the first spoken word — pure dead air before first audio.
+            for channel, chunk in tell_stream(command, want_thinking=False):
                 if channel == "answer":
                     parts.append(chunk)
                     yield chunk

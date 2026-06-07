@@ -54,15 +54,46 @@ _CATEGORIES: tuple[tuple[str, re.Pattern[str]], ...] = (
         r"np", r"no\s+problem", r"will\s+do", r"roger", r"copy\s+that")),
 )
 
+#: Greeting templates carry a ``{sal}`` slot filled with a time-of-day salutation —
+#: a small human touch (a person knows whether it's morning or night) and warmer than
+#: a flat "what do you need?". Addressed to Michael by name.
+_GREETING_TEMPLATES: tuple[str, ...] = (
+    "{sal}, Michael. What are we hitting?",
+    "{sal}, Michael — what's up?",
+    "{sal}. What do you need?",
+)
+
 _REPLIES: dict[str, tuple[str, ...]] = {
-    "greeting": ("Hey — what do you need?", "Hi Michael. What's up?",
-                 "Hey. What can I do?"),
-    "howareyou": ("Good — here and listening. What do you need?",
-                  "All good. What's up?", "Running fine. What can I do for you?"),
-    "thanks": ("Anytime.", "You got it.", "Sure thing."),
-    "farewell": ("Later.", "Talk soon.", "See ya."),
-    "ack": ("Got it.", "👍", "Cool."),
+    "howareyou": ("Good — locked in with you. What's up?",
+                  "All good here. What are we hitting?", "Solid. What do you need?"),
+    "thanks": ("Anytime.", "You got it.", "Course — that's what I'm here for."),
+    "farewell": ("Later, Michael.", "Talk soon.", "Go get 'em."),
+    "ack": ("Got it.", "👍", "On it."),
 }
+
+
+def _salutation(hour: int) -> str:
+    """The time-of-day salutation for *hour* (0–23, Michael's timezone)."""
+    if 5 <= hour < 12:
+        return "Morning"
+    if 12 <= hour < 17:
+        return "Afternoon"
+    if 17 <= hour < 22:
+        return "Evening"
+    return "Hey"  # late night / very early — a salutation would be odd
+
+
+def _now_hour() -> int:
+    """The current hour in Michael's timezone; system-local on any failure."""
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    from utah import config
+
+    try:
+        return datetime.now(ZoneInfo(config.TIMEZONE)).hour
+    except Exception:  # noqa: BLE001 — bad tz / clock: degrade to system-local
+        return datetime.now().hour
 
 
 def classify(text: str) -> str | None:
@@ -81,16 +112,24 @@ def matches(text: str) -> bool:
     return classify(text) is not None
 
 
-def reply(text: str) -> str | None:
+def reply(text: str, *, hour: int | None = None) -> str | None:
     """A deterministic canned reply for a social turn, or ``None`` if not social.
-    No model, no fact, no memory write — just a pleasantry, in microseconds."""
+    No model, no fact, no memory write — just a pleasantry, in microseconds.
+
+    ``hour`` (0–23) selects the greeting's time-of-day salutation; defaults to the
+    current hour in Michael's timezone. Injectable so the path stays test- and
+    resume-stable (the only non-pure input is the clock, and it is overridable)."""
     cat = classify(text)
     if cat is None:
         return None
-    options = _REPLIES[cat]
     # Stable, RNG-free variation: pick by a hash of the normalized message.
-    idx = int(hashlib.sha1(text.strip().lower().encode()).hexdigest(), 16) % len(options)
-    return options[idx]
+    seed = int(hashlib.sha1(text.strip().lower().encode()).hexdigest(), 16)
+    if cat == "greeting":
+        sal = _salutation(_now_hour() if hour is None else hour)
+        template = _GREETING_TEMPLATES[seed % len(_GREETING_TEMPLATES)]
+        return template.format(sal=sal)
+    options = _REPLIES[cat]
+    return options[seed % len(options)]
 
 
 __all__ = ["classify", "matches", "reply"]

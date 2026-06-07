@@ -31,7 +31,7 @@ def test_no_wake_is_ignored():
 
 def test_wake_runs_brain_speaks_and_publishes():
     spoken, published = [], []
-    def fake_tell(cmd):
+    def fake_tell(cmd, want_thinking=True):
         assert cmd == "what is utah"
         return iter([("source", "brain"), ("thinking", "reasoning"),
                      ("answer", "Utah is the rebuild."), ("done", "Utah is the rebuild.")])
@@ -47,11 +47,24 @@ def test_wake_runs_brain_speaks_and_publishes():
     assert any(ev.get("q") == "what is utah" for ch, ev in published)  # shown on deck
 
 
+def test_voice_skips_the_thinking_block_for_latency():
+    """Voice never speaks the <thinking> block, so it must tell the brain to skip it —
+    otherwise the model generates (and we discard) a whole reasoning pass before the
+    first spoken word. handle_utterance must call tell_stream with want_thinking=False."""
+    captured = {}
+    def fake_tell(cmd, want_thinking=True):
+        captured["want_thinking"] = want_thinking
+        return iter([("source", "brain"), ("answer", "Hi.")])
+    agent.handle_utterance("ace hi there", tell_stream=fake_tell,
+                           speak_stream=_collect([]), publish=lambda *a: None)
+    assert captured.get("want_thinking") is False
+
+
 def test_only_answer_text_is_spoken_not_thinking():
     """The speaker receives ONLY answer text — the brain's thinking is shown on the
     deck but never read aloud."""
     spoken = []
-    def fake_tell(cmd):
+    def fake_tell(cmd, want_thinking=True):
         return iter([("source", "brain"),
                      ("thinking", "let me reason about this at length"),
                      ("answer", "The answer is 42.")])
@@ -64,7 +77,7 @@ def test_on_speaking_fires_when_audio_begins():
     """on_speaking flips the deck state thinking → speaking exactly when the first
     real sentence is sent to the speaker."""
     fired = []
-    def fake_tell(cmd):
+    def fake_tell(cmd, want_thinking=True):
         return iter([("answer", "Hello there.")])
     def fake_speak(chunks, on_start=None):
         text = "".join(chunks)
@@ -81,7 +94,7 @@ def test_wake_publishes_immediate_wake_event_before_brain():
     brain turn — so the deck orb emits its wave immediately and Michael sees it heard
     'ace' (like old Ace), not 14s later when the answer lands."""
     published, order = [], []
-    def fake_tell(cmd):
+    def fake_tell(cmd, want_thinking=True):
         order.append("brain")
         return iter([("answer", "ok.")])
     def fake_speak(chunks, on_start=None):
@@ -112,7 +125,7 @@ def test_empty_answer_is_not_spoken():
     spoken = []
     r = agent.handle_utterance(
         "ace hello",
-        tell_stream=lambda c: iter([("source", "brain"), ("answer", "  ")]),
+        tell_stream=lambda c, want_thinking=True: iter([("source", "brain"), ("answer", "  ")]),
         speak_stream=_collect(spoken), publish=lambda *a: None,
     )
     assert spoken == []  # nothing meaningful to say -> stays silent
@@ -126,7 +139,7 @@ def test_handler_never_raises_if_speak_or_publish_fail():
         raise RuntimeError("audio device gone")
     r = agent.handle_utterance(
         "ace hi",
-        tell_stream=lambda c: iter([("answer", "hey")]),
+        tell_stream=lambda c, want_thinking=True: iter([("answer", "hey")]),
         speak_stream=boom_speak,
         publish=lambda *a: (_ for _ in ()).throw(RuntimeError("bus down")),
     )

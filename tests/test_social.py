@@ -43,6 +43,18 @@ def test_reply_is_short_nonempty_and_deterministic(t):
     assert r1 == r2                       # deterministic — no RNG (resume/test-stable)
 
 
+@pytest.mark.parametrize("hour,word", [(8, "Morning"), (14, "Afternoon"), (20, "Evening")])
+def test_greeting_is_time_of_day_aware(hour, word):
+    """A greeting leads with the salutation for the actual time of day — a small human
+    touch (a person knows if it's morning or night). hour is injectable for tests."""
+    assert social.reply("hey", hour=hour).startswith(word)
+
+
+def test_greeting_addresses_michael_by_name():
+    """Warmth: a greeting is addressed to Michael, not a generic 'what do you need?'."""
+    assert "Michael" in social.reply("hello", hour=9)
+
+
 def test_reply_is_none_for_non_social():
     assert social.reply("debug the parser") is None
     assert social.reply("who won the 2020 world series") is None
