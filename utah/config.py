@@ -299,3 +299,18 @@ ALERT_DEDUP_SECONDS: int = int(os.environ.get("UTAH_ALERT_DEDUP", "1800"))
 #: Emergency (priority 2) re-alert cadence / give-up window, in seconds.
 PUSHOVER_EMERGENCY_RETRY: int = 60
 PUSHOVER_EMERGENCY_EXPIRE: int = 3600
+
+# --- Discord (community server mirrored on the deck) --------------------------
+#: Public invite link surfaced on the deck (the "JOIN DISCORD" button) and by the
+#: ``/discord`` redirect. Prefer setting ``invite_url`` in ~/.utah/secrets/discord.json
+#: (the integration reads it there); this env override wins when set.
+DISCORD_INVITE_URL: str = os.environ.get("UTAH_DISCORD_INVITE", "")
+
+#: Which spine domains feed their Discord channel via webhook (channel name -> the
+#: feed that posts to it). The producer looks up the webhook URL in
+#: ~/.utah/secrets/discord_webhooks.json (written by ``discord.save_webhooks``).
+DISCORD_FEED_CHANNELS: dict[str, str] = {
+    "📈leads": "leads", "⚖️probate": "probate", "📨outreach": "outreach",
+    "🔥fires": "fires", "🛡️audit-ledger": "audit", "✅merges": "selfcode",
+    "📣announcements": "announce", "🚨alerts": "critical",
+}

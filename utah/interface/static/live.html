@@ -41,6 +41,12 @@
   .hstat{margin-left:auto;display:flex;gap:24px;align-items:center}
   .hstat .m{text-align:right} .hstat .m b{color:var(--gold2);font-size:15px} .hstat .m span{color:var(--mut);font-size:9px;display:block;letter-spacing:2px}
   #clock{color:var(--gold2);font-size:13px}
+  /* join-discord button (mirrors the server that mirrors this deck) */
+  .dbtn{display:none;align-items:center;gap:7px;padding:6px 13px;border:1px solid #5865F2;border-radius:8px;
+    background:linear-gradient(180deg,rgba(88,101,242,.22),rgba(88,101,242,.08));color:#cdd3ff;
+    font-size:10px;letter-spacing:1.6px;text-decoration:none;cursor:pointer;white-space:nowrap}
+  .dbtn.on{display:inline-flex} .dbtn:hover{border-color:#7984ff;box-shadow:0 0 12px rgba(88,101,242,.5)}
+  .dbtn b{color:#fff;letter-spacing:1.6px}
 
   /* hamburger menu — labs & consoles */
   .hamb{background:#0f0e0a;border:1px solid var(--line);color:var(--gold2);width:34px;height:34px;border-radius:8px;cursor:pointer;font-size:15px;flex:none}
@@ -311,6 +317,8 @@
       <div class="m drillable" onclick="drill('memory')" title="click for memory detail"><b id="h-mem">—</b><span>MEMORY ROWS</span></div>
       <div class="m drillable" onclick="drill('bus')" title="click for event-bus detail"><b id="h-bus">—</b><span>BUS EVENTS</span></div>
       <div class="m drillable" onclick="drillGated()" title="what's gated and why"><b id="h-gates">—</b><span>GATED</span></div>
+      <a class="dbtn" id="dbtn" href="/discord" target="_blank" rel="noopener" title="Join the Utah Discord — same structure as this deck">
+        <span>💬</span><b>JOIN DISCORD</b><span id="dbtn-meta"></span></a>
       <div class="m" id="clock">—</div>
     </div>
   </header>
@@ -1138,6 +1146,14 @@ function clock(){$("clock").textContent=new Date().toLocaleTimeString([],{hour:"
 renderTabs(); loadDash("overview");
 poll(); setInterval(poll,2500);
 clock(); setInterval(clock,1000);
+// JOIN DISCORD — light the header button only when an invite is configured.
+async function discordChip(){try{const d=await(await fetch("/api/discord")).json();
+  const b=$("dbtn"); if(!b) return;
+  if(d.invite){ b.classList.add("on"); b.href=d.invite||"/discord";
+    const t=d.totals||{}; if(t.channels) $("dbtn-meta").textContent=" · "+t.channels+"ch";
+  } else { b.classList.remove("on"); }
+}catch(e){}}
+discordChip(); setInterval(discordChip,60000);
 </script>
 </body>
 </html>

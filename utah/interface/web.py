@@ -19,13 +19,14 @@ import uuid
 
 from starlette.applications import Starlette
 from starlette.concurrency import run_in_threadpool
-from starlette.responses import FileResponse, JSONResponse
+from starlette.responses import FileResponse, JSONResponse, RedirectResponse
 from starlette.routing import Mount, Route
 from starlette.staticfiles import StaticFiles
 from sse_starlette.sse import EventSourceResponse
 
-from utah import failures
+from utah import config, failures
 from utah.daemon import client as ctl
+from utah.integrations import discord as discord_mod
 from utah.voice import state as voice_state
 
 log = logging.getLogger("utah.interface.web")
@@ -50,6 +51,33 @@ async def sim(request):
 
 async def favicon(request):
     return FileResponse(DASH / "favicon.svg")
+
+
+def _discord_invite() -> str:
+    """The configured invite link — config env wins, else the secrets file."""
+    return (config.DISCORD_INVITE_URL or discord_mod.invite_url() or "").strip()
+
+
+async def discord_redirect(request):
+    """Stable ``/discord`` link → the live invite (so the URL on the deck never rots)."""
+    url = _discord_invite()
+    if url:
+        return RedirectResponse(url)
+    return JSONResponse({"error": "no invite configured",
+                         "hint": "set invite_url in ~/.utah/secrets/discord.json"}, status_code=404)
+
+
+async def api_discord(request):
+    """Deck panel feed: is the server wired, the invite link, and the mirrored shape."""
+    try:
+        plan = await run_in_threadpool(discord_mod.provision, dry_run=True)
+    except Exception:  # noqa: BLE001 — panel must never crash the deck
+        plan = {"totals": {}}
+    return JSONResponse({
+        "invite": _discord_invite(),
+        "available": discord_mod.available(),
+        "totals": plan.get("totals", {}),
+    })
 
 
 async def api_status(request):
@@ -262,7 +290,7 @@ def _deck_state(st: dict | None) -> dict:
         "health": "live" if st is not None else "down",
         "spine": st or {},
         "daemon": st or {},
-        "memory": (st or {}).get("memory", {}),
+        "memory": (st or {}).get("memory", {}),  # contract key; real counts via /memory
         "risk": {},
         "voice": voice_state.status(),  # REAL live voice-loop state (or 'down'), never faked
     }
@@ -320,6 +348,8 @@ def build_app() -> Starlette:
         Route("/", index),
         Route("/sim", sim),
         Route("/favicon.svg", favicon),
+        Route("/discord", discord_redirect),
+        Route("/api/discord", api_discord),
         Route("/status", api_status),
         Route("/memory", api_memory),
         Route("/memory/list", api_memory_list),
