@@ -18,6 +18,7 @@ class ReplySource(enum.Enum):
     CAPABILITY = "capability"    # a deterministic grounded capability (weather, brief)
     LOCAL = "local"              # a free resident local model (L1, in front of the brain)
     BRAIN = "brain"              # reasoned by the Claude CLI over recalled context
+    LEARNED = "learned"          # cold miss → researched the web, grounded, then answered
     UNAVAILABLE = "unavailable"  # honest failure: no confident memory, brain down
 
 

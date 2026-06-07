@@ -2,6 +2,8 @@
 Plus the CLI entrypoint."""
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from utah import brain, core, local, memory
@@ -212,6 +214,141 @@ def test_empty_input_is_handled(mem, fake_brain):
     reply = core.tell("   ")
     assert reply.source is ReplySource.UNAVAILABLE
     assert mem.store.rows == {}
+
+
+# --- learn-on-miss: find → understand → remember, then answer -------------------------
+
+_EIFFEL = "The Eiffel Tower is 330 metres tall."
+_EIFFEL_Q = "how tall is the eiffel tower"
+
+
+def _ground_after_learn(prompt: str) -> str:
+    """A brain that refuses cold, but answers once the learned fact is in CONTEXT."""
+    return _EIFFEL if "330 metres" in prompt else brain.I_DONT_KNOW
+
+
+def _stub_research(mem, fact: str = _EIFFEL):
+    """A researcher.research that admits one grounded fact (what the real DDG→fetch→
+    extract pass does), and counts its calls. Returns the call-counter dict."""
+    mem.embedder.register(fact, basis(0))
+    calls = {"n": 0}
+
+    def fake_research(query, **kw):
+        calls["n"] += 1
+        memory.store(fact, source="fact", confidence=0.5)
+        return {"query": query, "sources": 1, "facts": 1, "stored": 1, "fact_list": [fact]}
+
+    return fake_research, calls
+
+
+def test_learn_on_miss_researches_grounds_and_remembers(mem, fake_brain, monkeypatch):
+    # The exact gap Michael hit: a factual question, cold memory → brain says "I
+    # don't know." Instead of stopping there, Utah LEARNS it (web research →
+    # grounded fact in memory) then re-reasons and answers — and it now compounds.
+    fake_brain.respond = _ground_after_learn
+    mem.embedder.register(_EIFFEL_Q, blend(basis(0), basis(1), 0.5))
+    fake_research, calls = _stub_research(mem)
+    monkeypatch.setattr("utah.product.researcher.research", fake_research)
+
+    reply = core.tell(_EIFFEL_Q)
+
+    assert reply.source is ReplySource.LEARNED
+    assert "330 metres" in reply.text
+    assert calls["n"] == 1  # it actually went and learned
+    # the grounded fact is now durable in memory → the next ask is instant recall
+    assert any(r.source == "fact" and "Eiffel Tower" in r.content for r in mem.store.rows.values())
+    # and the grounded exchange is remembered as a turn too
+    assert any(r.source == "turn" and "330 metres" in r.content for r in mem.store.rows.values())
+
+
+def test_learn_on_miss_grounds_on_complete_fresh_facts_not_lossy_recall(mem, fake_brain, monkeypatch):
+    # Regression for the live Burj Khalifa bug: the retry must ground on the COMPLETE
+    # freshly-researched evidence, not a post-supersede top-k recall that can drop the
+    # canonical fact. Here the right fact (828m) and a distractor (555m deck) are both
+    # learned; the brain must see the full set and answer 828m.
+    correct = "The Burj Khalifa's architectural height is 828 metres."
+    distractor = "The Burj Khalifa's SKY deck is at about 555 metres."
+    fake_brain.respond = lambda prompt: "828 metres." if "828 metres" in prompt else brain.I_DONT_KNOW
+    monkeypatch.setattr(
+        "utah.product.researcher.research",
+        lambda query, **kw: {"query": query, "sources": 4, "facts": 2, "stored": 2,
+                             "fact_list": [distractor, correct]},
+    )
+
+    reply = core.tell("how tall is the burj khalifa in metres")
+
+    assert reply.source is ReplySource.LEARNED
+    assert "828" in reply.text
+    # the retry prompt carried the WHOLE fresh set (both facts), in its own block
+    assert "FRESHLY RESEARCHED" in fake_brain.last_prompt
+    assert "828 metres" in fake_brain.last_prompt and "555 metres" in fake_brain.last_prompt
+
+
+def test_learn_on_miss_skips_non_factual_personal_misses(mem, fake_brain, monkeypatch):
+    # A personal / non-knowledge miss must NOT trigger a web search (keeps latency
+    # low and never stores irrelevant web facts) — it stays an honest "I don't know."
+    fake_brain.respond = brain.I_DONT_KNOW
+    fake_research, calls = _stub_research(mem)
+    monkeypatch.setattr("utah.product.researcher.research", fake_research)
+
+    reply = core.tell("what should I name my dog")
+
+    assert reply.text == brain.I_DONT_KNOW
+    assert calls["n"] == 0  # no research for a non-factual miss
+
+
+def test_learn_on_miss_keeps_honest_refusal_when_web_finds_nothing(mem, fake_brain, monkeypatch):
+    # Factual question, but the web yields no durable fact → no fabrication, the
+    # honest "I don't know." stands (learning never invents an answer).
+    fake_brain.respond = brain.I_DONT_KNOW
+    monkeypatch.setattr("utah.product.researcher.research",
+                        lambda query, **kw: {"query": query, "sources": 2, "facts": 0, "stored": 0})
+
+    reply = core.tell("who won the 1923 world series")
+
+    assert reply.text == brain.I_DONT_KNOW
+    assert all(r.source != "fact" for r in mem.store.rows.values())
+
+
+def test_learn_on_miss_disabled_by_flag(mem, fake_brain, monkeypatch):
+    # The deploy seam: with the flag off, a factual miss stays an honest refusal.
+    fake_brain.respond = brain.I_DONT_KNOW
+    monkeypatch.setattr("utah.config.LEARN_ON_MISS", False)
+    fake_research, calls = _stub_research(mem)
+    monkeypatch.setattr("utah.product.researcher.research", fake_research)
+
+    reply = core.tell(_EIFFEL_Q)
+
+    assert reply.text == brain.I_DONT_KNOW
+    assert calls["n"] == 0
+
+
+def test_learn_on_miss_streams_grounded_answer(mem, fake_brain, monkeypatch):
+    # The live chat-box / voice path: a factual cold miss learns FIRST (visible as a
+    # "looking it up" thinking line) then streams a GROUNDED answer, not a refusal.
+    from tests.fakes import ScriptedStreamRunner
+
+    def _answer_lines(prompt: str) -> list[str]:
+        text = _EIFFEL if "330 metres" in prompt else brain.I_DONT_KNOW
+        start = json.dumps({"type": "stream_event", "event": {
+            "type": "content_block_start", "index": 1, "content_block": {"type": "text"}}})
+        delta = json.dumps({"type": "stream_event", "event": {
+            "type": "content_block_delta", "index": 1,
+            "delta": {"type": "text_delta", "text": text}}})
+        return [start, delta]
+
+    brain.set_stream_runner(ScriptedStreamRunner(_answer_lines))
+    mem.embedder.register(_EIFFEL_Q, blend(basis(0), basis(1), 0.5))
+    fake_research, calls = _stub_research(mem)
+    monkeypatch.setattr("utah.product.researcher.research", fake_research)
+
+    events = list(core.tell_stream(_EIFFEL_Q))
+
+    assert ("source", "learned") in events
+    assert calls["n"] == 1
+    answer = "".join(c for ch, c in events if ch == "answer")
+    assert "330 metres" in answer
+    assert any(r.source == "fact" and "Eiffel Tower" in r.content for r in mem.store.rows.values())
 
 
 # --- CLI entrypoint -------------------------------------------------------------------

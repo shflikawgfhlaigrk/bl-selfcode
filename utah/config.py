@@ -70,6 +70,19 @@ LOCAL_HEAVY_MAX_TOKENS: int = int(os.environ.get("UTAH_LOCAL_HEAVY_MAX", "1024")
 #: At/above this word count, a non-capability query leans to the heavy local tier.
 ROUTER_HEAVY_MIN_WORDS: int = 18
 
+# --- learn-on-miss (find → understand → remember, then answer) ----------------
+#: When the brain REFUSES a world-knowledge question ("I don't know."), go learn
+#: it: the researcher searches the web, fetches, extracts GROUNDED facts into
+#: memory through the admission gate, then the brain re-reasons over the fresh
+#: recall. This keeps no-fabrication intact (the brain still only answers from
+#: CONTEXT — we just populate the context with real fetched facts first) AND lets
+#: Utah compound: the next identical question is an instant memory recall. Scoped
+#: to factual-recall turns so personal/agentic misses stay fast. 0 disables it.
+LEARN_ON_MISS: bool = os.environ.get("UTAH_LEARN_ON_MISS", "1") not in ("0", "", "false", "no")
+#: How many web sources the learn-on-miss research pass fetches (kept small so a
+#: cold miss costs a few seconds, not a crawl; subsequent asks are free recall).
+LEARN_ON_MISS_SOURCES: int = int(os.environ.get("UTAH_LEARN_ON_MISS_SOURCES", "4"))
+
 # --- clock capability (time/date — a model cannot know the current instant) ----
 #: Michael's timezone (Gulf Shores, AL = Central). Invalid → system-local fallback.
 TIMEZONE: str = os.environ.get("UTAH_TIMEZONE", "America/Chicago")

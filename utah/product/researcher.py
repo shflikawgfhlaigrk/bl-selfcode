@@ -186,6 +186,7 @@ def research(query: str, *, k: int = 4, search_fn=None, fetch_fn=None,
         return {"query": query, "sources": 0, "facts": 0, "stored": 0}
 
     facts_found = stored = 0
+    learned: list[str] = []  # the stored fact strings — the caller can ground on these
     for title, url in sources:
         try:
             content = fetch_fn(url)
@@ -200,6 +201,7 @@ def research(query: str, *, k: int = 4, search_fn=None, fetch_fn=None,
             try:
                 store_fn(fact)
                 stored += 1
+                learned.append(fact)
             except Exception as exc:  # noqa: BLE001 — admission/embccept failures
                 failures.record("researcher", "store_failed", f"{str(fact)[:50]}: {exc}")
 
@@ -207,7 +209,8 @@ def research(query: str, *, k: int = 4, search_fn=None, fetch_fn=None,
         failures.record("researcher", "no_facts",
                         f"{query[:60]}: {len(sources)} sources, 0 durable facts extracted")
     log.info("research %r: sources=%d facts=%d stored=%d", query, len(sources), facts_found, stored)
-    return {"query": query, "sources": len(sources), "facts": facts_found, "stored": stored}
+    return {"query": query, "sources": len(sources), "facts": facts_found,
+            "stored": stored, "fact_list": learned}
 
 
 __all__ = ["search", "fetch", "research", "sanitize_fetched_text", "SearchBlocked",

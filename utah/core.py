@@ -18,7 +18,7 @@ import sys
 from collections import deque
 from typing import Iterator
 
-from utah import brain, failures, local, memory, router
+from utah import brain, config, failures, local, memory, router
 from utah.brain import BrainUnavailable
 from utah.embed import EmbedError
 from utah.memory import AdmissionDenied, MemoryUnavailable
@@ -41,8 +41,11 @@ def _conversation_context() -> str:
     return "\n".join(f"Michael: {q}\nUtah: {a}" for q, a in _CONVO)
 
 
-def _build_context(hits: list) -> str:
-    """Brain context = core identity facts + conversation thread + recalled memory."""
+def _build_context(hits: list, learned: list[str] | None = None) -> str:
+    """Brain context = core identity facts + conversation thread + freshly researched
+    facts + recalled memory. ``learned`` (the just-fetched web facts) is injected as
+    its own labelled block so a learn-on-miss retry grounds on the COMPLETE fresh
+    evidence — not the post-supersede, top-k recall (which can drop the key fact)."""
     parts: list[str] = []
     core = memory.core_recall()
     if core:
@@ -50,6 +53,9 @@ def _build_context(hits: list) -> str:
     convo = _conversation_context()
     if convo:
         parts.append("RECENT CONVERSATION:\n" + convo)
+    if learned:
+        parts.append("FRESHLY RESEARCHED (grounded web facts):\n"
+                     + "\n".join(f"- {f}" for f in learned))
     if hits:
         parts.append("RECALLED MEMORY:\n" + "\n".join(f"- {h.content}" for h in hits))
     return "\n\n".join(parts)
@@ -126,6 +132,43 @@ def _remember_turn(text: str, reply_text: str) -> None:
         log.warning("could not remember the turn (reply still sent): %s", exc)
 
 
+# --------------------------------------------------------------------------
+# Learn-on-miss — find → understand → remember, then answer.
+# When the brain refuses a world-knowledge question because memory is cold, go
+# LEARN it: research the web, extract grounded facts into memory through the
+# admission gate, then re-reason over the fresh recall. No-fabrication is intact
+# (the brain still answers only from CONTEXT — we just populate the context with
+# real fetched facts first), and Utah compounds: the next ask is instant recall.
+# --------------------------------------------------------------------------
+
+
+def _learnable(text: str) -> bool:
+    """Scope the learn-on-miss loop: enabled, and a world-knowledge question (so
+    personal/agentic misses never pay for a web search). The TRIGGER is the brain's
+    actual refusal — never a predicted 'is this grounded?', which false-positives on
+    a semantically-near but wrong-entity hit (an Everest fact for a Kilimanjaro
+    question passed the gate and wrongly suppressed learning). The refusal is ground
+    truth: the brain only refuses when its CONTEXT genuinely lacks the answer."""
+    return config.LEARN_ON_MISS and router.is_factual_recall(text)
+
+
+def _learn(text: str) -> list[str]:
+    """Research *text* on the web and store the grounded facts in memory.
+    Returns the freshly learned fact strings (so the caller can ground the retry on
+    the COMPLETE fresh set, not a lossy recall). Best-effort: every failure (search
+    blocked, dead fetch, no facts, brain down) is swallowed and returns [] — the
+    caller keeps the honest "I don't know"."""
+    try:
+        from utah.product import researcher
+
+        result = researcher.research(text, k=config.LEARN_ON_MISS_SOURCES)
+    except Exception as exc:  # noqa: BLE001 — learning is best-effort, never fatal
+        log.warning("learn-on-miss research failed: %s", exc)
+        failures.record("learn", "research_failed", f"{text[:60]}: {exc}")
+        return []
+    return list(result.get("fact_list") or [])
+
+
 def tell(text: str) -> Reply:
     """One full turn: recall -> ground -> reason -> remember."""
     text = (text or "").strip()
@@ -183,6 +226,19 @@ def tell(text: str) -> Reply:
             hits=hits,
         )
 
+    # 4.5 LEARN-ON-MISS: the brain refused a world-knowledge question → go find it,
+    #     store the grounded facts, and re-reason over the COMPLETE fresh evidence.
+    #     (No-fab intact: the brain answers from the new CONTEXT.)
+    if brain.is_refusal(reply_text) and _learnable(text):
+        learned = _learn(text)
+        if learned:
+            relearned = brain.think(text, _build_context(hits, learned=learned))
+            if relearned and not brain.is_refusal(relearned):
+                _CONVO.append((text, relearned))
+                _remember_turn(text, relearned)
+                return Reply(text=relearned, source=ReplySource.LEARNED, hits=hits)
+            # the web didn't actually answer it → fall through to the honest refusal.
+
     # 5. REMEMBER (best-effort): store the exchange so future recall compounds.
     #    Refusals ("I don't know…", verbose or not) carry nothing durable → skip.
     if reply_text:
@@ -238,13 +294,20 @@ def tell_stream(text: str) -> Iterator[tuple[str, str]]:
         # miss (refusal / Ollama down) → escalate to the brain below.
 
     # 2. REASON — stream the Claude CLI brain, grounded in the conversation + hits.
+    #    Thinking always streams live (chat box reasons like Claude). For a factual
+    #    question the ANSWER is BUFFERED so a refusal can trigger learn-on-miss before
+    #    anything is committed to the box — no "I don't know" flash that we'd correct.
     yield ("source", "brain")
+    learnable = _learnable(text)
     parts: list[str] = []
     try:
         for channel, chunk in brain.think_stream(text, context):
             if channel == "answer":
                 parts.append(chunk)
-            yield (channel, chunk)
+                if not learnable:
+                    yield (channel, chunk)  # non-factual: stream the answer live
+            else:
+                yield (channel, chunk)      # thinking always streams live
     except BrainUnavailable as exc:
         log.error("brain unavailable: %s", exc)
         failures.record("brain", "unavailable", str(exc))
@@ -253,9 +316,32 @@ def tell_stream(text: str) -> Iterator[tuple[str, str]]:
         yield ("answer", msg)
         yield ("done", msg)
         return
+    reply_text = "".join(parts).strip()
+
+    # 2.5 LEARN-ON-MISS — the brain REFUSED a factual question → find it on the web,
+    #     ground on the COMPLETE fresh evidence, and reason again. (No-fab intact.)
+    if learnable and brain.is_refusal(reply_text):
+        yield ("source", "learned")
+        yield ("thinking", "I don't have that yet — searching the web and learning it…\n")
+        learned = _learn(text)
+        if learned:
+            relearned: list[str] = []
+            try:
+                for channel, chunk in brain.think_stream(text, _build_context(hits, learned=learned)):
+                    if channel == "answer":
+                        relearned.append(chunk)
+                    else:
+                        yield (channel, chunk)  # second-pass thinking live
+            except BrainUnavailable as exc:
+                log.error("brain unavailable on learn retry: %s", exc)
+            grounded = "".join(relearned).strip()
+            if grounded and not brain.is_refusal(grounded):
+                reply_text = grounded  # commit the grounded answer
+        # else (nothing learned / retry refused) → the honest refusal stands.
+    if learnable:
+        yield ("answer", reply_text)  # commit the (buffered or grounded) answer once
 
     # 3. REMEMBER (best-effort) — skip refusals (nothing durable).
-    reply_text = "".join(parts).strip()
     if reply_text:
         _CONVO.append((text, reply_text))  # conversation thread (incl. honest refusals)
     _remember_turn(text, reply_text)

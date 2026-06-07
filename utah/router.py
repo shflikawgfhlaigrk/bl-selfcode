@@ -86,6 +86,14 @@ _FACTUAL_RECALL = re.compile(
 )
 
 
+def is_factual_recall(text: str) -> bool:
+    """True for an external/world-knowledge question ("who won…", "capital of…",
+    "how tall is…"). These are what the brain's no-fab gate refuses when memory is
+    cold — and exactly what the web can ground — so the learn-on-miss loop is scoped
+    to them (personal/agentic misses don't trigger a web search)."""
+    return bool(_FACTUAL_RECALL.search(text or ""))
+
+
 def route(text: str) -> Route:
     """Map a turn to the cheapest tier that can answer it."""
     t = (text or "").strip()
