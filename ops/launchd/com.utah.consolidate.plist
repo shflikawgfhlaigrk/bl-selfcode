@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  com.utah.consolidate — sleep-time consolidation cron (every 30 min).
+
+  Runs utah.maintenance.run(): promotes unpromoted turns into durable facts via
+  the brain, then decays/archives faded rows. Failures go to the failure log, not
+  to stderr. Runs even if the prior interval is still running (StartInterval does
+  not queue).
+
+  Install:
+    cp ops/launchd/com.utah.consolidate.plist ~/Library/LaunchAgents/
+    launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.utah.consolidate.plist
+  Force-run now:  launchctl kickstart gui/$(id -u)/com.utah.consolidate
+  Stop:           launchctl bootout  gui/$(id -u)/com.utah.consolidate
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.utah.consolidate</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/michaelbarber/.utah/venv/bin/python</string>
+    <string>-c</string>
+    <string>import logging; logging.basicConfig(level=logging.INFO); from utah.maintenance import run; r=run(); print(r)</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>/Users/michaelbarber/Desktop/ProjectUtah</string>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PYTHONPATH</key>
+    <string>/Users/michaelbarber/Desktop/ProjectUtah</string>
+    <key>PYTHONUNBUFFERED</key>
+    <string>1</string>
+    <key>PATH</key>
+    <string>/Users/michaelbarber/.utah/venv/bin:/opt/homebrew/bin:/usr/local/bin:/Users/michaelbarber/.local/bin:/usr/bin:/bin</string>
+  </dict>
+
+  <key>StartInterval</key>
+  <integer>1800</integer>
+
+  <key>StandardOutPath</key>
+  <string>/Users/michaelbarber/.utah/logs/consolidate.log</string>
+
+  <key>StandardErrorPath</key>
+  <string>/Users/michaelbarber/.utah/logs/consolidate.err</string>
+</dict>
+</plist>
