@@ -24,7 +24,7 @@
   <array>
     <string>/Users/michaelbarber/.utah/venv/bin/python</string>
     <string>-c</string>
-    <string>import logging; logging.basicConfig(level=logging.INFO); from utah.product.leads import run_scheduled; print(run_scheduled())</string>
+    <string>import logging; logging.basicConfig(level=logging.INFO); from utah.product.leads import run_scheduled; print(run_scheduled(target=500))</string>
   </array>
 
   <key>WorkingDirectory</key>

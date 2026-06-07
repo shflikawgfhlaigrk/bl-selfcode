@@ -19,6 +19,7 @@ def test_chain_filter_exact_single_word_and_prefix_multiword():
 def test_build_query_targets_no_website_in_bbox():
     q = leads.build_query((33.20, -84.95, 33.55, -84.55))
     assert '["website"!~"."]' in q          # the no-website predicate
+    assert '["contact:website"!~"."]' in q and '["url"!~"."]' in q  # full no-web-presence
     assert "33.2" in q and "-84.95" in q     # the bbox
     assert "out tags center" in q
 
@@ -36,7 +37,17 @@ def test_find_parses_filters_and_shapes():
     names = {s["name"] for s in found}
     assert names == {"Joe's Diner", "Newnan Hardware"}           # chain + no-name removed
     joe = next(s for s in found if s["name"] == "Joe's Diner")
-    assert joe["kind"] == "restaurant" and joe["phone"] == "555-1"
+    assert joe["kind"] == "restaurant" and joe["contact"]["phone"] == "555-1"
+
+
+def test_extract_contact_pulls_phone_email_address():
+    tags = {"contact:phone": "770-555-9", "email": "hi@shop.com",
+            "addr:housenumber": "12", "addr:street": "Main St", "addr:city": "Newnan",
+            "addr:state": "GA", "addr:postcode": "30263"}
+    c = leads._extract_contact(tags)
+    assert c["phone"] == "770-555-9" and c["email"] == "hi@shop.com"
+    assert c["address"] == "12 Main St, Newnan, GA, 30263"
+    assert leads._extract_contact({}) == {}      # nothing tagged → empty (no fabrication)
 
 
 class _RecLedger:
@@ -106,12 +117,45 @@ def test_scout_frontier_iterates_tiles_and_dedupes():
     assert r["region"] == "Test Metro"
 
 
-def test_run_scheduled_cron_entry_writes_ledger_dedup():
-    # The com.utah.leads cron path: injected ledger + fetch, never the network.
+def _cursor_pair(start=0):
+    """In-memory frontier cursor (load/save) so run_scheduled never touches disk."""
+    box = {"i": start}
+    return (lambda: box["i"]), (lambda i: box.__setitem__("i", i)), box
+
+
+def test_run_scheduled_moving_frontier_hits_target_and_advances_cursor():
     import json as _json
     lg = _RecLedger()
-    sample = _json.dumps({"elements": [{"tags": {"name": "Maple Diner", "amenity": "restaurant"}}]})
-    r = leads.run_scheduled(region="Test Metro", max_tiles=2, ledger=lg, fetch=lambda q: sample)
-    assert r["region"] == "Test Metro" and r["tiles_scanned"] == 2
-    assert r["new"] == 1          # same business across both tiles → never-twice = 1 new
-    assert lg.calls and lg.calls[0][0] == "Maple Diner"
+    # each tile yields 2 fresh businesses; per-tile region means NO cross-tile dedup
+    sample = _json.dumps({"elements": [
+        {"tags": {"name": "Maple Diner", "amenity": "restaurant"}},
+        {"tags": {"name": "Oak Hardware", "shop": "hardware"}}]})
+    load, save, box = _cursor_pair(0)
+    r = leads.run_scheduled(region="GA", target=3, bbox=(0, 0, 1.0, 1.0),  # 16 tiles @0.25
+                            max_tiles=40, ledger=lg, fetch=lambda q: sample,
+                            cursor_load=load, cursor_save=save)
+    assert r["met"] is True and r["new"] >= 3            # reached the floor
+    assert r["tiles_scanned"] == 2                       # 2 tiles * 2 new = 4 >= target 3
+    assert box["i"] == 2                                 # cursor advanced + persisted
+    # per-tile region bucket (so the same name in another town isn't falsely deduped)
+    assert any(c[2].startswith("GA [") for c in lg.calls)
+
+
+def test_run_scheduled_caps_tiles_and_skips_failed_tile():
+    import json as _json
+    lg = _RecLedger()
+    good = _json.dumps({"elements": [{"tags": {"name": "Solo Cafe", "amenity": "cafe"}}]})
+
+    def flaky(query):
+        raise RuntimeError("overpass down")   # every tile fails → run survives, new=0
+
+    r = leads.run_scheduled(region="GA", target=500, bbox=(0, 0, 1.0, 1.0),
+                            max_tiles=3, ledger=lg, fetch=flaky,
+                            cursor_load=lambda: 0, cursor_save=lambda i: None)
+    assert r["new"] == 0 and r["tiles_scanned"] == 3 and r["met"] is False  # capped, survived
+    # and a working fetch still records
+    lg2 = _RecLedger()
+    r2 = leads.run_scheduled(region="GA", target=1, bbox=(0, 0, 0.5, 0.5), max_tiles=40,
+                             ledger=lg2, fetch=lambda q: good,
+                             cursor_load=lambda: 0, cursor_save=lambda i: None)
+    assert r2["new"] >= 1 and r2["met"] is True

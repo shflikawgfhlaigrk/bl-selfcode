@@ -2,12 +2,14 @@
 
 Ace's lead_scout transitions HERE as a capability behind the brain — not an agent.
 It queries OpenStreetMap (Overpass) for shop/craft/amenity businesses tagged WITHOUT a
-``website``, drops national chains (which slip in untagged but are useless for a
-website-build pitch), and writes each survivor to the product ledger
-(``record_lead`` → Postgres, never-twice, pushes the ``leads`` deck channel).
+website, drops national chains, enriches each with name + contact (phone/email/address),
+and writes survivors to the product ledger (``record_lead`` → Postgres, never-twice).
 
-Grounded by construction: every lead is a real OSM business, never fabricated. The
-Overpass fetch is an injectable boundary so the logic is unit-tested offline.
+For sustained volume (≥500 NEW/day) it scans a MOVING FRONTIER: a large tiled region
+with a persistent cursor that advances to FRESH tiles each run, so dedup doesn't just
+re-scan the same exhausted geography. Grounded by construction: every lead is a real
+OSM business, never fabricated. The Overpass fetch is injectable so the logic is
+unit-tested offline.
 """
 from __future__ import annotations
 
@@ -15,7 +17,10 @@ import json
 import logging
 import re
 import urllib.request
+from pathlib import Path
 from typing import Callable
+
+from utah.daemon import runtime
 
 log = logging.getLogger("utah.product.leads")
 
@@ -28,14 +33,27 @@ USER_AGENT = "Utah/1.0 leads-smb (educational)"
 QUERY_TIMEOUT_S = 30
 HTTP_TIMEOUT_S = 60.0
 
-#: Coweta County, GA — Newnan/Sharpsburg/Senoia (south, west, north, east). Michael's
-#: region; a single Overpass query over a much larger box times out (tiling is a TODO).
+#: Coweta County, GA — Michael's home region (kept for targeted single-county scans).
 COWETA_BBOX = (33.20, -84.95, 33.55, -84.55)
 
-#: A metro frontier: tile a large bbox into Overpass-sized sub-boxes.
-#: Atlanta metro ring around Coweta; ~0.7deg box tiled at 0.25deg ~= 9 tiles.
+#: Legacy metro ring (12 tiles) — kept for back-compat / small scans.
 METRO_BBOX = (33.0, -85.1, 34.1, -84.0)
+
+#: The MOVING-FRONTIER region: a large Southeast box (all of GA + AL + edges of the
+#: neighbors). Tiled at TILE_STEP into ~300+ Overpass-sized sub-boxes; a persistent
+#: cursor advances through FRESH tiles each daily run so ≥500 new/day is sustainable for
+#: WEEKS before it wraps (and a wrap still finds genuinely-new/newly-untagged businesses).
+#: Widen the box for even more supply.
+FRONTIER_BBOX = (30.8, -85.7, 35.0, -81.0)
 TILE_STEP = 0.25  # degrees; each tile small enough to not time out Overpass
+
+#: Daily floor + per-run safety cap on tiles. The cap is generous so even a sparse
+#: rural sweep (~7 new/tile) can still clear the 500 floor (~72 tiles); dense metro
+#: sweeps hit it in <10 tiles and stop early.
+DAILY_TARGET = 500
+MAX_TILES_PER_RUN = 80
+#: Persistent frontier cursor — which tile index to resume from next run.
+FRONTIER_STATE = runtime.RUN_DIR / "leads-frontier.json"
 
 #: High-signal "local business that probably can't build its own site" categories.
 _CATEGORIES: list[tuple[str, str]] = [
@@ -97,11 +115,8 @@ Fetch = Callable[[str], str]  # Overpass QL -> raw JSON text (injectable boundar
 def frontier_tiles(
     bbox: tuple[float, float, float, float], step: float = TILE_STEP
 ) -> list[tuple[float, float, float, float]]:
-    """Split (south, west, north, east) into a grid of <=step sub-boxes.
-
-    Pure function. Last row/column clamps to the parent edge so the whole
-    box is covered with no overlap and no spill.
-    """
+    """Split (south, west, north, east) into a grid of <=step sub-boxes (pure).
+    Last row/column clamps to the parent edge — full coverage, no overlap/spill."""
     if step <= 0:
         raise ValueError(f"step must be positive, got {step!r}")
     south, west, north, east = bbox
@@ -136,14 +151,19 @@ def is_national_chain(name: str) -> bool:
 
 
 def build_query(bbox: tuple[float, float, float, float]) -> str:
-    """Overpass QL: every node/way in *bbox* in a target category WITHOUT a website."""
+    """Overpass QL: every node/way in *bbox* in a target category with NO web presence.
+
+    "No website" means NONE of ``website`` / ``contact:website`` / ``url`` is set —
+    otherwise a business that tags its site under contact:website/url would wrongly
+    slip into the no-website list."""
     south, west, north, east = bbox
+    no_web = '["website"!~"."]["contact:website"!~"."]["url"!~"."]'
     parts: list[str] = []
     for k, v in _CATEGORIES:
         sel = f'["{k}"]' if v == "*" else f'["{k}"="{v}"]'
         box = f"({south},{west},{north},{east})"
-        parts.append(f'node{sel}["name"]["website"!~"."]{box};')
-        parts.append(f'way{sel}["name"]["website"!~"."]{box};')
+        parts.append(f'node{sel}["name"]{no_web}{box};')
+        parts.append(f'way{sel}["name"]{no_web}{box};')
     return f"[out:json][timeout:{QUERY_TIMEOUT_S}];(" + "".join(parts) + ");out tags center;"
 
 
@@ -164,10 +184,29 @@ def _http_fetch(query: str) -> str:
     raise RuntimeError(f"all Overpass mirrors failed: {last}")
 
 
+def _extract_contact(tags: dict) -> dict:
+    """Pull phone + email + address from OSM tags into a contact dict (empties dropped)."""
+    phone = (tags.get("phone") or tags.get("contact:phone") or "").strip()
+    email = (tags.get("email") or tags.get("contact:email") or "").strip()
+    street = " ".join(x for x in (tags.get("addr:housenumber"), tags.get("addr:street")) if x)
+    address = ", ".join(x for x in (
+        street, tags.get("addr:city"), tags.get("addr:state"), tags.get("addr:postcode")
+    ) if x).strip()
+    contact: dict[str, str] = {}
+    if phone:
+        contact["phone"] = phone
+    if email:
+        contact["email"] = email
+    if address:
+        contact["address"] = address
+    return contact
+
+
 def find_no_website_smbs(bbox: tuple[float, float, float, float],
                          fetch: Fetch | None = None) -> list[dict]:
     """Real OSM businesses in *bbox* with no website, national chains removed.
-    Each: ``{name, kind, phone}``. Never fabricated — straight from OSM."""
+    Each: ``{name, kind, contact}`` where contact = {phone?, email?, address?}.
+    Never fabricated — straight from OSM."""
     raw = (fetch or _http_fetch)(build_query(bbox))
     data = json.loads(raw)
     out: list[dict] = []
@@ -182,19 +221,18 @@ def find_no_website_smbs(bbox: tuple[float, float, float, float],
         seen.add(name.lower())
         kind = tags.get("shop") or tags.get("craft") or tags.get("amenity") \
             or tags.get("office") or tags.get("leisure") or "business"
-        phone = (tags.get("phone") or tags.get("contact:phone") or "").strip()
-        out.append({"name": name, "kind": kind, "phone": phone})
+        out.append({"name": name, "kind": kind, "contact": _extract_contact(tags)})
     return out
 
 
 def scout(ledger, bbox: tuple[float, float, float, float] = COWETA_BBOX,
           region: str = "Coweta County, GA", fetch: Fetch | None = None) -> dict:
     """Find no-website SMBs and write each to the product ledger (never-twice).
-    Returns ``{found, new, region}``. The ledger push lights the deck per new lead."""
+    Returns ``{found, new, region}``. Each lead carries name + contact (phone/email/addr)."""
     found = find_no_website_smbs(bbox, fetch)
     new = 0
     for s in found:
-        contact = {"phone": s["phone"]} if s["phone"] else None
+        contact = s.get("contact") or None
         if ledger.record_lead(s["name"], s["kind"], region, "osm", contact=contact):
             new += 1
     log.info("leads scout %s: found=%d new=%d", region, len(found), new)
@@ -203,15 +241,10 @@ def scout(ledger, bbox: tuple[float, float, float, float] = COWETA_BBOX,
 
 def scout_frontier(ledger, bbox=METRO_BBOX, region="Atlanta Metro Ring",
                    fetch=None, max_tiles=12):
-    """Scale leads: tile a metro bbox, scout each tile, dedup at the ledger.
-
-    Each tile is a separate Overpass query (avoids the single-big-box timeout).
-    Dedup is the ledger's UNIQUE(name, region) — same lead across tiles counts once.
-    Returns {tiles_scanned, found, new, region}.
-    """
+    """Legacy fixed-frontier scan (kept for back-compat). Tiles a bbox, scouts each,
+    dedup at the ledger. Prefer ``run_scheduled`` (moving frontier) for daily volume."""
     tiles = frontier_tiles(bbox)[:max_tiles]
-    found = 0
-    new = 0
+    found = new = 0
     for tile in tiles:
         res = scout(ledger, bbox=tile, region=region, fetch=fetch)
         found += res["found"]
@@ -219,20 +252,72 @@ def scout_frontier(ledger, bbox=METRO_BBOX, region="Atlanta Metro Ring",
     return {"tiles_scanned": len(tiles), "found": found, "new": new, "region": region}
 
 
-def run_scheduled(region: str = "Atlanta Metro Ring", max_tiles: int = 12,
-                  ledger=None, fetch: Fetch | None = None) -> dict:
-    """Entry point for the ``com.utah.leads`` cron: scout the metro frontier into the
-    LIVE product ledger (never-twice dedup keeps re-runs honest). Real OSM businesses
-    only — never fabricated. ``ledger``/``fetch`` are injectable so the cron path is
-    unit-tested offline. Returns ``{tiles_scanned, found, new, region}``."""
+# ── moving frontier (persistent cursor) ──────────────────────────────────────
+def _load_cursor() -> int:
+    try:
+        return int(json.loads(FRONTIER_STATE.read_text()).get("i", 0))
+    except Exception:  # noqa: BLE001 — absent/corrupt → start at 0
+        return 0
+
+
+def _save_cursor(i: int) -> None:
+    try:
+        FRONTIER_STATE.parent.mkdir(parents=True, exist_ok=True)
+        FRONTIER_STATE.write_text(json.dumps({"i": i}))
+    except Exception as exc:  # noqa: BLE001
+        log.warning("frontier cursor write failed: %s", exc)
+
+
+def _tile_region(base: str, tile: tuple[float, float, float, float]) -> str:
+    """Per-tile region bucket so dedup (UNIQUE name,region) doesn't false-collide a
+    same-named business across different towns — each tile is its own bucket."""
+    s, w, _, _ = tile
+    return f"{base} [{s:.2f},{w:.2f}]"
+
+
+def run_scheduled(region: str = "Georgia Frontier", target: int = DAILY_TARGET,
+                  bbox=FRONTIER_BBOX, max_tiles: int = MAX_TILES_PER_RUN,
+                  ledger=None, fetch: Fetch | None = None,
+                  cursor_load=None, cursor_save=None) -> dict:
+    """``com.utah.leads`` cron entry — MOVING FRONTIER, ≥``target`` new/day.
+
+    Advance a persistent cursor through FRESH tiles of a large region, scouting until
+    ``target`` NEW leads are recorded (or the per-run tile cap is hit). Persists the
+    cursor so each daily run continues into unscanned geography → sustained volume,
+    not a re-scan of exhausted tiles. A tile that fails all Overpass mirrors is
+    skipped (logged), so one bad tile never aborts the run. Real OSM only — never
+    fabricated. Returns ``{tiles_scanned, found, new, target, met, region, cursor}``."""
     if ledger is None:
         from utah.product.ledger import Ledger
         ledger = Ledger()
-    res = scout_frontier(ledger, region=region, max_tiles=max_tiles, fetch=fetch)
-    log.info("leads cron: %s", res)
-    return res
+    load = cursor_load or _load_cursor
+    save = cursor_save or _save_cursor
+
+    tiles = frontier_tiles(bbox)
+    if not tiles:
+        return {"tiles_scanned": 0, "found": 0, "new": 0, "target": target,
+                "met": False, "region": region, "cursor": 0}
+    start = load() % len(tiles)
+    i = start
+    found = new = scanned = 0
+    while new < target and scanned < max_tiles and scanned < len(tiles):
+        tile = tiles[i % len(tiles)]
+        try:
+            res = scout(ledger, bbox=tile, region=_tile_region(region, tile), fetch=fetch)
+            found += res["found"]
+            new += res["new"]
+        except Exception as exc:  # noqa: BLE001 — a bad tile must not abort the run
+            log.warning("leads tile %s failed, skipping: %s", tile, exc)
+        scanned += 1
+        i = (i + 1) % len(tiles)
+    save(i)
+    out = {"tiles_scanned": scanned, "found": found, "new": new, "target": target,
+           "met": new >= target, "region": region, "cursor": i}
+    log.info("leads cron (moving frontier): %s", out)
+    return out
 
 
 __all__ = ["is_national_chain", "build_query", "find_no_website_smbs", "scout",
-           "scout_frontier", "frontier_tiles", "run_scheduled", "COWETA_BBOX",
-           "METRO_BBOX", "TILE_STEP", "NATIONAL_CHAINS"]
+           "scout_frontier", "frontier_tiles", "run_scheduled", "_extract_contact",
+           "COWETA_BBOX", "METRO_BBOX", "FRONTIER_BBOX", "TILE_STEP", "DAILY_TARGET",
+           "MAX_TILES_PER_RUN", "FRONTIER_STATE", "NATIONAL_CHAINS"]
