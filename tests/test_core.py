@@ -179,6 +179,19 @@ def test_local_answer_is_grounded_in_recalled_context(mem, fake_brain):
     assert "Michael prefers tea" in user  # the local model was grounded
 
 
+def test_core_facts_are_injected_first_in_brain_context(mem, fake_brain):
+    # source='core' rows must arrive in the brain prompt before recalled memory
+    # so that identity/standing facts always ground the brain — the StoreBackend
+    # protocol path (core_rows) must be exercised, not just a FakeStore _tx hack.
+    memory.store("Michael lives in Gulf Shores, AL", source="core", confidence=1.0)
+    fake_brain.respond = "I know where you live."
+
+    core.tell("do you know where I live?")
+
+    assert "CORE (always true):" in fake_brain.last_prompt
+    assert "Gulf Shores" in fake_brain.last_prompt
+
+
 def test_store_failure_does_not_eat_the_reply(mem, fake_brain):
     fake_brain.respond = "An answer."
     original_insert = mem.store.insert

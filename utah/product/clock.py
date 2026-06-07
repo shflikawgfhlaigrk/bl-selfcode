@@ -18,7 +18,11 @@ def _zone() -> ZoneInfo | None:
     try:
         return ZoneInfo(config.TIMEZONE)
     except (ZoneInfoNotFoundError, ValueError):
-        return None  # fall back to system-local time
+        import logging
+        logging.getLogger("utah.clock").warning(
+            "invalid TIMEZONE %r, using system-local time", config.TIMEZONE
+        )
+        return None
 
 
 def _local_now() -> datetime:

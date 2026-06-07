@@ -360,6 +360,10 @@ class FakeStore:
         if "promoted" not in row.tags:
             row.tags.append("promoted")
 
+    def core_rows(self) -> list[tuple[int, str, str]]:
+        self._check()
+        return [(r.id, r.content, r.source) for r in self._live() if r.source == "core"]
+
     def list_memories(self, limit: int = 50, offset: int = 0) -> list[dict]:
         live = sorted(self._live(), key=lambda r: (r.ts, r.id), reverse=True)
         return [

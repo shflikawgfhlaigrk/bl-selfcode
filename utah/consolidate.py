@@ -18,6 +18,7 @@ from __future__ import annotations
 import logging
 
 from utah import brain, config, memory
+from utah.embed import EmbedError
 from utah.objects import ConsolidationReport
 
 log = logging.getLogger("utah.consolidate")
@@ -44,7 +45,7 @@ def consolidate(limit: int = 20) -> ConsolidationReport:
             try:
                 memory.store(fact, source="consolidation", confidence=0.8)
                 promoted += 1
-            except (memory.AdmissionDenied, memory.EmbedError) as exc:
+            except (memory.AdmissionDenied, EmbedError) as exc:
                 skipped += 1
                 log.warning("fact skipped (%s): %.80s", exc, fact)
         backend.mark_promoted(turn_id)

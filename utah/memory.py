@@ -222,6 +222,7 @@ class StoreBackend(Protocol):
     def apply_decay(self) -> int: ...
     def unpromoted_turns(self, limit: int) -> list[tuple[int, str]]: ...
     def mark_promoted(self, mem_id: int) -> None: ...
+    def core_rows(self) -> list[tuple[int, str, str]]: ...
     def close(self) -> None: ...
 
 
@@ -334,7 +335,19 @@ class PostgresStore:
             conn.execute(_DDL)
 
     def reset_schema(self) -> None:
-        """Dev-only clean slate (drops everything, then re-creates)."""
+        """Dev-only clean slate (drops everything, then re-creates).
+
+        PRODUCTION-SAFETY GUARD: refuses unless ``UTAH_ALLOW_RESET=1``. This DROPs the
+        memory/entity tables — a stray call (a misrouted test, an accidental --reset) once
+        wiped 9k migrated facts. The wipe now cannot happen without an explicit opt-in.
+        """
+        import os
+
+        if os.environ.get("UTAH_ALLOW_RESET") != "1":
+            raise MemoryUnavailable(
+                "reset_schema refused: this DROPs all memory. Set UTAH_ALLOW_RESET=1 "
+                "to intentionally wipe (production-safety guard)."
+            )
         with self._tx() as conn:
             conn.execute("DROP TABLE IF EXISTS mem_entity, entity, memory CASCADE")
             conn.execute(_DDL)
@@ -463,6 +476,15 @@ class PostgresStore:
                 "WHERE id = %s AND NOT ('promoted' = ANY(tags))",
                 (mem_id,),
             )
+
+    def core_rows(self) -> list[tuple[int, str, str]]:
+        with self._tx() as conn:
+            rows = conn.execute(
+                "SELECT id, content, source FROM memory "
+                "WHERE source = 'core' AND superseded_by IS NULL AND NOT archived "
+                "ORDER BY reinforcement DESC, ts ASC"
+            ).fetchall()
+        return [(int(r[0]), r[1], r[2]) for r in rows]
 
     def apply_decay(self) -> int:
         """Recompute decay_score for live rows; archive faded unprotected rows.
@@ -746,13 +768,7 @@ def core_recall() -> list[Hit]:
     facts are temporarily unreadable.
     """
     try:
-        backend = get_backend()
-        with backend._tx() as conn:
-            rows = conn.execute(
-                "SELECT id, content, source FROM memory "
-                "WHERE source = 'core' AND superseded_by IS NULL AND NOT archived "
-                "ORDER BY reinforcement DESC, ts ASC"
-            ).fetchall()
+        rows = get_backend().core_rows()
         return [Hit(id=int(r[0]), content=r[1], source=r[2], score=1.0, sim=1.0) for r in rows]
     except Exception as exc:
         log.warning("core_recall failed (degrading to empty): %s", exc)
