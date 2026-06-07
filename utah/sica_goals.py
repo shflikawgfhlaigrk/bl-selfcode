@@ -13,23 +13,38 @@ concrete, tier-aware task grounded in LIVE signals:
               (sica_loop|sica_autonomy|sica_overseer|sica_goals — the NON-safety
               parts; the Tier-D core selfcode/config/brain stay off-limits).
               "how to be autonomous": make it pick better tasks, score, compound.
+  frontend  — Ace uses its OWN browser (headless Chrome) to look at its OWN live
+              command deck, observe what actually rendered (dormant/empty panels,
+              broken affordances), and propose a grounded UX/frontend optimization
+              to utah/interface/* (leaf Tier-A → the Claude-CLI bot's fix can
+              auto-merge after the supervised ramp). Discovery is grounded in the
+              real rendered DOM, never a guess about markup the brain never saw.
 
 Every signal reader is defensive (never raises) and injected so this is
-unit-proven without DB/brain.
+unit-proven without DB/brain/browser.
 """
 from __future__ import annotations
 
 import json
 import logging
+import os
 
 from utah import config, sica
 from utah.daemon import runtime
 
 log = logging.getLogger("utah.sica_goals")
 
-DOMAINS = ("baseline", "leads", "autonomy")
+DOMAINS = ("baseline", "leads", "autonomy", "frontend")
 CYCLE_N = runtime.RUN_DIR / "selfcode-cycle.n"
 VERIFY_JSON = runtime.RUN_DIR / "verify.json"
+#: Ace's own live deck — what the browser renders during frontend discovery.
+DASHBOARD_URL = os.environ.get("UTAH_DASHBOARD_URL", "http://127.0.0.1:8766/")
+#: The quiescent structural twin (/sim) — the live deck holds a persistent SSE
+#: connection so headless --dump-dom never settles on it; /sim renders cleanly and
+#: carries the same panel structure to critique. Brief live attempt, reliable fallback.
+DASHBOARD_SIM_URL = os.environ.get("UTAH_DASHBOARD_SIM_URL", "http://127.0.0.1:8766/sim")
+#: Fast-fail on the live deck (it won't settle) so discovery falls back, not blocks 30s.
+_LIVE_RENDER_TIMEOUT_S = int(os.environ.get("UTAH_FRONTEND_RENDER_TIMEOUT", "8"))
 
 
 def pick_domain(n: int) -> str:
@@ -104,11 +119,73 @@ def _autonomy_signal(archive=None) -> str:
         return f"(autonomy signal unavailable: {type(exc).__name__})"
 
 
+#: Telltale markers the deck renders for dormant / broken / empty / loading states —
+#: real signals the brain can target. (The deck advertises GATED/DORMANT honestly.)
+_DOM_MARKERS = ("DORMANT", "GATED", "unavailable", "OFFLINE", "no producer",
+                "LOADING", "error", "awaiting")
+
+
+def _summarize_dom(html: str) -> str:
+    """Cheap, real observations from the rendered DOM — no model, no fabrication."""
+    low = html.lower()
+    found = {m: low.count(m.lower()) for m in _DOM_MARKERS}
+    nz = {k: v for k, v in found.items() if v}
+    return f"{len(html)} chars rendered; state markers {nz or 'none'}"
+
+
+def _frontend_signal(render_fn=None) -> str:
+    """Ace looks at its OWN face with its OWN browser: render the deck via headless
+    Chrome and report what actually came back, so the brain proposes a REAL, grounded
+    frontend/UX optimization — not a guess about markup it never saw.
+
+    The LIVE deck holds a persistent SSE connection, so ``--dump-dom`` won't settle on
+    it; we try it briefly (a render-hang is itself a real, reportable finding) then fall
+    back to the quiescent ``/sim`` twin, which carries the same panel structure and
+    renders cleanly. Degrades to a safe generic prompt only if BOTH fail. Never raises."""
+    from utah.integrations import browser
+
+    fn = render_fn or browser.render
+
+    def _try(url, **kw):
+        try:
+            return fn(url, **kw) if render_fn is None else fn(url)
+        except Exception as exc:  # noqa: BLE001 — discovery is best-effort
+            return {"rendered": False, "error": f"{type(exc).__name__}: {exc}", "url": url}
+
+    live = _try(DASHBOARD_URL, timeout=_LIVE_RENDER_TIMEOUT_S)
+    if live.get("rendered"):
+        return (f"Ace rendered its OWN live deck through headless Chrome at {DASHBOARD_URL} and "
+                f"observed: {_summarize_dom(live.get('html', ''))}. " + _FRONTEND_ASK)
+
+    # Live deck didn't settle (its persistent SSE keeps --dump-dom busy) — a real finding —
+    # so render the quiescent /sim twin to still ground the brain in the deck's real markup.
+    live_note = ("the live deck did not render headlessly (its persistent SSE connection keeps "
+                 "--dump-dom from settling — a real robustness gap worth fixing)")
+    twin = _try(DASHBOARD_SIM_URL)
+    if twin.get("rendered"):
+        return (f"Ace's browser found that {live_note}; it then rendered the deck's structural "
+                f"twin {DASHBOARD_SIM_URL} and observed: {_summarize_dom(twin.get('html', ''))}. "
+                + _FRONTEND_ASK)
+    why = "no headless Chrome installed" if twin.get("gated") else twin.get("error", "render failed")
+    return (f"(browser frontend discovery unavailable: {why}; also {live_note}). Propose a small, "
+            "safe frontend robustness fix to utah/interface/static/live.html or utah/interface/web.py.")
+
+
+_FRONTEND_ASK = (
+    "Propose ONE concrete, SAFE frontend/UX optimization to utah/interface/static/live.html or "
+    "utah/interface/web.py — make a dormant/empty panel more honest, fix a missing/broken "
+    "affordance, improve clarity or accessibility, or fix a render/latency issue — grounded in "
+    "what was ACTUALLY rendered. Touch one file."
+)
+
+
 def gather_signals(domain: str, **inject) -> str:
     if domain == "leads":
         return _leads_signal(db_query=inject.get("db_query"))
     if domain == "autonomy":
         return _autonomy_signal(archive=inject.get("archive"))
+    if domain == "frontend":
+        return _frontend_signal(render_fn=inject.get("render_fn"))
     return _baseline_signal(read_text=inject.get("read_text"))
 
 
@@ -133,4 +210,4 @@ def next_task(domain: str, *, brain_fn, **inject) -> str:
 
 
 __all__ = ["DOMAINS", "pick_domain", "next_cycle_index", "gather_signals",
-           "build_prompt", "next_task", "CYCLE_N"]
+           "build_prompt", "next_task", "CYCLE_N", "DASHBOARD_URL"]

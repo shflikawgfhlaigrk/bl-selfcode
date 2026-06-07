@@ -53,25 +53,37 @@ def available() -> bool:
     return chrome_binary() is not None
 
 
-def _chrome_render(url: str) -> str:
-    """Render *url* with headless Chrome and return the post-JS DOM. Raises on failure."""
+def _chrome_render(url: str, timeout: int = RENDER_TIMEOUT_S) -> str:
+    """Render *url* with headless Chrome and return the post-JS DOM. Raises on failure.
+
+    NOTE: ``--dump-dom`` dumps once the page reaches network-idle, so a page with a
+    PERSISTENT connection (an SSE ``EventSource``, a long-poll) never settles and this
+    times out. Such pages should be rendered via a quiescent twin (see the frontend
+    self-inspection lane), or fetched as data — not force-dumped."""
     chrome = chrome_binary()
     if not chrome:
         raise RuntimeError("no Chrome binary found")
     proc = subprocess.run(
         [chrome, "--headless=new", "--disable-gpu", "--no-sandbox", "--dump-dom",
          f"--virtual-time-budget={VIRTUAL_TIME_BUDGET_MS}", url],
-        capture_output=True, text=True, timeout=RENDER_TIMEOUT_S,
+        capture_output=True, text=True, timeout=timeout,
     )
     if proc.returncode != 0 or not proc.stdout:
         raise RuntimeError((proc.stderr or "chrome produced no DOM").strip()[-300:])
     return proc.stdout
 
 
-def render(url: str, *, render_fn=None) -> dict:
+def render(url: str, *, render_fn=None, timeout: int = RENDER_TIMEOUT_S) -> dict:
     """Fetch a JS-rendered page via headless Chrome. With no Chrome it documents the gate and
-    returns ``rendered=False`` (never fabricates). ``render_fn`` is injectable for tests."""
-    fn = render_fn or (_chrome_render if available() else None)
+    returns ``rendered=False`` (never fabricates). ``render_fn`` is injectable for tests;
+    ``timeout`` bounds the subprocess (a page with a persistent connection won't settle, so a
+    short timeout lets a caller fail fast and fall back instead of blocking the default 30s)."""
+    if render_fn is not None:
+        fn = render_fn
+    elif available():
+        fn = lambda u: _chrome_render(u, timeout=timeout)
+    else:
+        fn = None
     if fn is None:
         failures.record("browser", "gated",
                         f"render {url[:50]} gated: no headless Chrome found; "
