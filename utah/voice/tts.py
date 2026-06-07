@@ -20,6 +20,8 @@ so chat answers get the same pipelining for free.
 """
 from __future__ import annotations
 
+import contextlib
+import fcntl
 import logging
 import os
 import queue
@@ -30,12 +32,32 @@ import wave
 from typing import Callable, Iterable
 
 from utah import config
+from utah.daemon import runtime
 
 log = logging.getLogger("utah.voice.tts")
 
-# Serialize ALL playback (voice loop + chat-speak thread): two players running at
-# once overlap into garble. One voice at a time, process-wide.
+# Serialize ALL playback. A threading.Lock alone only covers ONE process — but the
+# voice loop and the web server are SEPARATE processes, each with its own lock, so two
+# players ran at the same time = overlapping ("multiple") voices. So we ALSO take an
+# flock on a shared file: one voice at a time, machine-wide, across every process.
 _PLAY_LOCK = threading.Lock()
+_PLAY_LOCKFILE = str(runtime.RUN_DIR / "tts-play.lock")
+
+
+@contextlib.contextmanager
+def _system_play_lock():
+    """Exclusive cross-process playback lock (flock). Blocks until no other process is
+    playing, so the voice loop and chat-speak never overlap into garble."""
+    runtime.RUN_DIR.mkdir(parents=True, exist_ok=True)
+    fd = os.open(_PLAY_LOCKFILE, os.O_CREAT | os.O_RDWR, 0o600)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        yield
+    finally:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_UN)
+        finally:
+            os.close(fd)
 
 #: Closing punctuation that may trail a sentence terminator (".", "!", "?").
 _CLOSERS = "\"')]}»”’"
@@ -149,7 +171,7 @@ class PiperTTS:
                 if path is None:
                     return
                 try:
-                    with _PLAY_LOCK:          # one voice at a time, process-wide
+                    with _PLAY_LOCK, _system_play_lock():   # one voice at a time, machine-wide
                         self._player(path)    # macOS reference player
                 except Exception as exc:  # noqa: BLE001
                     log.warning("TTS playback failed: %s", exc)
