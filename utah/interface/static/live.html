@@ -8,119 +8,148 @@
   :root{
     --bg:#08080c;--bg2:#0c0c12;--panel:#111119;--panel2:#0d0d14;--line:#1c1c26;
     --gold:#c9a24a;--gold2:#ecd08a;--goldglow:rgba(201,162,74,.35);
-    --txt:#e8e3d4;--mut:#5f5b4f;--dim:#34323c;--dormant:#26252e;
+    --txt:#e8e3d4;--mut:#7d7765;--dim:#34323c;--dormant:#26252e;
     --ok:#33d17a;--okglow:rgba(51,209,122,.5);--warn:#e7a93b;--err:#e2554b;
   }
   *{box-sizing:border-box}
-  html,body{height:100%}
-  body{margin:0;background:
-      radial-gradient(1200px 600px at 50% -10%,#15130c 0%,transparent 60%),
-      radial-gradient(900px 500px at 100% 110%,#0e0d16 0%,transparent 60%),var(--bg);
-    color:var(--txt);font:12.5px/1.45 ui-monospace,"JetBrains Mono",Menlo,monospace;
-    letter-spacing:.2px}
+  html,body{height:100%;margin:0}
+  body{background:
+      radial-gradient(1200px 620px at 50% -12%,#15130c 0%,transparent 60%),
+      radial-gradient(900px 520px at 100% 115%,#0e0d16 0%,transparent 60%),var(--bg);
+    color:var(--txt);font:12.5px/1.45 ui-monospace,"JetBrains Mono",Menlo,monospace;letter-spacing:.2px}
   .uc{text-transform:uppercase;letter-spacing:2px}
+  ::-webkit-scrollbar{width:7px;height:7px}::-webkit-scrollbar-thumb{background:#23222c;border-radius:4px}
+  ::-webkit-scrollbar-track{background:transparent}
+
+  /* ---- app shell: 3 independent grid rows. The DECK (1fr) absorbs all slack and
+       scrolls INTERNALLY, so 2s polling can never reflow the header or the command
+       dock — the chat box no longer jumps. ---- */
+  #app{height:100dvh;display:grid;grid-template-rows:auto 1fr auto;overflow:hidden}
+
   /* header */
-  header{display:flex;align-items:center;gap:18px;padding:11px 22px;border-bottom:1px solid var(--line);
+  header{display:flex;align-items:center;gap:16px;padding:10px 20px;border-bottom:1px solid var(--line);
     background:linear-gradient(180deg,#0d0c08,transparent)}
   .logo{display:flex;align-items:center;gap:10px}
-  .logo .mark{width:22px;height:22px;border:1.5px solid var(--gold);border-radius:5px;transform:rotate(45deg);
-    box-shadow:0 0 14px var(--goldglow)}
-  .logo b{color:var(--gold2);letter-spacing:3px;font-size:15px}
-  .logo span{color:var(--mut);font-size:10px;letter-spacing:3px}
-  .chips{display:flex;gap:8px;margin-left:8px}
-  .chip{display:flex;align-items:center;gap:7px;padding:4px 11px;border:1px solid var(--line);border-radius:20px;
-    color:var(--mut);font-size:10px;letter-spacing:1.5px}
-  .led{width:7px;height:7px;border-radius:50%;background:var(--dim)}
+  .logo .mark{width:22px;height:22px;border:1.5px solid var(--gold);border-radius:5px;transform:rotate(45deg);box-shadow:0 0 14px var(--goldglow)}
+  .logo b{color:var(--gold2);letter-spacing:3px;font-size:15px} .logo span{color:var(--mut);font-size:10px;letter-spacing:3px}
+  .chips{display:flex;gap:8px;margin-left:6px;flex-wrap:wrap}
+  .chip{display:flex;align-items:center;gap:7px;padding:4px 11px;border:1px solid var(--line);border-radius:20px;color:var(--mut);font-size:10px;letter-spacing:1.5px}
+  .led{width:7px;height:7px;border-radius:50%;background:var(--dim);flex:none}
   .led.ok{background:var(--ok);box-shadow:0 0 9px var(--okglow)}
   .led.warn{background:var(--warn);box-shadow:0 0 9px rgba(231,169,59,.5)}
   .led.off{background:var(--err);box-shadow:0 0 9px rgba(226,85,75,.5)}
-  .hstat{margin-left:auto;display:flex;gap:26px;align-items:center}
-  .hstat .m b{color:var(--gold2);font-size:15px} .hstat .m span{color:var(--mut);font-size:9px;display:block;letter-spacing:2px}
+  .hstat{margin-left:auto;display:flex;gap:24px;align-items:center}
+  .hstat .m{text-align:right} .hstat .m b{color:var(--gold2);font-size:15px} .hstat .m span{color:var(--mut);font-size:9px;display:block;letter-spacing:2px}
   #clock{color:var(--gold2);font-size:13px}
-  /* layout */
-  main{padding:0}
-  .col{display:flex;flex-direction:column;gap:14px}
-  /* tabs (top-level pages) */
-  .tabs{display:flex;gap:6px;padding:10px 18px 0;flex-wrap:wrap}
-  .tab{background:transparent;border:1px solid var(--line);border-bottom:0;color:var(--mut);
-    padding:7px 18px;border-radius:8px 8px 0 0;cursor:pointer;font:inherit;font-size:11px;letter-spacing:2px}
-  .tab:hover:not(.active){color:var(--gold2)}
-  .tab.active{color:#1a1407;background:linear-gradient(180deg,var(--gold2),var(--gold));border-color:var(--gold);font-weight:700}
-  .page{display:none;padding:16px 18px;border-top:1px solid var(--line)}
-  .page.active{display:block}
-  .coregrid{display:grid;grid-template-columns:248px 1fr 300px;gap:14px}
-  .pagegrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:14px;align-items:start}
-  @media(max-width:1100px){.coregrid{grid-template-columns:1fr}}
-  .card{background:linear-gradient(180deg,var(--panel),var(--panel2));border:1px solid var(--line);
-    border-radius:9px;padding:13px 14px;position:relative;overflow:hidden}
+
+  /* deck */
+  .deck{display:grid;grid-template-columns:262px 1fr 312px;gap:14px;padding:14px 16px;overflow:hidden;min-height:0}
+  @media(max-width:1180px){.deck{grid-template-columns:1fr;overflow:auto}}
+  .rail,.hud{min-height:0;display:flex;flex-direction:column;gap:12px}
+  .rail{overflow:auto;padding-right:2px}
+  .hud{overflow:hidden}
+
+  .card{background:linear-gradient(180deg,var(--panel),var(--panel2));border:1px solid var(--line);border-radius:9px;padding:12px 13px;position:relative;overflow:hidden}
   .card::before{content:"";position:absolute;left:0;top:0;height:2px;width:38px;background:var(--gold);opacity:.5}
-  .card h2{margin:0 0 9px;font-size:10px;letter-spacing:2.5px;color:var(--gold);font-weight:600;display:flex;justify-content:space-between}
-  .card h2 .tag{color:var(--ok);font-size:9px}
-  .card.dormant{opacity:.62}
-  .card.dormant::before{background:var(--dim)}
-  .card.dormant h2{color:var(--mut)}
-  .row{display:flex;justify-content:space-between;align-items:baseline;padding:4px 0;border-bottom:1px dotted #1b1b24}
+  .card h2{margin:0 0 9px;font-size:10px;letter-spacing:2.4px;color:var(--gold);font-weight:600;display:flex;justify-content:space-between;align-items:center}
+  .card h2 .tag{color:var(--ok);font-size:9px;letter-spacing:1.5px}
+  .card h2 .tag.warn{color:var(--warn)} .card h2 .tag.off{color:var(--err)}
+  .card.dormant{opacity:.6} .card.dormant::before{background:var(--dim)} .card.dormant h2{color:var(--mut)}
+  .rail-title{font-size:10px;letter-spacing:2.5px;color:var(--mut);padding:2px 2px 0;display:flex;justify-content:space-between}
+
+  .row{display:flex;justify-content:space-between;align-items:baseline;padding:3px 0;border-bottom:1px dotted #1b1b24}
   .row:last-child{border-bottom:0}
   .row .k{color:var(--mut);font-size:11px} .row .v{color:var(--gold2);font-weight:600}
-  .sub{color:var(--mut);font-size:9px;letter-spacing:2px;margin-top:6px}
-  .dormbody{height:62px;display:flex;align-items:center;justify-content:center;color:var(--dim);
-    letter-spacing:3px;font-size:10px;border:1px dashed #1e1d27;border-radius:6px;background:#0a0a10}
+
+  /* spine rows (left rail) */
+  .sysrow{display:grid;grid-template-columns:auto 1fr auto;gap:9px;align-items:center;padding:9px 0;border-bottom:1px solid #16161e}
+  .sysrow:last-child{border-bottom:0}
+  .sysrow .nm{color:var(--txt);font-size:11.5px;letter-spacing:.4px}
+  .sysrow .sub{color:var(--mut);font-size:9px;letter-spacing:.6px;margin-top:2px}
+  .sysrow .big{color:var(--gold2);font-weight:700;font-size:14px;text-align:right;line-height:1}
+  .sysrow .st{color:var(--mut);font-size:8.5px;letter-spacing:1.5px;text-align:right;margin-top:3px}
+  .sysrow.gated{opacity:.5} .sysrow.gated .big{color:var(--mut)}
+
   /* center reasoning core */
-  .core-wrap{display:flex;flex-direction:column;align-items:center;justify-content:center;padding:6px 0 14px}
-  .core{position:relative;width:300px;height:300px;display:flex;align-items:center;justify-content:center}
+  .core-wrap{display:flex;flex-direction:column;align-items:center;justify-content:center;padding:2px 0 8px}
+  .core{position:relative;width:230px;height:230px;display:flex;align-items:center;justify-content:center}
   .ring{position:absolute;border-radius:50%;border:1px solid #211c10}
-  .r1{width:300px;height:300px;border-color:#2a230f}
-  .r2{width:226px;height:226px;border-color:#332813;animation:spin 30s linear infinite}
-  .r3{width:152px;height:152px;border-color:#3d2f12}
-  .r2::after,.r1::after{content:"";position:absolute;top:-3px;left:50%;width:5px;height:5px;border-radius:50%;
-    background:var(--gold);box-shadow:0 0 10px var(--gold)}
+  .r1{width:230px;height:230px;border-color:#2a230f}
+  .r2{width:172px;height:172px;border-color:#332813;animation:spin 30s linear infinite}
+  .r3{width:118px;height:118px;border-color:#3d2f12}
+  .r2::after,.r1::after{content:"";position:absolute;top:-3px;left:50%;width:5px;height:5px;border-radius:50%;background:var(--gold);box-shadow:0 0 10px var(--gold)}
   @keyframes spin{to{transform:rotate(360deg)}}
-  @keyframes pulse{0%,100%{box-shadow:0 0 40px 4px var(--goldglow)}50%{box-shadow:0 0 70px 10px var(--goldglow)}}
-  .orb{width:118px;height:118px;border-radius:50%;
-    background:radial-gradient(circle at 50% 40%,#f6e2a6,#caa24a 45%,#6e571f 80%,#241b0a);
-    display:flex;flex-direction:column;align-items:center;justify-content:center;animation:pulse 4s ease-in-out infinite}
-  .orb b{color:#1a1407;font-size:18px;letter-spacing:1px} .orb span{color:#2a2008;font-size:8px;letter-spacing:2px}
-  .orbit{position:absolute;color:var(--mut);font-size:9px;letter-spacing:2px;background:#0c0b10;padding:3px 7px;border:1px solid var(--line);border-radius:4px}
-  .o-top{top:6px} .o-bot{bottom:6px} .o-l{left:-6px;top:46%} .o-r{right:-6px;top:46%}
-  /* wake-word confirmation: expanding waves emitted from the orb the instant
-     "ace" is heard (the old-Ace visual — so Michael KNOWS it fired) */
-  .orb{transition:transform .22s ease,box-shadow .22s ease}
-  .orb.heard{animation:none;transform:scale(1.07);box-shadow:0 0 95px 18px var(--goldglow)}
-  .wave{position:absolute;left:50%;top:50%;width:118px;height:118px;border-radius:50%;
-    border:2px solid var(--gold);box-shadow:0 0 22px 4px var(--goldglow);
-    transform:translate(-50%,-50%) scale(.7);opacity:0;pointer-events:none}
+  @keyframes pulse{0%,100%{box-shadow:0 0 38px 4px var(--goldglow)}50%{box-shadow:0 0 64px 9px var(--goldglow)}}
+  .orb{width:96px;height:96px;border-radius:50%;background:radial-gradient(circle at 50% 40%,#f6e2a6,#caa24a 45%,#6e571f 80%,#241b0a);
+    display:flex;flex-direction:column;align-items:center;justify-content:center;animation:pulse 4s ease-in-out infinite;transition:transform .22s ease,box-shadow .22s ease}
+  .orb b{color:#1a1407;font-size:16px;letter-spacing:1px} .orb span{color:#2a2008;font-size:7.5px;letter-spacing:1.5px}
+  .orb.heard{animation:none;transform:scale(1.07);box-shadow:0 0 88px 16px var(--goldglow)}
+  .orb.listen{box-shadow:0 0 64px 8px var(--okglow)}
+  .orbit{position:absolute;color:var(--mut);font-size:8.5px;letter-spacing:2px;background:#0c0b10;padding:3px 7px;border:1px solid var(--line);border-radius:4px}
+  .o-top{top:2px} .o-bot{bottom:2px} .o-l{left:-4px;top:46%} .o-r{right:-4px;top:46%}
+  .wave{position:absolute;left:50%;top:50%;width:96px;height:96px;border-radius:50%;border:2px solid var(--gold);box-shadow:0 0 22px 4px var(--goldglow);transform:translate(-50%,-50%) scale(.7);opacity:0;pointer-events:none}
   .wave.go{animation:wake-wave 1.05s cubic-bezier(.22,.61,.36,1) forwards}
-  @keyframes wake-wave{0%{transform:translate(-50%,-50%) scale(.7);opacity:.85}
-    100%{transform:translate(-50%,-50%) scale(2.6);opacity:0}}
-  .tiles{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;width:100%;margin-top:6px}
-  .tile{background:var(--panel2);border:1px solid var(--line);border-radius:7px;padding:10px;text-align:center}
-  .tile b{color:var(--gold2);font-size:16px;display:block} .tile span{color:var(--mut);font-size:9px;letter-spacing:2px}
-  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
-  .grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px}
-  /* event ticker */
-  .ticker{height:96px;overflow:auto;font-size:11px;margin-top:2px}
-  .ticker div{padding:2px 0;color:#a39c84;border-bottom:1px dotted #16161e}
-  .ticker .ch{color:var(--gold)}
-  /* ask bar */
-  .ask{display:flex;gap:10px;padding:4px 18px 8px}
-  .ask input{flex:1;background:var(--panel);border:1px solid var(--line);color:var(--txt);padding:11px 14px;border-radius:8px;font:inherit}
-  .ask input:focus{outline:0;border-color:var(--gold);box-shadow:0 0 0 1px var(--goldglow)}
-  .ask button{background:linear-gradient(180deg,var(--gold2),var(--gold));border:0;color:#1a1407;padding:0 22px;border-radius:8px;font-weight:700;cursor:pointer;letter-spacing:1px}
-  #ans{padding:0 20px 12px;color:#cfc8ad;white-space:pre-wrap;min-height:16px}
-  footer{padding:9px 22px;color:var(--mut);border-top:1px solid var(--line);font-size:10px;letter-spacing:1.5px}
-  ::-webkit-scrollbar{width:7px}::-webkit-scrollbar-thumb{background:#23222c;border-radius:4px}
-  /* TRANSPARENCY drill-down: any panel marked .drillable opens a drawer of the REAL
-     underlying detail (the groundwork pattern every Ace panel must follow). */
-  .drillable{cursor:pointer} .drillable h2::after{content:" ⤢";color:var(--mut);font-size:9px}
-  .drillable:hover{box-shadow:0 0 0 1px var(--goldglow)}
-  #drill{position:fixed;inset:0;background:rgba(4,4,8,.72);display:none;z-index:60;
-    align-items:center;justify-content:center}
+  @keyframes wake-wave{0%{transform:translate(-50%,-50%) scale(.7);opacity:.85}100%{transform:translate(-50%,-50%) scale(2.6);opacity:0}}
+  .tiles{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;width:100%;max-width:520px;margin:2px auto 0}
+  .tile{background:var(--panel2);border:1px solid var(--line);border-radius:7px;padding:9px;text-align:center}
+  .tile b{color:var(--gold2);font-size:15px;display:block} .tile span{color:var(--mut);font-size:9px;letter-spacing:1.5px}
+
+  /* center dash (tabbed real-data viewer) */
+  .dash{flex:1;min-height:0;display:flex;flex-direction:column}
+  .dtabs{display:flex;gap:5px;flex-wrap:wrap;margin-bottom:8px}
+  .dtab{background:transparent;border:1px solid var(--line);color:var(--mut);padding:5px 12px;border-radius:7px;cursor:pointer;font:inherit;font-size:10px;letter-spacing:1.5px}
+  .dtab:hover:not(.active){color:var(--gold2)} .dtab .ct{color:var(--gold);margin-left:5px}
+  .dtab.active{color:#1a1407;background:linear-gradient(180deg,var(--gold2),var(--gold));border-color:var(--gold);font-weight:700}
+  .dtab.active .ct{color:#1a1407}
+  .dbody{flex:1;min-height:0;overflow:auto;background:linear-gradient(180deg,var(--panel),var(--panel2));border:1px solid var(--line);border-radius:9px;padding:11px 13px}
+  .item{padding:7px 0;border-bottom:1px dotted #1b1b24} .item:last-child{border-bottom:0}
+  .item .h{display:flex;justify-content:space-between;gap:10px;align-items:baseline}
+  .item .nm{color:var(--gold2);font-weight:600;font-size:12px} .item .meta{color:var(--mut);font-size:9.5px;letter-spacing:.5px;white-space:nowrap}
+  .item .body{color:#cfc8ad;font-size:11px;margin-top:3px;line-height:1.45;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+  .pill{display:inline-block;font-size:8.5px;letter-spacing:1px;padding:1px 6px;border-radius:4px;background:#1a1813;color:var(--gold);border:1px solid #2a2415}
+  .kpis{display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:10px;margin-bottom:10px}
+  .kpi{background:var(--panel2);border:1px solid var(--line);border-radius:7px;padding:10px 11px}
+  .kpi b{color:var(--gold2);font-size:18px;display:block} .kpi span{color:var(--mut);font-size:9px;letter-spacing:1.5px}
+  .empty{height:100%;min-height:80px;display:flex;align-items:center;justify-content:center;color:var(--dim);letter-spacing:3px;font-size:11px}
+  .ents{display:flex;flex-wrap:wrap;gap:6px} .ent{background:var(--panel2);border:1px solid var(--line);border-radius:5px;padding:3px 8px;font-size:10.5px;color:#cdc6ad}.ent b{color:var(--gold)}
+  .cores{display:flex;flex-wrap:wrap;gap:5px}.core-cell{background:var(--panel2);border:1px solid var(--line);border-radius:5px;padding:3px 7px;font-size:10px;color:#cdc6ad}.core-cell b{color:var(--gold)}
+
+  /* right rail function cards */
+  .fn{display:grid;grid-template-columns:auto 1fr auto;gap:10px;align-items:center;padding:9px 0;border-bottom:1px solid #16161e}
+  .fn:last-child{border-bottom:0}
+  .fn .nm{color:var(--txt);font-size:11.5px} .fn .sub{color:var(--mut);font-size:9px;margin-top:2px;letter-spacing:.5px}
+  .fn .st{color:var(--ok);font-size:8.5px;letter-spacing:1.2px;text-align:right} .fn .st.warn{color:var(--warn)} .fn .st.off{color:var(--err)} .fn .st.dim{color:var(--mut)}
+  .fn.gated{opacity:.55}
+  .ticker{height:120px;overflow:auto;font-size:11px}
+  .ticker div{padding:2px 0;color:#a39c84;border-bottom:1px dotted #16161e}.ticker .ch{color:var(--gold)}
+
+  /* ---- command dock (pinned bottom row; structurally independent of the deck) ---- */
+  .dock{border-top:1px solid var(--line);background:linear-gradient(0deg,#0b0a07,transparent)}
+  #stream{height:0;overflow:auto;transition:height .25s ease;padding:0 20px}
+  #stream.open{height:32vh;padding:12px 20px}
+  .turn{margin:0 0 12px}
+  .turn .u{margin:8px 0 4px;color:#cfc9b6;font-size:13px}.turn .u b{color:#8a8470;font-weight:400}
+  .turn .src{color:#8a8470;font-size:10px;letter-spacing:2px;margin:1px 0 4px}
+  .turn .think{display:none;background:#15130d;border:1px solid #2a2620;border-radius:7px;padding:6px 9px;margin-bottom:6px;font-size:12px;color:#9a937c}
+  .turn .think .hh{cursor:pointer;font-size:10px;letter-spacing:2px;margin-bottom:3px}
+  .turn .think .bb{white-space:pre-wrap;line-height:1.4}
+  .turn .ans{white-space:pre-wrap;line-height:1.55;color:#ece6d4}
+  .quick{display:flex;gap:7px;padding:7px 20px 0;flex-wrap:wrap}
+  .quick button{background:#0f0e0a;border:1px solid var(--line);color:var(--mut);padding:4px 11px;border-radius:14px;cursor:pointer;font:inherit;font-size:10px;letter-spacing:1px}
+  .quick button:hover{color:var(--gold2);border-color:#2a2415}
+  .cmd{display:flex;gap:10px;padding:9px 20px 11px;align-items:center}
+  .micbtn{width:38px;height:38px;flex:none;border-radius:9px;border:1px solid var(--line);background:#0f0e0a;color:var(--mut);font-size:15px;cursor:default;display:flex;align-items:center;justify-content:center}
+  .micbtn.live{color:var(--ok);border-color:#1c3a28;box-shadow:0 0 12px var(--okglow)}
+  .cmd input{flex:1;background:var(--panel);border:1px solid var(--line);color:var(--txt);padding:11px 14px;border-radius:9px;font:inherit}
+  .cmd input:focus{outline:0;border-color:var(--gold);box-shadow:0 0 0 1px var(--goldglow)}
+  .cmd button.send{background:linear-gradient(180deg,var(--gold2),var(--gold));border:0;color:#1a1407;padding:0 24px;height:38px;border-radius:9px;font-weight:700;cursor:pointer;letter-spacing:1px}
+  .footer{padding:6px 20px 8px;color:var(--mut);font-size:9px;letter-spacing:1.4px;border-top:1px solid #131319}
+
+  /* drill drawer */
+  #drill{position:fixed;inset:0;background:rgba(4,4,8,.74);display:none;z-index:60;align-items:center;justify-content:center}
   #drill.open{display:flex}
-  .drill-box{width:min(860px,92vw);max-height:84vh;display:flex;flex-direction:column;
-    background:var(--panel);border:1px solid var(--gold);border-radius:11px;overflow:hidden;
-    box-shadow:0 18px 70px rgba(0,0,0,.7)}
-  .drill-head{display:flex;justify-content:space-between;align-items:center;padding:13px 16px;
-    border-bottom:1px solid var(--line);color:var(--gold);letter-spacing:2px;font-size:12px}
+  .drill-box{width:min(880px,92vw);max-height:84vh;display:flex;flex-direction:column;background:var(--panel);border:1px solid var(--gold);border-radius:11px;overflow:hidden;box-shadow:0 18px 70px rgba(0,0,0,.7)}
+  .drill-head{display:flex;justify-content:space-between;align-items:center;padding:13px 16px;border-bottom:1px solid var(--line);color:var(--gold);letter-spacing:2px;font-size:12px}
   .drill-x{cursor:pointer;color:var(--mut);border:1px solid var(--line);border-radius:6px;padding:2px 9px}
   .drill-body{padding:12px 16px;overflow:auto}
   .drill-sec{color:var(--gold2);font-size:10px;letter-spacing:2px;margin:12px 0 6px;font-weight:600}
@@ -128,104 +157,86 @@
   .drill-tag{color:#1a1407;background:var(--gold2);border-radius:4px;padding:1px 6px;font-size:9px;letter-spacing:1px}
   .drill-meta{color:var(--mut);font-size:10px;margin-left:6px}
   .drill-content{color:#cfc8ad;white-space:pre-wrap;margin-top:3px;font-size:12px;line-height:1.45}
-  .drill-ents{display:flex;flex-wrap:wrap;gap:6px}
-  .drill-ent{background:var(--panel2);border:1px solid var(--line);border-radius:5px;padding:3px 8px;font-size:11px;color:#cdc6ad}
-  .drill-ent b{color:var(--gold)}
 </style>
 </head>
 <body>
-<header>
-  <div class="logo"><div class="mark"></div><b>UTAH</b><span>LOCAL COMMAND DECK</span></div>
-  <div class="chips">
-    <span class="chip"><span class="led" id="led-core"></span>LOCAL CORE</span>
-    <span class="chip"><span class="led" id="led-brain"></span>BRAIN · CLAUDE CLI</span>
-    <span class="chip"><span class="led" id="led-bus"></span>EVENT BUS</span>
-  </div>
-  <div class="hstat">
-    <div class="m"><b id="h-load">—</b><span>CORE LOAD</span></div>
-    <div class="m"><b id="h-mem">—</b><span>MEMORY ROWS</span></div>
-    <div class="m" id="clock">—</div>
-  </div>
-</header>
-
-<nav class="tabs">
-  <button class="tab active" data-tab="core">◆ CORE</button>
-  <button class="tab" data-tab="system">SYSTEM</button>
-  <button class="tab" data-tab="revenue">REVENUE</button>
-  <button class="tab" data-tab="ops">OPS</button>
-  <button class="tab" data-tab="voice">VOICE</button>
-</nav>
-
-<main>
-  <!-- CORE: brain + memory + the live spine -->
-  <section class="page active" data-page="core"><div class="coregrid">
-    <div class="col">
-      <div class="card drillable" data-drill="spine"><h2>SYSTEM SPINE <span class="tag" id="spine-tag">—</span></h2><div id="spine"></div></div>
-      <div class="card drillable" data-drill="memory"><h2>MEMORY · BRAIN</h2><div id="memory"></div></div>
+<div id="app">
+  <header>
+    <div class="logo"><div class="mark"></div><b>UTAH</b><span>LOCAL COMMAND DECK</span></div>
+    <div class="chips">
+      <span class="chip"><span class="led" id="led-core"></span>LOCAL CORE</span>
+      <span class="chip"><span class="led" id="led-brain"></span>BRAIN · CLAUDE CLI</span>
+      <span class="chip"><span class="led" id="led-bus"></span>EVENT BUS</span>
+      <span class="chip"><span class="led" id="led-voice"></span>VOICE</span>
     </div>
-    <div class="col">
-      <div class="card">
-        <h2>REASONING CORE <span class="tag" id="core-tag">—</span></h2>
-        <div class="core-wrap">
-          <div class="core">
-            <div class="ring r1"></div><div class="ring r2"></div><div class="ring r3"></div>
-            <span class="orbit o-top">MEM</span><span class="orbit o-bot">BUS</span>
-            <span class="orbit o-l">RISK</span><span class="orbit o-r">VOICE</span>
-            <div class="orb"><b id="core-state">ACE</b><span>GROUNDED · NO-FAB</span></div>
-          </div>
-          <div class="tiles">
-            <div class="tile"><b id="t-up">—</b><span>UPTIME s</span></div>
-            <div class="tile"><b id="t-bus">—</b><span>BUS EVENTS</span></div>
-            <div class="tile"><b>ON-DEVICE</b><span>EMBED+RERANK</span></div>
-          </div>
+    <div class="hstat">
+      <div class="m"><b id="h-load">—</b><span>CORE LOAD</span></div>
+      <div class="m"><b id="h-mem">—</b><span>MEMORY ROWS</span></div>
+      <div class="m"><b id="h-bus">—</b><span>BUS EVENTS</span></div>
+      <div class="m"><b id="h-gates">—</b><span>GATED</span></div>
+      <div class="m" id="clock">—</div>
+    </div>
+  </header>
+
+  <div class="deck">
+    <!-- LEFT RAIL — SYSTEM SPINE -->
+    <aside class="rail">
+      <div class="rail-title"><span>◆ SYSTEM SPINE</span><span id="spine-state">—</span></div>
+      <div class="card"><div id="spine"></div></div>
+      <div class="card"><h2>TRANSPORT</h2>
+        <div class="row"><span class="k">control plane</span><span class="v">binary · len-prefix</span></div>
+        <div class="row"><span class="k">ipc</span><span class="v">unix socket</span></div>
+        <div class="row"><span class="k">store</span><span class="v">postgres · pgvector</span></div>
+        <div class="row"><span class="k">cloud dep</span><span class="v">none</span></div>
+      </div>
+    </aside>
+
+    <!-- CENTER — REASONING CORE + LIVE DATA DASH -->
+    <section class="hud">
+      <div class="core-wrap">
+        <div class="core">
+          <div class="ring r1"></div><div class="ring r2"></div><div class="ring r3"></div>
+          <span class="orbit o-top">MEM</span><span class="orbit o-bot">BUS</span>
+          <span class="orbit o-l">RISK</span><span class="orbit o-r">VOICE</span>
+          <div class="orb"><b id="core-state">ACE</b><span>GROUNDED · NO-FAB</span></div>
+        </div>
+        <div class="tiles">
+          <div class="tile"><b id="t-load">—</b><span>CORE LOAD</span></div>
+          <div class="tile"><b id="t-bus">—</b><span>BUS HEARTBEAT</span></div>
+          <div class="tile"><b>ON-DEVICE</b><span>EMBED · RERANK</span></div>
         </div>
       </div>
-    </div>
-    <div class="col">
-      <div class="card drillable" data-drill="spine"><h2>LOCAL DAEMON &amp; SOCKET <span class="tag" id="dae-tag">—</span></h2><div id="daemon"></div></div>
+      <div class="dash">
+        <div class="dtabs" id="dtabs"></div>
+        <div class="dbody" id="dbody"><div class="empty">LOADING…</div></div>
+      </div>
+    </section>
+
+    <!-- RIGHT RAIL — FUNCTIONS + LIVE BUS -->
+    <aside class="rail">
+      <div class="rail-title"><span>◆ FUNCTIONS</span><span id="fn-count">—</span></div>
+      <div class="card"><div id="fns"></div></div>
       <div class="card"><h2>EVENT BUS · LIVE</h2><div class="ticker" id="ticker"><div>awaiting events…</div></div></div>
-      <div class="card drillable" data-drill="audit"><h2>AUDIT LEDGER</h2><div class="dormbody" id="p-audit">DORMANT</div></div>
+    </aside>
+  </div>
+
+  <!-- COMMAND DOCK (pinned; deck polling cannot move it) -->
+  <div class="dock">
+    <div id="stream"></div>
+    <div class="quick">
+      <button onclick="ask('what is my live system status right now?')">System status</button>
+      <button onclick="ask('summarize today\'s leads')">Today's leads</button>
+      <button onclick="ask('what do you remember about Project Utah?')">Recall Utah</button>
+      <button onclick="streamClear()">Clear</button>
     </div>
-  </div></section>
-
-  <!-- SYSTEM: pool / governor / watchdog -->
-  <section class="page" data-page="system"><div class="pagegrid">
-    <div class="card drillable" data-drill="pool"><h2>WORKER POOL</h2><div id="pool"></div></div>
-    <div class="card drillable" data-drill="governor"><h2>GOVERNOR</h2><div id="gov"></div></div>
-    <div class="card drillable" data-drill="watchdog"><h2>WATCHDOG</h2><div class="dormbody" id="p-watchdog">—</div></div>
-    <div class="card"><h2>SYNC &amp; INGEST</h2><div class="dormbody" id="p-sync">DORMANT</div></div>
-  </div></section>
-
-  <!-- REVENUE: the money ledger + producers -->
-  <section class="page" data-page="revenue"><div class="pagegrid">
-    <div class="card drillable" data-drill="leads"><h2>LEADS</h2><div class="dormbody" id="p-leads">DORMANT</div></div>
-    <div class="card drillable" data-drill="probate"><h2>PROBATE</h2><div class="dormbody" id="p-probate">DORMANT</div></div>
-    <div class="card drillable" data-drill="outreach"><h2>OUTREACH</h2><div class="dormbody" id="p-outreach">DORMANT</div></div>
-    <div class="card drillable" data-drill="engines"><h2>ENGINES · FIRES</h2><div class="dormbody" id="p-engines">DORMANT</div></div>
-    <div class="card drillable" data-drill="trading"><h2>TRADING</h2><div class="dormbody" id="p-trading">—</div></div>
-    <div class="card drillable" data-drill="marketer"><h2>MARKETER</h2><div class="dormbody" id="p-marketer">—</div></div>
-  </div></section>
-
-  <!-- OPS: tasks / trackers / research / mail -->
-  <section class="page" data-page="ops"><div class="pagegrid">
-    <div class="card drillable" data-drill="tasks"><h2>TASKS</h2><div class="dormbody" id="p-tasks">—</div></div>
-    <div class="card drillable" data-drill="trackers"><h2>TRACKERS</h2><div class="dormbody" id="p-trackers">—</div></div>
-    <div class="card drillable" data-drill="research"><h2>RESEARCH</h2><div class="dormbody" id="p-research">—</div></div>
-    <div class="card drillable" data-drill="mail"><h2>MAIL</h2><div class="dormbody" id="p-mail">—</div></div>
-  </div></section>
-
-  <!-- VOICE -->
-  <section class="page" data-page="voice"><div class="pagegrid">
-    <div class="card drillable" data-drill="voice"><h2>VOICE PIPELINE</h2><div class="dormbody" id="p-voice">DORMANT</div></div>
-  </div></section>
-</main>
-
-<div class="ask">
-  <input id="q" placeholder="Issue a command to UTAH…  (real reasoning · no fabrication)"/>
-  <button onclick="ask()">SEND</button>
+    <div class="cmd">
+      <div class="micbtn" id="mic" title="voice loop">🎙</div>
+      <input id="q" placeholder="Issue a command to UTAH…  (real reasoning · streamed thinking · no fabrication)"/>
+      <button class="send" onclick="ask()">SEND</button>
+    </div>
+    <div class="footer">LIVE · REAL DATA ONLY · DORMANT/GATED = NO PRODUCER WIRED YET (NEVER SIMULATED) · SOURCE: UTAH CONTROL PLANE · <span id="f-stamp">—</span></div>
+  </div>
 </div>
-<div id="ans" style="max-height:40vh;overflow-y:auto;padding:0 22px"></div>
-<footer>LIVE · REAL DATA ONLY · DORMANT = NO PRODUCER WIRED YET (NEVER SIMULATED) · SOURCE: UTAH CONTROL PLANE</footer>
 
 <div id="drill" onclick="if(event.target===this)drillClose()">
   <div class="drill-box">
@@ -236,187 +247,249 @@
 
 <script>
 const $=id=>document.getElementById(id);
-const rows=o=>Object.entries(o).map(([k,v])=>`<div class="row"><span class="k">${k}</span><span class="v">${v}</span></div>`).join("");
-function led(id,on){$(id).className="led "+(on?"ok":"off");}
-function esc(s){return String(s).replace(/[&<>]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[c]));}
-// Render one panel from its backend feed: real rows when present, honest DORMANT when empty.
-function panel(id,data){
-  const el=$(id); if(!el) return;
-  const isList=Array.isArray(data);
-  const empty = data==null || (isList&&data.length===0) ||
-                (!isList&&typeof data==="object"&&(Object.keys(data).length===0||data.status==="idle"));
-  if(empty){ el.className="dormbody"; el.textContent="DORMANT"; return; }
-  el.className="";
-  if(isList){
-    el.innerHTML='<div class="row"><span class="k">rows</span><span class="v">'+data.length+'</span></div>'+
-      data.slice(0,4).map(r=>'<div class="row"><span class="v">'+esc(typeof r==="object"?JSON.stringify(r):r).slice(0,70)+'</span></div>').join("");
-  } else { el.innerHTML=rows(data); }
-}
-const DOMAIN_PANELS={"p-sync":"sync","p-engines":"engines","p-risk":"risk","p-tick":"tick","p-leads":"leads","p-probate":"probate","p-outreach":"outreach","p-voice":"voice","p-audit":"audit"};
+const esc=s=>String(s==null?"":s).replace(/[&<>]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[c]));
+const rows=o=>Object.entries(o).map(([k,v])=>`<div class="row"><span class="k">${esc(k)}</span><span class="v">${esc(v)}</span></div>`).join("");
+const led=(id,cls)=>{const e=$(id);if(e)e.className="led "+cls;};
+const fmtUp=s=>{s=Math.round(s||0);const h=(s/3600|0),m=(s%3600/60|0);return h?h+"h "+m+"m":(m?m+"m "+(s%60)+"s":s+"s");};
+
+/* ============================ LIVE STATE POLL ============================ */
+/* Every value below comes from a real control-plane fetch. Nothing is hardcoded
+   except units/labels. Where a producer is genuinely absent, the panel shows an
+   honest GATED/DORMANT — never a simulated number. */
+let LAST={};
 async function poll(){
-  try{
-    const s=await (await fetch("/status")).json();
-    led("led-core",true); led("led-brain",true); led("led-bus",true);
-    $("spine-tag").textContent="ONLINE"; $("core-tag").textContent="ONLINE"; $("dae-tag").textContent="ONLINE";
-    $("spine").innerHTML=rows({version:s.version,uptime:s.uptime_s+"s",draining:s.draining});
-    $("pool").innerHTML=rows({limit:s.pool.limit,borrowed:s.pool.borrowed,available:s.pool.available});
-    $("gov").innerHTML=rows({load:s.governor.load1,"per core":s.governor.load_per_core,inflight:s.governor.inflight+"/"+s.governor.max_inflight,cores:s.governor.ncpu});
-    $("daemon").innerHTML=rows({socket:"~/.utah/run",control:"unix · len-prefix",peer:"owner-only",bus:s.bus.subscribers+" subs"});
-    $("h-load").textContent=s.governor.load_per_core;
-    $("t-up").textContent=Math.round(s.uptime_s); $("t-bus").textContent=s.bus.published;
-    const m=await (await fetch("/memory")).json();
-    if(m&&m.total!=null){$("memory").innerHTML=rows({total:m.total,live:m.live,entities:m.entities}); $("h-mem").textContent=m.live;}
-    // every domain panel renders from the single live /state feed (real-or-DORMANT)
-    const st=await (await fetch("/state")).json();
-    for(const id in DOMAIN_PANELS) panel(id, st[DOMAIN_PANELS[id]]);
-  }catch(e){
-    ["led-core","led-brain","led-bus"].forEach(i=>$(i).className="led off");
-    $("spine-tag").textContent="OFFLINE";
-    for(const id of ["spine","pool","gov","daemon","memory"]) $(id).innerHTML='<div class="dormbody">OFFLINE</div>';
-    for(const id in DOMAIN_PANELS){const e=$(id); if(e){e.className="dormbody"; e.textContent="OFFLINE";}}
-    $("h-load").textContent="—"; $("h-mem").textContent="—";
+  let s=null,m=null,st=null;
+  try{ s=await (await fetch("/status")).json(); if(s.error)throw 0; }catch(_){ s=null; }
+  try{ m=await (await fetch("/memory")).json(); if(m&&m.error)m=null; }catch(_){ m=null; }
+  try{ st=await (await fetch("/state")).json(); if(st&&st.error)st=null; }catch(_){ st=null; }
+  const up = s!=null;
+  led("led-core",up?"ok":"off"); led("led-brain",up?"ok":"off"); led("led-bus",up&&s.bus?"ok":"off");
+  const voice = (st&&st.voice)||{};
+  const vlive = voice.status==="listening"||voice.listening===true;
+  led("led-voice", voice.status==="down"||voice.status==null?"off":(vlive?"ok":"warn"));
+  $("mic").className="micbtn"+(vlive?" live":"");
+
+  if(!up){
+    $("spine").innerHTML='<div class="empty">CORE OFFLINE</div>';
+    $("spine-state").textContent="OFFLINE";
+    $("h-load").textContent="—";$("h-bus").textContent="—";
+    renderFns(null,null,null);
+    LAST={};return;
   }
+  LAST={s,m,st};
+  $("spine-state").textContent="ONLINE";
+  // header metrics
+  $("h-load").textContent=s.governor.load_per_core;
+  $("h-bus").textContent=s.bus.published;
+  $("t-load").textContent=s.governor.load_per_core;
+  $("t-bus").textContent=s.bus.published;
+  if(m&&m.live!=null) $("h-mem").textContent=m.live;
+  // ---- SYSTEM SPINE rows (real fields only; gated where no producer) ----
+  const g=s.governor, p=s.pool, b=s.bus;
+  const sys=[
+    {nm:"Local Core Daemon", big:fmtUp(s.uptime_s), sub:"unix · ~/.utah/run · v"+s.version, st:"UPTIME", led:"ok"},
+    {nm:"Event Bus", big:b.published, sub:b.subscribers+" subs · "+b.dropped+" dropped", st:"PUBLISHED", led:"ok"},
+    {nm:"Worker Pool", big:p.borrowed+"/"+p.limit, sub:p.available+" available", st:"BORROWED", led:p.borrowed>0?"warn":"ok"},
+    {nm:"Governor", big:g.load_per_core, sub:"load1 "+g.load1+" · "+g.ncpu+" cores", st:"LOAD/CORE", led:g.load_per_core>1.2?"warn":"ok"},
+    {nm:"Memory Forge", big:(m&&m.live!=null)?m.live:"—", sub:m?("total "+m.total+" · "+m.entities+" ents"):"recall · consolidation", st:"LIVE FACTS", led:m?"ok":"off"},
+    {nm:"Voice Loop", big:(voice.status||"—").toUpperCase(), sub:voice.segments!=null?(voice.segments+" segs · wake-armed"):"vad · stt · brain · tts", st:"PIPELINE", led:vlive?"ok":(voice.status?"warn":"off")},
+    {nm:"Risk Firewall", big:"GATED", sub:"trade kernel · pre-exec", st:"NO PRODUCER", led:"off", gated:true},
+    {nm:"Sync & Ingest", big:"GATED", sub:"wealthcharts rx · cdp", st:"NO PRODUCER", led:"off", gated:true},
+  ];
+  $("spine").innerHTML=sys.map(r=>
+    `<div class="sysrow${r.gated?' gated':''}"><span class="led ${r.led}"></span>`+
+    `<div><div class="nm">${esc(r.nm)}</div><div class="sub">${esc(r.sub)}</div></div>`+
+    `<div><div class="big">${esc(r.big)}</div><div class="st">${esc(r.st)}</div></div></div>`).join("");
+  // core orb reflects voice
+  const orb=document.querySelector(".orb"); if(orb) orb.classList.toggle("listen", vlive && !orb.classList.contains("heard"));
+  // right-rail function cards
+  renderFns(s,m,st,voice);
+  // refresh the open dash tab (real data)
+  loadDash(curTab,true);
+  $("f-stamp").textContent="updated "+new Date().toLocaleTimeString();
 }
+
+function renderFns(s,m,st,voice){
+  voice=voice||{};
+  const up=s!=null;
+  const audit=(st&&st.audit&&st.audit.length)||0;
+  const lead=(st&&st.ledger&&st.ledger.leads)||0;
+  const fns=[
+    {nm:"Voice Loop", sub:"wake · barge-in · TTS", st:voice.status?voice.status.toUpperCase():"DOWN", cls:(voice.status==="listening")?"":(voice.status?"warn":"off")},
+    {nm:"Agent Mesh", sub:up?(s.pool.borrowed+" running · "+s.pool.available+" ready"):"worker pool", st:up?(s.pool.borrowed>0?"RUNNING":"READY"):"DOWN", cls:up?"":"off"},
+    {nm:"Memory Holograph", sub:m?(m.entities+" entities · graph"):"pgvector · hnsw", st:m?"INDEXED":"DOWN", cls:m?"":"off"},
+    {nm:"Black Box Ledger", sub:audit+" audit events", st:up?"RECORDING":"DOWN", cls:up?"":"off"},
+    {nm:"Sensor Array", sub:up?(s.bus.subscribers+" subscribers"):"world-model bus", st:up?"RX":"DOWN", cls:up?"":"off"},
+    {nm:"Trading Engine Lab", sub:"paper / sim · fires "+((st&&st.ledger&&st.ledger.fires)||0), st:"GATED", cls:"dim", gated:true},
+    {nm:"Risk / Threat Kernel", sub:"pre-exec gate", st:"GATED", cls:"dim", gated:true},
+    {nm:"Self-Coding Bay", sub:"bounded autonomy", st:"LOCKED · APPROVAL", cls:"dim", gated:true},
+  ];
+  $("fns").innerHTML=fns.map(f=>
+    `<div class="fn${f.gated?' gated':''}"><span class="led ${f.cls==='off'?'off':(f.cls==='warn'?'warn':(f.cls==='dim'?'':'ok'))}"></span>`+
+    `<div><div class="nm">${esc(f.nm)}</div><div class="sub">${esc(f.sub)}</div></div>`+
+    `<div class="st ${f.cls}">${esc(f.st)}</div></div>`).join("");
+  $("fn-count").textContent=fns.filter(f=>!f.gated).length+" LIVE";
+  $("h-gates").textContent=fns.filter(f=>f.gated).length;
+}
+
+/* ============================ CENTER DASH (tabbed real data) ============================ */
+const TABS=[
+  {id:"overview", label:"OVERVIEW"},
+  {id:"memory",   label:"MEMORY"},
+  {id:"leads",    label:"LEADS"},
+  {id:"outreach", label:"OUTREACH"},
+  {id:"research", label:"RESEARCH"},
+  {id:"audit",    label:"AUDIT"},
+  {id:"system",   label:"SYSTEM"},
+  {id:"voice",    label:"VOICE"},
+];
+let curTab="overview", tabCounts={};
+function renderTabs(){
+  $("dtabs").innerHTML=TABS.map(t=>{
+    const c=tabCounts[t.id]; const ct=(c!=null&&c>0)?`<span class="ct">${c}</span>`:"";
+    return `<button class="dtab${t.id===curTab?' active':''}" data-tab="${t.id}">${t.label}${ct}</button>`;
+  }).join("");
+  document.querySelectorAll(".dtab").forEach(b=>b.onclick=()=>{curTab=b.dataset.tab;renderTabs();loadDash(curTab);});
+}
+function metaOf(r){return [r.kind,r.region,r.county,r.campaign,r.channel,r.source,r.status,r.direction,r.ts].filter(Boolean).join(" · ");}
+function itemRows(arr,nameKey){
+  if(!arr||!arr.length) return '<div class="empty">DORMANT — 0 ROWS (NO PRODUCER WIRED)</div>';
+  return arr.map(r=>{
+    const nm=r[nameKey]||r.name||r.case_name||r.recipient||r.title||("#"+(r.id||""));
+    const meta=metaOf(r);
+    const body=r.content?`<div class="body">${esc(r.content)}</div>`:"";
+    return `<div class="item"><div class="h"><span class="nm">${esc(nm)}</span><span class="meta">${esc(meta)}</span></div>${body}</div>`;
+  }).join("");
+}
+async function getPanel(name){ const d=await fetch("/panel/"+name).then(r=>r.json()); if(d.error)throw new Error(d.error); return d; }
+async function loadDash(tab, quiet){
+  const body=$("dbody"); if(!quiet) body.innerHTML='<div class="empty">LOADING…</div>';
+  try{
+    if(tab==="overview"){
+      const s=LAST.s, m=LAST.m, st=LAST.st;
+      if(!s){ body.innerHTML='<div class="empty">CORE OFFLINE</div>'; return; }
+      const L=(st&&st.ledger)||{}; const voice=(st&&st.voice)||{};
+      const kpi=[
+        ["MEMORY · LIVE", m?m.live:"—"], ["ENTITIES", m?m.entities:"—"],
+        ["LEADS", L.leads!=null?L.leads:"—"], ["OUTREACH", L.outreach_ledger!=null?L.outreach_ledger:"—"],
+        ["BUS EVENTS", s.bus.published], ["CPU CORES", s.governor.ncpu],
+        ["LOAD / CORE", s.governor.load_per_core], ["VOICE", (voice.status||"—").toUpperCase()],
+      ];
+      let h='<div class="kpis">'+kpi.map(k=>`<div class="kpi"><b>${esc(k[1])}</b><span>${esc(k[0])}</span></div>`).join("")+"</div>";
+      h+='<div class="drill-sec">RECENT AUDIT</div>';
+      const aud=(st&&st.audit)||[];
+      h+= aud.length? aud.slice(0,8).map(a=>`<div class="item"><div class="body" style="-webkit-line-clamp:2">${esc(a)}</div></div>`).join("") : '<div class="empty">no events</div>';
+      body.innerHTML=h; return;
+    }
+    if(tab==="memory"){
+      const d=await getPanel("memory"); tabCounts.memory=(d.rows||[]).length;
+      let h="";
+      if(d.counts) h+='<div class="kpis">'+Object.entries(d.counts).map(([k,v])=>`<div class="kpi"><b>${esc(v)}</b><span>${esc(k)}</span></div>`).join("")+"</div>";
+      if(d.entities&&d.entities.length) h+='<div class="drill-sec">'+d.entities.length+' TOP ENTITIES</div><div class="ents">'+d.entities.slice(0,40).map(e=>`<span class="ent">${esc(e.name)} <b>${esc(e.mentions)}</b></span>`).join("")+"</div>";
+      h+='<div class="drill-sec">'+(d.rows||[]).length+' RECENT FACTS</div>';
+      h+= (d.rows||[]).map(r=>`<div class="item"><div class="h"><span class="pill">${esc(r.source||"fact")}</span><span class="meta">#${esc(r.id)} · conf ${esc(r.confidence)} · ${esc(r.ts||"")}</span></div><div class="body">${esc(r.content)}</div></div>`).join("");
+      body.innerHTML=h||'<div class="empty">DORMANT</div>'; renderTabs(); return;
+    }
+    if(tab==="system"){
+      const [pool,gov]=await Promise.all([getPanel("pool"),getPanel("governor")]);
+      let h='<div class="kpis">'+
+        `<div class="kpi"><b>${esc(gov.load1)}</b><span>LOAD (1m)</span></div>`+
+        `<div class="kpi"><b>${esc(gov.load_per_core)}</b><span>PER CORE</span></div>`+
+        `<div class="kpi"><b>${esc(pool.busy)}/${esc(pool.limit)}</b><span>POOL BUSY</span></div>`+
+        `<div class="kpi"><b>${esc(gov.ncpu)}</b><span>CORES</span></div></div>`;
+      if(gov.per_core_pct) h+='<div class="drill-sec">'+gov.per_core_pct.length+' CPU CORES (% BUSY)</div><div class="cores">'+gov.per_core_pct.map((p,i)=>`<span class="core-cell">c${i} <b>${esc(p)}%</b></span>`).join("")+"</div>";
+      if(pool.slots) h+='<div class="drill-sec">'+pool.limit+' WORKER SLOTS ('+pool.busy+' busy / '+pool.idle+' idle)</div><div class="cores">'+pool.slots.map(s=>`<span class="core-cell">#${esc(s.slot)} <b>${esc(s.state)}</b></span>`).join("")+"</div>";
+      if(gov.top_processes) h+='<div class="drill-sec">TOP PROCESSES</div>'+gov.top_processes.map(p=>`<div class="item"><div class="h"><span class="nm">${esc(p.name||"")}</span><span class="meta">pid ${esc(p.pid)} · ${esc(p.cpu)}% cpu</span></div></div>`).join("");
+      body.innerHTML=h; return;
+    }
+    if(tab==="voice"){
+      const v=await getPanel("voice");
+      let h='<div class="kpis">'+
+        `<div class="kpi"><b>${esc((v.status||"—").toUpperCase())}</b><span>STATE</span></div>`+
+        `<div class="kpi"><b>${esc(v.segments)}</b><span>SEGMENTS</span></div>`+
+        `<div class="kpi"><b>${v.listening?"YES":"no"}</b><span>LISTENING</span></div>`+
+        `<div class="kpi"><b>${v.speaking?"YES":"no"}</b><span>SPEAKING</span></div></div>`;
+      if(v.last_wake) h+=`<div class="drill-sec">LAST WAKE</div><div class="item"><div class="body" style="-webkit-line-clamp:4">${esc(v.last_wake)}</div></div>`;
+      if(v.last_transcript) h+=`<div class="drill-sec">LAST TRANSCRIPT (${esc(v.age_s)}s ago)</div><div class="item"><div class="body">${esc(v.last_transcript)}</div></div>`;
+      body.innerHTML=h; return;
+    }
+    // generic row panels: leads / outreach / research / audit
+    const d=await getPanel(tab);
+    const arr=d.rows||[]; tabCounts[tab]=arr.length;
+    let h="";
+    if(d.note) h+=`<div class="rail-title" style="margin-bottom:8px">${esc(d.note)}</div>`;
+    if(tab==="audit"){
+      h+= arr.length? arr.map(a=>`<div class="item"><div class="body" style="-webkit-line-clamp:2">${esc(typeof a==="object"?(a.detail||JSON.stringify(a)):a)}</div></div>`).join("") : '<div class="empty">no events</div>';
+    } else {
+      h+=itemRows(arr, tab==="leads"?"name":(tab==="outreach"?"recipient":"name"));
+    }
+    body.innerHTML=h; renderTabs();
+  }catch(e){ body.innerHTML='<div class="empty">unavailable — '+esc(String(e.message||e))+'</div>'; }
+}
+
+/* ============================ LIVE EVENT BUS (SSE) ============================ */
 const ev=new EventSource("/events");
-function addEvent(ch,data){const t=$("ticker"); if(t.firstChild&&t.firstChild.textContent.startsWith("awaiting")) t.innerHTML="";
-  const d=document.createElement("div"); d.innerHTML=`<span class="ch">${ch}</span> ${data}`; t.prepend(d);
-  while(t.children.length>30) t.removeChild(t.lastChild);}
+function addEvent(ch,data){const t=$("ticker"); if(t.firstChild&&t.firstChild.textContent.startsWith("awaiting"))t.innerHTML="";
+  const d=document.createElement("div"); d.innerHTML=`<span class="ch">${esc(ch)}</span> ${esc(typeof data==="string"?data:JSON.stringify(data))}`; t.prepend(d);
+  while(t.children.length>40) t.removeChild(t.lastChild);}
 ev.onmessage=e=>addEvent("event",e.data);
 ["engine","trading","leads","probate","outreach","risk","memory","agent"].forEach(c=>ev.addEventListener(c,e=>addEvent(c,e.data)));
-// wake word heard ("ace") -> the orb emits expanding waves at once, so Michael
-// sees it fired (the old-Ace visual). Published BEFORE the brain runs.
 function fireWake(data){
   let cmd=""; try{cmd=(JSON.parse(data)||{}).command||"";}catch(_){}
   const core=document.querySelector(".core");
-  if(core) for(let i=0;i<3;i++){
-    const w=document.createElement("div"); w.className="wave"; core.appendChild(w);
-    setTimeout(()=>w.classList.add("go"), i*170);
-    w.addEventListener("animationend",()=>w.remove());
-    setTimeout(()=>w.remove(), 2500);   // belt-and-suspenders cleanup
-  }
-  const orb=document.querySelector(".orb"), st=$("core-state");
-  if(orb){ orb.classList.add("heard"); setTimeout(()=>orb.classList.remove("heard"),1300); }
-  if(st){ st.textContent="HEARD"; setTimeout(()=>{ st.textContent="ACE"; },1300); }
-  addEvent("wake", cmd?("heard “"+esc(cmd)+"”"):"heard “ace”");
+  if(core) for(let i=0;i<3;i++){const w=document.createElement("div");w.className="wave";core.appendChild(w);
+    setTimeout(()=>w.classList.add("go"),i*170); w.addEventListener("animationend",()=>w.remove()); setTimeout(()=>w.remove(),2500);}
+  const orb=document.querySelector(".orb"), s=$("core-state");
+  if(orb){orb.classList.add("heard");setTimeout(()=>orb.classList.remove("heard"),1300);}
+  if(s){s.textContent="HEARD";setTimeout(()=>{s.textContent="ACE";},1300);}
+  addEvent("wake", cmd?("heard “"+cmd+"”"):"heard “ace”");
 }
-ev.addEventListener("wake", e=>fireWake(e.data));
-// a voice turn ("ace …") flows through the SAME brain and lands in the chat box
-ev.addEventListener("voice",e=>{
-  addEvent("voice",e.data);
-  try{ const v=JSON.parse(e.data); if(v&&v.q){
-    addUser("🎙 "+v.q);
-    const t=addAssistant(); t.src.textContent="[voice · "+esc(v.source||"brain")+"]";
-    t.ab.textContent=v.answer||""; scrollAns();
-  }}catch(_){}
+ev.addEventListener("wake",e=>fireWake(e.data));
+ev.addEventListener("voice",e=>{ addEvent("voice",e.data);
+  try{const v=JSON.parse(e.data); if(v&&v.q){ streamOpen(); const t=newTurn("🎙 "+v.q); t.src.textContent="[voice · "+esc(v.source||"brain")+"]"; t.ans.textContent=v.answer||""; streamScroll(); }}catch(_){}
 });
+
+/* ============================ CHAT STREAM (real brain) ============================ */
 let _es=null;
-function scrollAns(){ const a=$("ans"); a.scrollTop=a.scrollHeight; }
-function addUser(text){
-  const d=document.createElement("div");
-  d.style.cssText="margin:10px 0 3px;color:#cfc9b6;font-size:13px";
-  d.innerHTML='<span style="color:#8a8470">▸ </span>'+esc(text);
-  $("ans").appendChild(d);
+function streamOpen(){ $("stream").classList.add("open"); }
+function streamScroll(){ const a=$("stream"); a.scrollTop=a.scrollHeight; }
+function streamClear(){ $("stream").innerHTML=""; $("stream").classList.remove("open"); }
+function newTurn(userText){
+  streamOpen();
+  const w=document.createElement("div"); w.className="turn";
+  w.innerHTML=`<div class="u"><b>▸ </b>${esc(userText)}</div>`+
+    '<div class="src">…</div>'+
+    '<div class="think"><div class="hh">▼ THINKING</div><div class="bb"></div></div>'+
+    '<div class="ans"></div>';
+  $("stream").appendChild(w);
+  const th=w.querySelector(".think"), hh=w.querySelector(".hh"), bb=w.querySelector(".bb");
+  hh.onclick=()=>{bb.style.display=bb.style.display==="none"?"":"none";};
+  return {src:w.querySelector(".src"), think:th, hh, bb, ans:w.querySelector(".ans")};
 }
-function addAssistant(){
-  const w=document.createElement("div"); w.style.cssText="margin:0 0 12px";
-  w.innerHTML=
-    '<div class="t-src" style="color:#8a8470;font-size:10px;letter-spacing:2px;margin:1px 0 4px">…</div>'+
-    '<div class="t-think" style="display:none;background:#15130d;border:1px solid #2a2620;border-radius:7px;padding:6px 9px;margin-bottom:6px;font-size:12px;color:#9a937c">'+
-      '<div class="t-think-h" style="cursor:pointer;font-size:10px;letter-spacing:2px;margin-bottom:3px">▼ THINKING</div>'+
-      '<div class="t-think-b" style="white-space:pre-wrap;line-height:1.4"></div></div>'+
-    '<div class="t-ans" style="white-space:pre-wrap;line-height:1.55;color:#ece6d4"></div>';
-  $("ans").appendChild(w);
-  const th=w.querySelector(".t-think"), hh=w.querySelector(".t-think-h"), tb=w.querySelector(".t-think-b");
-  hh.onclick=()=>{ tb.style.display = tb.style.display==="none"?"":"none"; };
-  return {src:w.querySelector(".t-src"), th, hh, tb, ab:w.querySelector(".t-ans")};
-}
-function ask(){
-  const q=$("q").value.trim(); if(!q)return;
-  $("q").value="";                 // clear so the next message can be typed right away
-  if(_es){_es.close(); _es=null;}  // stop any still-streaming prior turn
-  addUser(q);
-  const t=addAssistant(); scrollAns();
-  let gotThinking=false, gotAnswer=false;
+function ask(preset){
+  const q=(preset!=null?preset:$("q").value).trim(); if(!q)return;
+  if(preset==null)$("q").value="";
+  if(_es){_es.close();_es=null;}
+  const t=newTurn(q); streamScroll();
+  let gotThink=false, gotAns=false;
   _es=new EventSource("/api/tell/stream?q="+encodeURIComponent(q));
-  _es.addEventListener("source",e=>{ t.src.textContent="["+esc(e.data)+"]"; if(e.data!=="brain") t.th.style.display="none"; });
-  _es.addEventListener("thinking",e=>{ gotThinking=true; t.th.style.display=""; t.tb.textContent+=e.data; scrollAns(); });
-  _es.addEventListener("answer",e=>{ gotAnswer=true; t.ab.textContent+=e.data; scrollAns(); });
-  _es.addEventListener("done",e=>{ if(gotThinking){t.tb.style.display="none"; t.hh.textContent="▶ THINKING";} if(_es){_es.close(); _es=null;} scrollAns(); });
-  _es.onerror=()=>{ if(!gotAnswer) t.ab.textContent="[brain unreachable]"; if(_es){_es.close(); _es=null;} };
+  _es.addEventListener("source",e=>{ t.src.textContent="["+esc(e.data)+"]"; if(e.data!=="brain")t.think.style.display="none"; });
+  _es.addEventListener("thinking",e=>{ gotThink=true; t.think.style.display=""; t.bb.textContent+=e.data; streamScroll(); });
+  _es.addEventListener("answer",e=>{ gotAns=true; t.ans.textContent+=e.data; streamScroll(); });
+  _es.addEventListener("done",()=>{ if(gotThink){t.bb.style.display="none";t.hh.textContent="▶ THINKING";} if(_es){_es.close();_es=null;} streamScroll(); });
+  _es.onerror=()=>{ if(!gotAns)t.ans.textContent="[brain unreachable]"; if(_es){_es.close();_es=null;} };
 }
 $("q").addEventListener("keydown",e=>{if(e.key==="Enter")ask();});
-// ---- TRANSPARENCY drill-down (groundwork pattern: click panel -> REAL detail) ----
+
+/* ============================ DRILL-DOWN (transparency) ============================ */
 function drillClose(){ $("drill").classList.remove("open"); $("drill-body").innerHTML=""; }
-document.addEventListener("keydown",e=>{ if(e.key==="Escape") drillClose(); });
-async function openDrill(title,render){
-  $("drill-title").textContent=title;
-  $("drill-body").innerHTML='<div style="color:#8a8470">loading real data…</div>';
-  $("drill").classList.add("open");
-  try{ await render($("drill-body")); }
-  catch(e){ $("drill-body").innerHTML='<div style="color:#c66">drill failed: '+esc(String(e))+'</div>'; }
-}
-// one row -> html, shaped by what kind of row it is (memory/audit/ledger)
-function drillRow(r){
-  if(r.content!==undefined) return '<div class="drill-row"><span class="drill-tag">'+esc(r.source||'')+'</span>'+
-    '<span class="drill-meta">#'+(r.id||'')+(r.confidence!==undefined?' · conf '+r.confidence:'')+(r.reinforcement!==undefined?' · ×'+r.reinforcement:'')+(r.ts?' · '+esc(r.ts):'')+'</span>'+
-    '<div class="drill-content">'+esc(r.content)+'</div></div>';
-  if(r.detail!==undefined) return '<div class="drill-row"><span class="drill-tag">'+esc((r.source||'')+'/'+(r.kind||''))+'</span> <span class="drill-meta">'+esc(r.ts||'')+'</span>'+
-    '<div class="drill-content">'+esc(r.detail)+'</div></div>';
-  const main=r.name||r.case_name||r.recipient||r.engine||JSON.stringify(r);
-  const meta=[r.kind,r.region,r.county,r.campaign,r.direction,r.status,r.ts].filter(Boolean).join(' · ');
-  return '<div class="drill-row"><div class="drill-content">'+esc(main)+'</div><span class="drill-meta">'+esc(meta)+'</span></div>';
-}
-// GENERIC: fetch /panel/<name> and render whatever real detail it carries
-async function drillPanel(name, body){
-  const d=await fetch("/panel/"+name).then(r=>r.json());
-  if(d.error){ body.innerHTML='<div style="color:#c66">drill failed: '+esc(d.error)+'</div>'; return; }
-  let html="";
-  const skip=["panel","per_core_pct","top_processes","slots","rows","entities","counts"];
-  const kv=Object.entries(d).filter(([k,v])=>!skip.includes(k)&&(typeof v!=="object"||v===null));
-  if(kv.length) html+='<div class="drill-sec">STATE</div>'+kv.map(([k,v])=>'<div class="row"><span class="k">'+esc(k)+'</span><span class="v">'+esc(String(v))+'</span></div>').join('');
-  if(d.counts) html+='<div class="drill-sec">COUNTS</div>'+Object.entries(d.counts).map(([k,v])=>'<div class="row"><span class="k">'+esc(k)+'</span><span class="v">'+v+'</span></div>').join('');
-  if(d.slots) html+='<div class="drill-sec">'+d.limit+' WORKER SLOTS ('+d.busy+' busy / '+d.idle+' idle)</div><div class="drill-ents">'+
-    d.slots.map(s=>'<span class="drill-ent">#'+s.slot+' <b>'+s.state+'</b></span>').join('')+'</div>';
-  if(d.per_core_pct) html+='<div class="drill-sec">'+d.per_core_pct.length+' CPU CORES (% busy)</div><div class="drill-ents">'+
-    d.per_core_pct.map((p,i)=>'<span class="drill-ent">c'+i+' <b>'+p+'%</b></span>').join('')+'</div>';
-  if(d.top_processes) html+='<div class="drill-sec">TOP PROCESSES</div>'+
-    d.top_processes.map(p=>'<div class="drill-row"><span class="drill-meta">pid '+p.pid+' · '+p.cpu+'% cpu</span><div class="drill-content">'+esc(p.name||'')+'</div></div>').join('');
-  if(d.rows) html+='<div class="drill-sec">'+d.rows.length+' ROWS</div>'+d.rows.map(drillRow).join('');
-  if(d.entities) html+='<div class="drill-sec">'+d.entities.length+' ENTITIES</div><div class="drill-ents">'+
-    d.entities.map(e=>'<span class="drill-ent">'+esc(e.name)+' <b>'+e.mentions+'</b></span>').join('')+'</div>';
-  body.innerHTML = html || '<div style="color:#8a8470">DORMANT — no producer wired for this panel yet.</div>';
-}
-document.querySelectorAll(".drillable").forEach(card=>{
-  const name=card.dataset.drill;
-  const title=(card.querySelector("h2")?.textContent||name).replace(/⤢/,"").trim();
-  card.addEventListener("click",()=>openDrill(title+" — live detail", body=>drillPanel(name, body)));
-});
-// ---- TABS: top-level pages; each tab's capability panels populate on view ----
-const TAB_PANELS={core:["audit"],system:["watchdog"],revenue:["trading","marketer"],
-  ops:["tasks","trackers","research","mail"],voice:[]};
-let curTab="core";
-async function populatePanel(name){
-  const el=$("p-"+name); if(!el) return;
-  try{
-    const d=await fetch("/panel/"+name).then(r=>r.json());
-    if(d.error) throw new Error(d.error);
-    let body="";
-    if(d.rows!==undefined) body='<div class="row"><span class="k">rows</span><span class="v">'+d.rows.length+'</span></div>'+
-      (d.note?'<div class="sub">'+esc(d.note)+'</div>':'')+
-      d.rows.slice(0,3).map(r=>'<div class="row"><span class="v" style="font-size:10px">'+esc((r.text||r.name||r.content||JSON.stringify(r))).slice(0,60)+'</span></div>').join('');
-    else { const kv={}; for(const k in d){ if(k!=='panel'&&(typeof d[k]!=='object'||d[k]===null)) kv[k]=d[k]; } body=rows(kv); }
-    el.className=""; el.innerHTML=body||'<div class="dormbody">—</div>';
-  }catch(e){ el.className="dormbody"; el.textContent="unavailable"; }
-}
-function refreshTab(pg){ (TAB_PANELS[pg]||[]).forEach(populatePanel); }
-document.querySelectorAll(".tab").forEach(t=>t.addEventListener("click",()=>{
-  curTab=t.dataset.tab;
-  document.querySelectorAll(".tab").forEach(x=>x.classList.toggle("active",x===t));
-  document.querySelectorAll(".page").forEach(p=>p.classList.toggle("active",p.dataset.page===curTab));
-  refreshTab(curTab);
-}));
+document.addEventListener("keydown",e=>{ if(e.key==="Escape")drillClose(); });
+
+/* ============================ BOOT ============================ */
 function clock(){$("clock").textContent=new Date().toLocaleTimeString([],{hour:"2-digit",minute:"2-digit",second:"2-digit"})+" · ET";}
-poll();setInterval(()=>{poll();refreshTab(curTab);},2000);clock();setInterval(clock,1000);refreshTab(curTab);
+renderTabs(); loadDash("overview");
+poll(); setInterval(poll,2500);
+clock(); setInterval(clock,1000);
 </script>
 </body>
 </html>
