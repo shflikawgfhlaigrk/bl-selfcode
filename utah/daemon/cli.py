@@ -145,6 +145,31 @@ def cmd_verify(_args) -> int:
     return 1 if d.get("state") == "red" and d.get("confirmed") else 0
 
 
+def cmd_discord(args) -> int:
+    """Provision the Utah Discord server (mirrors the deck). ``--plan`` is a dry-run
+    that needs no token; bare ``discord`` applies the blueprint idempotently."""
+    from utah.integrations import discord as dc
+
+    if args.plan:
+        print(dc._render_plan(dc.provision(dry_run=True)))
+        return 0
+    rep = dc.provision(guild_id=args.guild, create=args.create)
+    if rep.get("gated"):
+        print(f"utah discord: GATED — no bot token. Add ~/.utah/secrets/discord.json "
+              f"(see {dc.SECRET}.example) or set DISCORD_BOT_TOKEN, then re-run.")
+        print(dc._render_plan(dc.provision(dry_run=True)))
+        return 2
+    dc.save_webhooks(rep)
+    t = rep["totals"]
+    print(f"utah discord: guild={rep['guild_id']}  "
+          f"+{len(rep['created_channels'])} channels (now {t['channels']}), "
+          f"+{len(rep['created_roles'])} roles (now {t['roles']}), "
+          f"{t['webhooks']} feed webhooks saved.")
+    for e in rep.get("errors", []):
+        print("  ! ", e)
+    return 1 if rep.get("errors") else 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="utah", description="Utah control CLI")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -156,6 +181,11 @@ def build_parser() -> argparse.ArgumentParser:
     t = sub.add_parser("tell", help="ask the brain"); t.add_argument("text", nargs="+"); t.set_defaults(fn=cmd_tell)
     a = sub.add_parser("agent", help="run a pool task"); a.add_argument("seconds", nargs="?", type=float, default=0.5); a.set_defaults(fn=cmd_agent)
     sub.add_parser("verify", help="Utah's own test health (from com.utah.verify)").set_defaults(fn=cmd_verify)
+    d = sub.add_parser("discord", help="provision the Utah Discord server (mirrors the deck)")
+    d.add_argument("--plan", action="store_true", help="dry-run the blueprint (no token needed)")
+    d.add_argument("--create", action="store_true", help="create a new guild if none is known")
+    d.add_argument("--guild", default=None, help="target guild id (overrides creds)")
+    d.set_defaults(fn=cmd_discord)
     return p
 
 
