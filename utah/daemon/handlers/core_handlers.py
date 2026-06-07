@@ -231,6 +231,18 @@ async def morning_brief(ctx: Context, params: object) -> dict:
         return await ctx.pool.run(_brief_blocking)
 
 
+def _watchdog_blocking() -> dict:
+    from utah import watchdog
+    return watchdog.check()
+
+
+async def watchdog_check(ctx: Context, params: object) -> dict:
+    """Capability (not an agent): health snapshot of Utah's own live state; genuine
+    anomalies (daemon down, load critical) are documented to the AUDIT log."""
+    with ctx.governor.admission():
+        return await ctx.pool.run(_watchdog_blocking)
+
+
 def _busy(seconds: float) -> float:
     t = time.perf_counter()
     time.sleep(seconds)  # a real blocking unit of work, off the loop
@@ -266,6 +278,7 @@ REGISTRY = {
     "queue_outreach": queue_outreach,
     "research": research,
     "morning_brief": morning_brief,
+    "watchdog_check": watchdog_check,
     "publish": publish,
     "shutdown": shutdown,
 }
