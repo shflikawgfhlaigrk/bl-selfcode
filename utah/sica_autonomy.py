@@ -151,12 +151,9 @@ def run_cycle(*, repo=None, brain_fn=None, propose_fn=None, sync_fn=None, task_f
 
 
 def _log_cycle(d: dict) -> None:
-    try:
-        CYCLE_LOG.parent.mkdir(parents=True, exist_ok=True)
-        with CYCLE_LOG.open("a", encoding="utf-8") as fh:
-            fh.write(json.dumps({"ts": time.time(), **d}) + "\n")
-    except Exception as exc:  # noqa: BLE001
-        log.warning("cycle log failed: %s", exc)
+    """Cycle telemetry → Postgres (selfcode_log), best-effort. Was a JSONL file; now
+    on PG like everything else (no-op in tests via the in-memory archive backend)."""
+    sica.record_cycle({"ts": time.time(), **d})
 
 
 def main() -> int:

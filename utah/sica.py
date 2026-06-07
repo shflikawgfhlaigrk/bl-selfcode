@@ -197,6 +197,31 @@ def set_archive_backend(backend) -> None:
     _backend = backend
 
 
+#: Per-cycle telemetry table (append-only) — also Postgres, not a file.
+_LOG_SCHEMA = """
+CREATE TABLE IF NOT EXISTS selfcode_log (
+  id bigserial PRIMARY KEY,
+  ts timestamptz NOT NULL DEFAULT now(),
+  data jsonb NOT NULL
+);
+"""
+
+
+def record_cycle(d: dict) -> None:
+    """Append one self-code cycle's telemetry to Postgres (best-effort; never raises).
+    A no-op unless the archive backend is Postgres, so unit tests never hit a real DB
+    (the conftest pin makes the backend in-memory)."""
+    backend = get_archive_backend()
+    if not isinstance(backend, _PgArchive):
+        return
+    try:
+        with backend._conn() as c:
+            c.execute(_LOG_SCHEMA)
+            c.execute("INSERT INTO selfcode_log (data) VALUES (%s)", (json.dumps(d),))
+    except Exception:  # noqa: BLE001 — telemetry is best-effort
+        pass
+
+
 class Archive:
     """Scored-attempt archive. Production = Postgres; passing a ``path`` forces the file
     backend (isolated tests / migration). ``best()``/``count()`` are computed over
@@ -227,5 +252,5 @@ class Archive:
 
 
 __all__ = ["utility", "score_from_pytest", "Attempt", "make_attempt", "Archive",
-           "get_archive_backend", "set_archive_backend", "ARCHIVE_PATH",
+           "get_archive_backend", "set_archive_backend", "record_cycle", "ARCHIVE_PATH",
            "TIME_LIMIT_S", "COST_LIMIT_USD", "TIMEOUT_PENALTY"]
