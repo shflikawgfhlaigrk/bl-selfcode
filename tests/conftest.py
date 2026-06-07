@@ -31,6 +31,11 @@ def _restore_boundaries():
     local lane OFF (so router L1 escalates to the injected brain, never real Ollama),
     and clear the in-memory conversation thread so it never bleeds across tests."""
     failures_mod.set_store(FakeFailureStore())
+    # Pin a fake memory backend for EVERY test so no test ever reads, writes, or resets
+    # the real Postgres memory (that pollution added rows to prod; a stray reset once
+    # wiped it). Tests that need a configured store override via the `mem`/`fake_store`
+    # fixtures, which run after this and replace it.
+    memory_mod.set_backend(FakeStore())
     local_mod.set_runner(_local_down)
     local_mod.set_stream_runner(_local_down)
     core_mod.reset_conversation()
