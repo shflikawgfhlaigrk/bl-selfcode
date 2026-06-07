@@ -415,6 +415,7 @@ async def panel_detail(ctx: Context, params: object) -> dict:
         from utah import selfcode
         on = selfcode.enabled()
         am = selfcode.automerge_enabled()
+        smoke = selfcode.kill_switch_smoke()    # live proof: refuses self-edits to safety
         return {"panel": "selfcode",
                 "status": ("armed" if am else "propose-only") if on else "kill-switch",
                 "enabled": on,
@@ -423,8 +424,17 @@ async def panel_detail(ctx: Context, params: object) -> dict:
                 "mode": "auto-merge on green · suite-gated · kill-switch" if am
                         else "propose-only · isolated branch · suite-gated · never main",
                 "kill_switch": str(selfcode.KILL_SWITCH),
-                "note": ("autonomy: green proposals auto-merge to main; a red suite never "
-                         "merges, kill-switch overrides") if am
+                # Doc-13 tiered policy-as-data, surfaced for the transparency rule.
+                "tiers": [{"tier": t, "label": selfcode.POLICY[t]["label"],
+                           "automerge": selfcode.POLICY[t]["automerge"]}
+                          for t in selfcode.TIER_ORDER],
+                "supervised": selfcode._read_supervised(),
+                "tier_A_needs": selfcode.POLICY["A"]["min_supervised"],
+                "safety_files": list(selfcode.SAFETY_PATHS),
+                "kill_switch_smoke": "PASS — refuses self-edits to safety" if smoke["refused"]
+                                     else "FAIL — safety not enforced",
+                "note": ("autonomy: Tier-A green proposals auto-merge after N supervised; "
+                         "B/C batch-review, D off-limits; kill-switch overrides") if am
                         else "bounded: proposes a change on a branch, never merges"}
     if panel == "browser":
         from utah.integrations import browser

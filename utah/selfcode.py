@@ -21,7 +21,10 @@ is unit-proven; the defaults are the real subprocesses.
 """
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
+import pathlib
 import re
 import subprocess
 import sys
@@ -38,6 +41,105 @@ AUTOMERGE_FLAG = runtime.RUN_DIR / "selfcode.automerge"
 #: Bound a single coding run. Kept tight: the live proof showed an unbounded Claude+Bash
 #: run can hang (it ran `uv` and timed out at 600s), so the gate must cut it off.
 CODE_TIMEOUT_S = 300
+
+#: Count of supervised green proposals (human-reviewed) — gates Tier-A autonomy.
+SUPERVISED_STATE = runtime.RUN_DIR / "selfcode.supervised"
+
+# --- Doc-13 tiered self-coding (policy-as-data) -----------------------------
+#: Off-limits files (Tier D): the self-coder itself, auth, the singleton/hard-exit,
+#: the admission governor, doctrine config, and the no-fabrication brain. A coding
+#: run that changes ANY of these bytes is rolled back — the self-coder may never
+#: edit its own safety. (Byte-checked around every run; see :func:`safety_intact`.)
+SAFETY_PATHS: tuple[str, ...] = (
+    "utah/selfcode.py",
+    "utah/config.py",
+    "utah/brain.py",
+    "utah/daemon/peercred.py",
+    "utah/daemon/lifecycle.py",
+    "utah/daemon/governor.py",
+)
+
+#: The tier of a change = the STRICTEST tier among the files it touches; the tier
+#: sets the autonomy ceiling. Pure data so the policy is the spec, not buried logic.
+POLICY: dict[str, dict] = {
+    "D": {"label": "off-limits", "automerge": False, "paths": SAFETY_PATHS},
+    "C": {"label": "5-rung review", "automerge": False,
+          "paths": ("utah/daemon/", "migrations/")},          # the spine + schema
+    "B": {"label": "batch-review", "automerge": False,
+          "paths": ("utah/product/", "utah/memory.py", "utah/store/")},  # money + memory
+    "A": {"label": "autonomous", "automerge": True, "min_supervised": 3,
+          "paths": ("",)},                                    # leaf caps / docs / helpers
+}
+#: Strictest → loosest. ``classify`` returns the first (strictest) tier that matches.
+TIER_ORDER: tuple[str, ...] = ("D", "C", "B", "A")
+
+
+def _tier_of(path: str) -> str:
+    p = path.strip().lstrip("./")
+    for tier in TIER_ORDER:                       # D, C, B, A — strictest first
+        for pref in POLICY[tier]["paths"]:
+            if pref and (p == pref or p.startswith(pref)):
+                return tier
+    return "A"                                    # nothing matched → leaf (A fallback)
+
+
+def classify(paths) -> str:
+    """The strictest tier among *paths* (doc-13 policy-as-data). Empty → ``'A'``."""
+    worst = "A"
+    for path in paths:
+        t = _tier_of(path)
+        if TIER_ORDER.index(t) < TIER_ORDER.index(worst):
+            worst = t
+    return worst
+
+
+def tier_allows_automerge(tier: str, supervised: int) -> bool:
+    """True iff *tier* may auto-merge on green. Only Tier A, and only after its
+    ``min_supervised`` count of human-reviewed green proposals."""
+    pol = POLICY.get(tier, {})
+    if not pol.get("automerge"):
+        return False
+    return supervised >= pol.get("min_supervised", 0)
+
+
+def safety_snapshot(repo: str = ".") -> dict[str, str]:
+    """sha256 of each existing safety file — the before-image for the byte-check."""
+    out: dict[str, str] = {}
+    for rel in SAFETY_PATHS:
+        p = pathlib.Path(repo) / rel
+        if p.exists():
+            out[rel] = hashlib.sha256(p.read_bytes()).hexdigest()
+    return out
+
+
+def safety_intact(repo: str, before: dict[str, str]) -> bool:
+    """True iff every safety file is byte-identical to *before* (none added/removed).
+    A mismatch means the coding run touched off-limits code → refuse + roll back."""
+    return safety_snapshot(repo) == before
+
+
+def _read_supervised() -> int:
+    try:
+        return int(json.loads(SUPERVISED_STATE.read_text()).get("count", 0))
+    except Exception:  # noqa: BLE001 — absent/corrupt → start at zero
+        return 0
+
+
+def _bump_supervised() -> None:
+    try:
+        SUPERVISED_STATE.write_text(json.dumps({"count": _read_supervised() + 1}))
+    except Exception as exc:  # noqa: BLE001
+        log.warning("selfcode supervised bump failed: %s", exc)
+
+
+def _real_changed_files(repo: str = ".") -> list[str]:
+    """Files the coding run produced (tracked diff vs HEAD + new untracked). Reliable
+    on the auto-merge path because a clean tree is enforced before the run."""
+    def git(*a):
+        return subprocess.run(["git", *a], cwd=repo, capture_output=True, text=True).stdout
+    tracked = git("diff", "--name-only", "HEAD").split()
+    untracked = git("ls-files", "--others", "--exclude-standard").split()
+    return [*tracked, *untracked]
 
 
 def enabled() -> bool:
@@ -82,11 +184,14 @@ def _real_tests(*, cwd: str, timeout: int = CODE_TIMEOUT_S) -> tuple[bool, str]:
 
 def propose(task: str, *, run_claude=None, run_tests=None, branch_fn=None,
             discard_fn=None, merge_fn=None, auto_merge=None, tree_clean_fn=None,
-            repo: str | None = None) -> dict:
-    """Propose a change for *task* on an isolated branch, gated by the suite. On a green
-    suite, auto-merges to main + pushes when the auto-merge flag is set (``auto_merge``
-    overrides for tests); otherwise the change stays a branch proposal. Returns
-    ``{task, applied, tests_passed, merged, branch, reason, ...}``. Never raises."""
+            repo: str | None = None, safety_snapshot_fn=None, safety_intact_fn=None,
+            changed_files_fn=None, supervised_fn=None, bump_supervised_fn=None) -> dict:
+    """Propose a change for *task* on an isolated branch, gated by the suite AND the
+    doc-13 tier policy. The change's tier (the strictest among the files it touches)
+    sets the autonomy ceiling: Tier-D (safety) is rolled back via a byte-check; only a
+    Tier-A change auto-merges, and only after ``min_supervised`` green proposals. B/C
+    (and not-yet-autonomous A) stay branch proposals for review. Returns
+    ``{task, applied, tests_passed, merged, branch, tier, reason, ...}``. Never raises."""
     if not enabled():
         failures.record("selfcode", "disabled", f"kill switch present; skipped: {task[:80]}")
         return {"task": task, "applied": False, "disabled": True,
@@ -110,6 +215,12 @@ def propose(task: str, *, run_claude=None, run_tests=None, branch_fn=None,
     branch_fn = branch_fn or _real_branch
     discard_fn = discard_fn or _real_discard
 
+    # Byte-check before-image of the off-limits (Tier-D) files. Captured around the run
+    # so it is robust to an already-dirty tree (unlike a diff-vs-HEAD).
+    before = None
+    if safety_intact_fn is None:
+        before = (safety_snapshot_fn or (lambda: safety_snapshot(repo or ".")))()
+
     branch = branch_fn(_slug(task))   # isolated; _real_branch refuses main
     try:
         run_claude(task)
@@ -118,6 +229,19 @@ def propose(task: str, *, run_claude=None, run_tests=None, branch_fn=None,
         _safe(discard_fn)
         return {"task": task, "applied": False, "tests_passed": False,
                 "branch": branch, "reason": str(exc)}
+
+    # Tier-D off-limits enforcement: a run that edited a safety file is rolled back,
+    # no matter how green the suite. The self-coder can never edit its own safety.
+    intact = (safety_intact_fn(before) if safety_intact_fn is not None
+              else safety_intact(repo or ".", before))
+    if not intact:
+        failures.record("selfcode", "off_limits",
+                        f"{task[:80]}: edited a Tier-D safety file — rolled back")
+        _safe(discard_fn)
+        log.info("selfcode: %s — touched off-limits safety code, rolled back", task[:60])
+        return {"task": task, "applied": False, "tests_passed": False, "merged": False,
+                "branch": branch, "tier": "D",
+                "reason": "off-limits — change touched a Tier-D safety file, rolled back"}
 
     try:
         passed, output = run_tests()
@@ -136,17 +260,38 @@ def propose(task: str, *, run_claude=None, run_tests=None, branch_fn=None,
                 "branch": branch, "reason": tail}
 
     if do_merge:
-        merge = merge_fn or (lambda b, t: _real_merge(b, t, repo=repo or "."))
-        try:
-            sha, pushed = merge(branch, task)
-        except Exception as exc:  # noqa: BLE001 — merge/push failed; the branch survives
-            failures.record("selfcode", "merge_failed", f"{task[:80]}: {exc}")
-            return {"task": task, "applied": True, "tests_passed": True, "merged": False,
-                    "branch": branch, "reason": f"suite green; merge failed: {exc}"}
-        log.info("selfcode: %s — suite GREEN, merged to main %s (pushed=%s)", task[:60], sha, pushed)
-        return {"task": task, "applied": True, "tests_passed": True, "merged": True,
-                "commit": sha, "pushed": pushed, "branch": branch,
-                "reason": "suite green, merged to main" + ("" if pushed else " (push rejected — local only)")}
+        # Tree was clean pre-run, so changed-files == the run's output → tier is reliable.
+        changed = (changed_files_fn or (lambda: _real_changed_files(repo or ".")))()
+        tier = classify(changed)
+        if tier == "D":   # belt-and-suspenders with the byte-check above
+            failures.record("selfcode", "off_limits",
+                            f"{task[:80]}: change set includes a Tier-D safety file — rolled back")
+            _safe(discard_fn)
+            return {"task": task, "applied": False, "tests_passed": False, "merged": False,
+                    "branch": branch, "tier": "D",
+                    "reason": "off-limits — change set includes a Tier-D safety file, rolled back"}
+        supervised = (supervised_fn or _read_supervised)()
+        if tier_allows_automerge(tier, supervised):
+            merge = merge_fn or (lambda b, t: _real_merge(b, t, repo=repo or "."))
+            try:
+                sha, pushed = merge(branch, task)
+            except Exception as exc:  # noqa: BLE001 — merge/push failed; the branch survives
+                failures.record("selfcode", "merge_failed", f"{task[:80]}: {exc}")
+                return {"task": task, "applied": True, "tests_passed": True, "merged": False,
+                        "branch": branch, "tier": tier, "reason": f"suite green; merge failed: {exc}"}
+            log.info("selfcode: %s — Tier-%s GREEN, merged to main %s (pushed=%s)",
+                     task[:60], tier, sha, pushed)
+            return {"task": task, "applied": True, "tests_passed": True, "merged": True,
+                    "commit": sha, "pushed": pushed, "branch": branch, "tier": tier,
+                    "reason": f"suite green, Tier-{tier} merged to main"
+                              + ("" if pushed else " (push rejected — local only)")}
+        # Tier B/C, or Tier-A still under supervision → stays a proposal for review.
+        (bump_supervised_fn or _bump_supervised)()
+        reason = (f"suite green; Tier-{tier} ({POLICY[tier]['label']}) — proposal kept for "
+                  f"review, not auto-merged")
+        log.info("selfcode: %s — Tier-%s GREEN, kept on %s (review)", task[:60], tier, branch)
+        return {"task": task, "applied": True, "tests_passed": True, "merged": False,
+                "branch": branch, "tier": tier, "reason": reason}
 
     log.info("selfcode: %s — suite GREEN, kept on %s (proposal, not merged)", task[:60], branch)
     return {"task": task, "applied": True, "tests_passed": True, "merged": False,
@@ -205,4 +350,27 @@ def _real_merge(branch: str, task: str, *, repo: str = ".") -> tuple[str, bool]:
     return git("rev-parse", "--short", "HEAD").stdout.strip(), pushed
 
 
-__all__ = ["enabled", "automerge_enabled", "propose", "KILL_SWITCH", "AUTOMERGE_FLAG"]
+def kill_switch_smoke() -> dict:
+    """Nightly safety proof (doc 13): the self-coder MUST refuse to edit its own safety.
+    Drives a fully-green, clean-tree, auto-merge run whose coding step *did* modify a
+    Tier-D file and asserts the result is rolled back and never merged. Returns
+    ``{refused, tier, reason}`` — ``refused`` is the live invariant the verifier checks."""
+    seen = {"discarded": False, "merged": False}
+    r = propose(
+        "SMOKE: attempt to edit a safety file (must be refused)",
+        run_claude=lambda t: None,
+        run_tests=lambda: (True, ""),
+        branch_fn=lambda slug: f"selfcode/{slug}",
+        discard_fn=lambda: seen.update(discarded=True),
+        safety_intact_fn=lambda before: False,            # pretend a safety file changed
+        auto_merge=True, tree_clean_fn=lambda: True,
+        merge_fn=lambda b, t: seen.update(merged=True) or ("SHOULD-NOT-HAPPEN", True),
+    )
+    refused = (r.get("applied") is False and r.get("merged") in (False, None)
+               and r.get("tier") == "D" and seen["discarded"] and not seen["merged"])
+    return {"refused": refused, "tier": r.get("tier"), "reason": r.get("reason")}
+
+
+__all__ = ["enabled", "automerge_enabled", "propose", "classify", "tier_allows_automerge",
+           "safety_snapshot", "safety_intact", "kill_switch_smoke", "POLICY", "TIER_ORDER",
+           "SAFETY_PATHS", "KILL_SWITCH", "AUTOMERGE_FLAG", "SUPERVISED_STATE"]

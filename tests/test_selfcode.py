@@ -72,7 +72,8 @@ def test_claude_crash_is_documented_and_discarded(monkeypatch, tmp_path):
 
 
 def test_auto_merge_on_green_merges_and_pushes(monkeypatch, tmp_path):
-    # With auto_merge=True, a green proposal goes through merge_fn (to main + push).
+    # With auto_merge=True, a green Tier-A change with enough supervised runs behind it
+    # goes through merge_fn (to main + push). (Tier + supervised gate per doc 13.)
     failures.set_store(FakeFailureStore())
     monkeypatch.setattr(selfcode, "KILL_SWITCH", tmp_path / "nope")
     calls, bf, df = _vcs()
@@ -82,9 +83,12 @@ def test_auto_merge_on_green_merges_and_pushes(monkeypatch, tmp_path):
         return "abc1234", True
     r = selfcode.propose("add a helper", run_claude=lambda t: None,
                          run_tests=lambda: (True, ""), branch_fn=bf, discard_fn=df,
-                         merge_fn=merge_fn, auto_merge=True, tree_clean_fn=lambda: True)
+                         merge_fn=merge_fn, auto_merge=True, tree_clean_fn=lambda: True,
+                         changed_files_fn=lambda: ["utah/knowledge/douglas.py"],  # Tier A
+                         supervised_fn=lambda: selfcode.POLICY["A"]["min_supervised"])
     assert r["applied"] is True and r["merged"] is True
     assert r["commit"] == "abc1234" and r["pushed"] is True
+    assert r["tier"] == "A"
     assert merged["branch"] == calls["branch"]           # merged the proposal's own branch
 
 

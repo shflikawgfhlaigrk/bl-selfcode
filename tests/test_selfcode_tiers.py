@@ -1,0 +1,143 @@
+"""Doc-13 tiered self-coding (policy-as-data A/B/C/D) + byte-checked off-limits +
+kill-switch smoke.
+
+The tier of a change is the *strictest* tier among the files it touches, and the
+tier sets the autonomy ceiling:
+
+* **D — off-limits** (the self-coder, auth, flock/hard-exit, governor, config, the
+  no-fabrication brain). A run that edits one is rolled back + documented, even on
+  a GREEN suite. Enforced by a byte-check snapshot around the coding run.
+* **C — 5-rung** (the daemon spine, schema migrations) — never auto-merges.
+* **B — batch-review** (revenue capabilities, memory, storage) — never auto-merges.
+* **A — autonomous** (leaf capabilities, docs, helpers) — auto-merges on green only
+  after N supervised green proposals.
+
+Boundaries are injected so the policy is proven without spawning git/claude/pytest.
+"""
+from __future__ import annotations
+
+from utah import failures, selfcode
+from tests.fakes import FakeFailureStore
+
+
+def _vcs():
+    calls = {"branch": None, "discarded": False}
+
+    def branch_fn(slug):
+        calls["branch"] = f"selfcode/{slug}"
+        return calls["branch"]
+
+    def discard_fn():
+        calls["discarded"] = True
+
+    return calls, branch_fn, discard_fn
+
+
+# --- classification (pure policy-as-data) -----------------------------------
+
+def test_classify_safety_file_is_tier_D():
+    assert selfcode.classify(["utah/config.py"]) == "D"
+    assert selfcode.classify(["utah/brain.py"]) == "D"
+    assert selfcode.classify(["utah/selfcode.py"]) == "D"
+    assert selfcode.classify(["utah/daemon/peercred.py"]) == "D"
+
+
+def test_classify_spine_is_tier_C():
+    assert selfcode.classify(["utah/daemon/server.py"]) == "C"
+    assert selfcode.classify(["migrations/003_thing.sql"]) == "C"
+
+
+def test_classify_product_and_memory_is_tier_B():
+    assert selfcode.classify(["utah/product/leads.py"]) == "B"
+    assert selfcode.classify(["utah/memory.py"]) == "B"
+
+
+def test_classify_leaf_is_tier_A():
+    assert selfcode.classify(["utah/knowledge/douglas.py"]) == "A"
+    assert selfcode.classify([]) == "A"
+
+
+def test_classify_returns_strictest_across_files():
+    assert selfcode.classify(["utah/knowledge/douglas.py", "utah/config.py"]) == "D"
+    assert selfcode.classify(["utah/product/leads.py", "utah/daemon/server.py"]) == "C"
+
+
+def test_tier_A_autonomy_needs_N_supervised():
+    n = selfcode.POLICY["A"]["min_supervised"]
+    assert selfcode.tier_allows_automerge("A", n) is True
+    assert selfcode.tier_allows_automerge("A", n - 1) is False
+
+
+def test_tiers_B_C_D_never_automerge():
+    assert selfcode.tier_allows_automerge("B", 999) is False
+    assert selfcode.tier_allows_automerge("C", 999) is False
+    assert selfcode.tier_allows_automerge("D", 999) is False
+
+
+# --- off-limits byte-check (Tier-D enforcement) -----------------------------
+
+def test_offlimits_safety_edit_is_refused_and_documented(monkeypatch, tmp_path):
+    # A run that modifies a safety file is rolled back + documented, even GREEN.
+    store = FakeFailureStore(); failures.set_store(store)
+    monkeypatch.setattr(selfcode, "KILL_SWITCH", tmp_path / "nope")
+    calls, bf, df = _vcs()
+    r = selfcode.propose("sneak an edit into config", run_claude=lambda t: None,
+                         run_tests=lambda: (True, ""), branch_fn=bf, discard_fn=df,
+                         safety_intact_fn=lambda before: False)  # a safety file changed
+    assert r["applied"] is False and r.get("merged") in (False, None)
+    assert r["tier"] == "D"
+    assert calls["discarded"] is True
+    assert any("off_limits" in row[2] for row in store.rows)
+
+
+def test_kill_switch_smoke_refuses_self_edit_to_safety(monkeypatch, tmp_path):
+    monkeypatch.setattr(selfcode, "KILL_SWITCH", tmp_path / "nope")
+    failures.set_store(FakeFailureStore())
+    result = selfcode.kill_switch_smoke()
+    assert result["refused"] is True and result["tier"] == "D"
+
+
+# --- tier-gated merge -------------------------------------------------------
+
+def test_tier_A_with_enough_supervised_auto_merges(monkeypatch, tmp_path):
+    failures.set_store(FakeFailureStore())
+    monkeypatch.setattr(selfcode, "KILL_SWITCH", tmp_path / "nope")
+    calls, bf, df = _vcs()
+    r = selfcode.propose("tweak a leaf helper", run_claude=lambda t: None,
+                         run_tests=lambda: (True, ""), branch_fn=bf, discard_fn=df,
+                         auto_merge=True, tree_clean_fn=lambda: True,
+                         changed_files_fn=lambda: ["utah/knowledge/douglas.py"],
+                         supervised_fn=lambda: selfcode.POLICY["A"]["min_supervised"],
+                         merge_fn=lambda b, t: ("sha999", True))
+    assert r["tier"] == "A" and r["merged"] is True and r["commit"] == "sha999"
+
+
+def test_tier_B_change_stays_proposal_even_with_automerge(monkeypatch, tmp_path):
+    failures.set_store(FakeFailureStore())
+    monkeypatch.setattr(selfcode, "KILL_SWITCH", tmp_path / "nope")
+    calls, bf, df = _vcs()
+    merge_called = []
+    r = selfcode.propose("touch a revenue capability", run_claude=lambda t: None,
+                         run_tests=lambda: (True, ""), branch_fn=bf, discard_fn=df,
+                         auto_merge=True, tree_clean_fn=lambda: True,
+                         changed_files_fn=lambda: ["utah/product/leads.py"],
+                         supervised_fn=lambda: 999, bump_supervised_fn=lambda: None,
+                         merge_fn=lambda b, t: merge_called.append(1) or ("x", True))
+    assert r["tier"] == "B" and r["applied"] is True and r["merged"] is False
+    assert merge_called == []   # batch-review never auto-merges
+
+
+def test_tier_A_insufficient_supervised_stays_proposal_and_counts(monkeypatch, tmp_path):
+    failures.set_store(FakeFailureStore())
+    monkeypatch.setattr(selfcode, "KILL_SWITCH", tmp_path / "nope")
+    calls, bf, df = _vcs()
+    bumped = []
+    r = selfcode.propose("tiny leaf tweak", run_claude=lambda t: None,
+                         run_tests=lambda: (True, ""), branch_fn=bf, discard_fn=df,
+                         auto_merge=True, tree_clean_fn=lambda: True,
+                         changed_files_fn=lambda: ["utah/knowledge/douglas.py"],
+                         supervised_fn=lambda: 0,
+                         bump_supervised_fn=lambda: bumped.append(1),
+                         merge_fn=lambda b, t: ("x", True))
+    assert r["tier"] == "A" and r["merged"] is False and r["applied"] is True
+    assert bumped == [1]   # a supervised green proposal counts toward Tier-A autonomy
