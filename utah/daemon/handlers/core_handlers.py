@@ -243,6 +243,18 @@ async def watchdog_check(ctx: Context, params: object) -> dict:
         return await ctx.pool.run(_watchdog_blocking)
 
 
+def _maintenance_blocking() -> dict:
+    from utah import maintenance
+    return maintenance.run()
+
+
+async def maintenance_run(ctx: Context, params: object) -> dict:
+    """Capability (not an agent): consolidate turns->facts + decay/archive faded memory.
+    Brain/consolidate failures documented to the AUDIT log."""
+    with ctx.governor.admission():
+        return await ctx.pool.run(_maintenance_blocking)
+
+
 def _busy(seconds: float) -> float:
     t = time.perf_counter()
     time.sleep(seconds)  # a real blocking unit of work, off the loop
@@ -279,6 +291,7 @@ REGISTRY = {
     "research": research,
     "morning_brief": morning_brief,
     "watchdog_check": watchdog_check,
+    "maintenance_run": maintenance_run,
     "publish": publish,
     "shutdown": shutdown,
 }
