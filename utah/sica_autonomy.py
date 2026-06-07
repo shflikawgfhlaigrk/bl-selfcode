@@ -32,6 +32,8 @@ log = logging.getLogger("utah.sica_autonomy")
 
 #: Isolated clone the autonomous loop edits/merges/pushes — NEVER the live dev tree.
 REPO_DIR = Path(os.environ.get("UTAH_SELFCODE_REPO", str(Path.home() / ".utah" / "selfcode-repo")))
+#: The real Utah repo autonomous improvements propagate INTO (the ProjectUtah root).
+LIVE_REPO = Path(os.environ.get("UTAH_LIVE_REPO", str(Path(__file__).resolve().parents[1])))
 CYCLE_LOG = runtime.RUN_DIR / "selfcode-cycle.log"
 
 #: Fallback when the archive is empty / the brain returns nothing — deliberately
@@ -49,6 +51,37 @@ def _brain_answer(prompt: str, timeout: int = 60) -> str:
     except Exception as exc:  # noqa: BLE001
         log.warning("meta brain call failed: %s", exc)
         return ""
+
+
+def propagate(live=None, clone=None) -> dict:
+    """Flow autonomous improvements OUT of the sandbox clone INTO the real Utah:
+    fast-forward the live repo's main to include the clone's autonomous commits.
+
+    SAFE BY CONSTRUCTION: (1) refuses if the live working tree is DIRTY — never
+    clobbers uncommitted dev work; (2) ff-ONLY — never a force/merge-commit, so it
+    only applies when live's main is a strict ancestor of the clone's (no
+    divergence). On a skip the autonomous commits stay in the clone (preserved by
+    sync_repo) and propagate on a later clean cycle. Never raises."""
+    live = Path(live) if live else LIVE_REPO
+    clone = Path(clone) if clone else REPO_DIR
+
+    def g(repo, *a):
+        return subprocess.run(["git", "-C", str(repo), *a], capture_output=True, text=True)
+
+    if not (live / ".git").exists() or not (clone / ".git").exists():
+        return {"propagated": False, "reason": "live or clone repo missing"}
+    if g(live, "status", "--porcelain").stdout.strip():
+        return {"propagated": False, "reason": "live tree dirty — skipped (safe; will retry when clean)"}
+    g(live, "fetch", str(clone), "main")
+    before = g(live, "rev-parse", "HEAD").stdout.strip()
+    res = g(live, "merge", "--ff-only", "FETCH_HEAD")
+    after = g(live, "rev-parse", "HEAD").stdout.strip()
+    if res.returncode != 0:
+        return {"propagated": False, "reason": f"not a fast-forward: {res.stderr.strip()[:120]}"}
+    if before == after:
+        return {"propagated": False, "reason": "already up to date"}
+    log.info("propagated autonomous work to live main: %s -> %s", before[:8], after[:8])
+    return {"propagated": True, "from": before[:8], "to": after[:8]}
 
 
 def sync_repo(repo: Path) -> bool:
@@ -79,7 +112,8 @@ def sync_repo(repo: Path) -> bool:
     return True
 
 
-def run_cycle(*, repo=None, brain_fn=None, propose_fn=None, sync_fn=None, task_fn=None) -> dict:
+def run_cycle(*, repo=None, brain_fn=None, propose_fn=None, sync_fn=None, task_fn=None,
+              propagate_fn=None) -> dict:
     """One autonomous improvement cycle. Boundaries injected for unit-proof.
 
     The task is chosen by the domain-rotating goal source (sica_goals): each cycle
@@ -108,8 +142,11 @@ def run_cycle(*, repo=None, brain_fn=None, propose_fn=None, sync_fn=None, task_f
     res = loop.run([task])
     out = {"ran": True, "domain": domain, "task": task, "steps": res.steps,
            "attempts": res.attempts, "best_after": res.best_after}
+    if any(a.get("merged") for a in res.attempts):
+        out["propagation"] = (propagate_fn or propagate)(clone=repo)
     _log_cycle(out)
-    log.info("sica cycle: domain=%s task=%r steps=%d", domain, task[:60], res.steps)
+    log.info("sica cycle: domain=%s task=%r steps=%d propagation=%s",
+             domain, task[:60], res.steps, out.get("propagation"))
     return out
 
 
