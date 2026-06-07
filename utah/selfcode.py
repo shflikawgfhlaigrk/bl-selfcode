@@ -213,8 +213,12 @@ def propose(task: str, *, run_claude=None, run_tests=None, branch_fn=None,
 
     run_claude = run_claude or (lambda t: _real_claude(t, cwd=repo or "."))
     run_tests = run_tests or (lambda: _real_tests(cwd=repo or "."))
-    branch_fn = branch_fn or _real_branch
-    discard_fn = discard_fn or _real_discard
+    # Thread `repo` into the branch/discard defaults too — otherwise _real_branch /
+    # _real_discard default to cwd="." and operate on the PROCESS's tree, not `repo`
+    # (a real footgun caught live: propose(repo=worktree) `git checkout -B`'d the
+    # LIVE tree). With this, an isolated-repo run touches ONLY that repo.
+    branch_fn = branch_fn or (lambda slug: _real_branch(slug, repo=repo or "."))
+    discard_fn = discard_fn or (lambda: _real_discard(repo=repo or "."))
 
     # Byte-check before-image of the off-limits (Tier-D) files. Captured around the run
     # so it is robust to an already-dirty tree (unlike a diff-vs-HEAD).

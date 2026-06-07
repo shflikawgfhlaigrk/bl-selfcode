@@ -141,3 +141,31 @@ def test_tier_A_insufficient_supervised_stays_proposal_and_counts(monkeypatch, t
                          merge_fn=lambda b, t: ("x", True))
     assert r["tier"] == "A" and r["merged"] is False and r["applied"] is True
     assert bumped == [1]   # a supervised green proposal counts toward Tier-A autonomy
+
+
+def test_propose_threads_repo_into_branch_and_discard(monkeypatch, tmp_path):
+    """Repo isolation: propose(repo=X) must branch/discard in X, not the process
+    cwd (regression for the live-tree checkout bug caught by the SICA proof)."""
+    failures.set_store(FakeFailureStore())
+    monkeypatch.setattr(selfcode, "KILL_SWITCH", tmp_path / "nope")
+    seen: dict[str, str] = {}
+
+    def fake_branch(slug, *, repo="."):
+        seen["branch_repo"] = repo
+        return f"selfcode/{slug}"
+
+    def fake_discard(*, repo="."):
+        seen["discard_repo"] = repo
+
+    monkeypatch.setattr(selfcode, "_real_branch", fake_branch)
+    monkeypatch.setattr(selfcode, "_real_discard", fake_discard)
+
+    # green run → branch uses repo, no discard
+    selfcode.propose("x", run_claude=lambda t: None, run_tests=lambda: (True, "1 passed"),
+                     repo="/tmp/wtA", safety_intact_fn=lambda b: True, auto_merge=False)
+    assert seen["branch_repo"] == "/tmp/wtA"
+
+    # red run → discard uses repo (rollback in the isolated repo, not cwd)
+    selfcode.propose("y", run_claude=lambda t: None, run_tests=lambda: (False, "1 failed"),
+                     repo="/tmp/wtB", safety_intact_fn=lambda b: True, auto_merge=False)
+    assert seen["discard_repo"] == "/tmp/wtB"
