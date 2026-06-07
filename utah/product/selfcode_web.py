@@ -117,12 +117,15 @@ def _git_count(repo: Path, grep: str) -> int:
     """Count commits in *repo* whose subject matches *grep* (the autonomous-merge
     provenance). git -C + a safe cwd so a TCC-protected process cwd can't abort it."""
     try:
+        # SUBJECT-only: --grep matches the whole message (body too), so a human feature
+        # commit that merely mentions the pattern got miscounted as an autonomous merge.
+        # Count commits whose SUBJECT line starts with the provenance prefix.
         out = subprocess.run(
-            ["git", "-C", str(repo), "log", "--oneline", f"--grep={grep}"],
+            ["git", "-C", str(repo), "log", "--pretty=%s"],
             capture_output=True, text=True, cwd=_SAFE_CWD, timeout=15)
         if out.returncode != 0:
             return 0
-        return sum(1 for ln in out.stdout.splitlines() if ln.strip())
+        return sum(1 for ln in out.stdout.splitlines() if ln.strip().startswith(grep))
     except Exception as exc:  # noqa: BLE001
         log.warning("git count failed (%s): %s", repo, exc)
         return 0
