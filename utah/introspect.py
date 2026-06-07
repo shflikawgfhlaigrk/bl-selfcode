@@ -17,20 +17,23 @@ CAPABILITIES = (
 )
 
 
+_UNSET = object()  # distinguishes "not passed" (fetch live) from "explicitly None/empty"
+
+
 def capabilities() -> tuple[str, ...]:
     return CAPABILITIES
 
 
-def self_model(*, status=None, memory_counts=None) -> dict:
+def self_model(*, status=_UNSET, memory_counts=_UNSET) -> dict:
     """Utah's self-model from live state: identity, capability set, memory, health.
     ``status``/``memory_counts`` injectable; default to the live daemon + memory."""
-    if status is None:
+    if status is _UNSET:
         from utah.daemon import client as ctl
         try:
             status = ctl.call_sync("status", timeout=5.0)
         except Exception:  # noqa: BLE001
             status = None
-    if memory_counts is None:
+    if memory_counts is _UNSET:
         try:
             from utah import memory
             memory_counts = memory.get_backend().live_counts()
