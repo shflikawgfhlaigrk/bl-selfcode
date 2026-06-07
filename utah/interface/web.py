@@ -104,7 +104,14 @@ async def api_tell(request):
     if not text:
         return JSONResponse({"error": "empty text"}, status_code=400)
     try:
-        return JSONResponse(await ctl.call("tell", {"text": text}, timeout=180.0))
+        result = await ctl.call("tell", {"text": text}, timeout=180.0)
+        # Path-B parity: the non-streaming reply must SPEAK the answer too (the
+        # streaming /api/tell/stream path does — without this, a chat turn over
+        # /api/tell came back silent). Detached so the JSON returns at once.
+        answer = (result.get("text") or "").strip() if isinstance(result, dict) else ""
+        if answer:
+            threading.Thread(target=_speak_answer, args=(answer,), daemon=True).start()
+        return JSONResponse(result)
     except Exception as exc:
         return JSONResponse({"error": str(exc)}, status_code=503)
 
