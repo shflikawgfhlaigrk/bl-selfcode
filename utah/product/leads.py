@@ -219,6 +219,20 @@ def scout_frontier(ledger, bbox=METRO_BBOX, region="Atlanta Metro Ring",
     return {"tiles_scanned": len(tiles), "found": found, "new": new, "region": region}
 
 
+def run_scheduled(region: str = "Atlanta Metro Ring", max_tiles: int = 12,
+                  ledger=None, fetch: Fetch | None = None) -> dict:
+    """Entry point for the ``com.utah.leads`` cron: scout the metro frontier into the
+    LIVE product ledger (never-twice dedup keeps re-runs honest). Real OSM businesses
+    only — never fabricated. ``ledger``/``fetch`` are injectable so the cron path is
+    unit-tested offline. Returns ``{tiles_scanned, found, new, region}``."""
+    if ledger is None:
+        from utah.product.ledger import Ledger
+        ledger = Ledger()
+    res = scout_frontier(ledger, region=region, max_tiles=max_tiles, fetch=fetch)
+    log.info("leads cron: %s", res)
+    return res
+
+
 __all__ = ["is_national_chain", "build_query", "find_no_website_smbs", "scout",
-           "scout_frontier", "frontier_tiles", "COWETA_BBOX", "METRO_BBOX", "TILE_STEP",
-           "NATIONAL_CHAINS"]
+           "scout_frontier", "frontier_tiles", "run_scheduled", "COWETA_BBOX",
+           "METRO_BBOX", "TILE_STEP", "NATIONAL_CHAINS"]

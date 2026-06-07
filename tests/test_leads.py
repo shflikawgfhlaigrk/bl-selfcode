@@ -104,3 +104,14 @@ def test_scout_frontier_iterates_tiles_and_dedupes():
     assert r["found"] >= 3          # 1 + 2 across tiles
     assert r["new"] == 2            # Joe deduped on the second tile
     assert r["region"] == "Test Metro"
+
+
+def test_run_scheduled_cron_entry_writes_ledger_dedup():
+    # The com.utah.leads cron path: injected ledger + fetch, never the network.
+    import json as _json
+    lg = _RecLedger()
+    sample = _json.dumps({"elements": [{"tags": {"name": "Maple Diner", "amenity": "restaurant"}}]})
+    r = leads.run_scheduled(region="Test Metro", max_tiles=2, ledger=lg, fetch=lambda q: sample)
+    assert r["region"] == "Test Metro" and r["tiles_scanned"] == 2
+    assert r["new"] == 1          # same business across both tiles → never-twice = 1 new
+    assert lg.calls and lg.calls[0][0] == "Maple Diner"
