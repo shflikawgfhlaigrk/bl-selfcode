@@ -742,6 +742,23 @@ def store(
     )
 
 
+def _touch_off_path(ids: list[int]) -> None:
+    """Bump frequency/recency for the recalled rows OFF the read hot path. touch() is a
+    serialized WRITE under the store's connection RLock; inline it made every recall pay
+    a write and block concurrent reads (a measured cold-path cost). Fire it on a daemon
+    thread so recall returns immediately — the signal is best-effort, never blocks a read."""
+    if not ids:
+        return
+
+    def _run() -> None:
+        try:
+            get_backend().touch(ids)
+        except Exception as exc:  # noqa: BLE001 — best-effort signal, never fatal
+            log.warning("recall touch failed (non-fatal): %s", exc)
+
+    threading.Thread(target=_run, daemon=True).start()
+
+
 def recall(query: str, k: int = config.RECALL_K) -> list[Hit]:
     """Hybrid recall: dense + sparse -> RRF(k=60) -> rerank -> entity boost.
 
@@ -803,10 +820,7 @@ def recall(query: str, k: int = config.RECALL_K) -> list[Hit]:
     )
     top = ranked[:k]
 
-    try:
-        backend.touch([i for i, _ in top])  # frequency/recency signal
-    except MemoryUnavailable as exc:
-        log.warning("recall touch failed (non-fatal): %s", exc)
+    _touch_off_path([i for i, _ in top])  # frequency/recency WRITE — never on the read path
 
     return [
         Hit(

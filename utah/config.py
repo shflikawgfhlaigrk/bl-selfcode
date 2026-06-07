@@ -213,7 +213,7 @@ CURATED_LANE_K: int = 5
 #: it only tips the LOW-confidence regime (vague query, nothing scores well) toward
 #: curated wisdom over low-value migrated facts. It shifts rerank ORDER only, never a
 #: hit's ``sim``, so the no-fabrication answer gate (which reads sim) is unaffected.
-SOURCE_BOOST: dict[str, float] = {"core": 1.5, "knowledge": 1.0}
+SOURCE_BOOST: dict[str, float] = {"core": 1.5, "knowledge": 1.0, "code": 0.5}
 
 # --- no-fabrication answer gate ----------------------------------------------
 #: Answer straight from memory ONLY when BOTH hold; otherwise fall to the brain
