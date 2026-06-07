@@ -47,6 +47,20 @@ METRO_BBOX = (33.0, -85.1, 34.1, -84.0)
 FRONTIER_BBOX = (30.8, -85.7, 35.0, -81.0)
 TILE_STEP = 0.25  # degrees; each tile small enough to not time out Overpass
 
+#: Multi-region rotation so 500/day is SUSTAINABLE, not a one-pass that silently
+#: exhausts. The production cron (bbox=None) walks a single int cursor across the
+#: CONCATENATED tiles of every region below — ~2,000 tiles spanning the Southeast —
+#: so the frontier keeps finding FRESH geography for years before any wrap. Each
+#: region keeps its own per-tile dedup bucket. Widen / append regions for more supply.
+FRONTIER_REGIONS: list[tuple[str, tuple[float, float, float, float]]] = [
+    ("Georgia Frontier", (30.8, -85.7, 35.0, -81.0)),
+    ("Alabama Frontier", (30.2, -88.5, 35.0, -85.0)),
+    ("South Carolina Frontier", (32.0, -83.4, 35.2, -78.5)),
+    ("Tennessee Frontier", (35.0, -90.3, 36.7, -81.6)),
+    ("North Carolina Frontier", (33.8, -84.3, 36.6, -75.5)),
+    ("Florida North Frontier", (29.2, -87.6, 31.0, -81.4)),
+]
+
 #: Daily floor + per-run safety cap on tiles. The cap is generous so even a sparse
 #: rural sweep (~7 new/tile) can still clear the 500 floor (~72 tiles); dense metro
 #: sweeps hit it in <10 tiles and stop early.
@@ -313,45 +327,62 @@ def _tile_region(base: str, tile: tuple[float, float, float, float]) -> str:
     return f"{base} [{s:.2f},{w:.2f}]"
 
 
+def _all_frontier_tiles() -> list[tuple[str, tuple[float, float, float, float]]]:
+    """Every tile of every FRONTIER_REGIONS region, each tagged with its region name.
+    The production cursor is a single int into THIS combined list, so advancing rotates
+    naturally through GA → AL → SC → TN → NC → FL → (wrap) — thousands of fresh tiles."""
+    out: list[tuple[str, tuple[float, float, float, float]]] = []
+    for name, box in FRONTIER_REGIONS:
+        out.extend((name, t) for t in frontier_tiles(box))
+    return out
+
+
 def run_scheduled(region: str = "Georgia Frontier", target: int = DAILY_TARGET,
-                  bbox=FRONTIER_BBOX, max_tiles: int = MAX_TILES_PER_RUN,
+                  bbox=None, max_tiles: int = MAX_TILES_PER_RUN,
                   ledger=None, fetch: Fetch | None = None,
                   cursor_load=None, cursor_save=None) -> dict:
-    """``com.utah.leads`` cron entry — MOVING FRONTIER, ≥``target`` new/day.
+    """``com.utah.leads`` cron entry — MOVING, SELF-REPLENISHING FRONTIER, ≥``target`` new/day.
 
-    Advance a persistent cursor through FRESH tiles of a large region, scouting until
-    ``target`` NEW leads are recorded (or the per-run tile cap is hit). Persists the
-    cursor so each daily run continues into unscanned geography → sustained volume,
-    not a re-scan of exhausted tiles. A tile that fails all Overpass mirrors is
-    skipped (logged), so one bad tile never aborts the run. Real OSM only — never
-    fabricated. Returns ``{tiles_scanned, found, new, target, met, region, cursor}``."""
+    With ``bbox=None`` (the production default) a single persistent int cursor walks the
+    CONCATENATED tiles of every FRONTIER_REGIONS region (~2,000 tiles across the Southeast),
+    so each daily run continues into FRESH, unscanned geography and rotates region-to-region
+    automatically — 500/day is sustainable for years, not a one-pass that silently dries up.
+    Pass an explicit ``bbox`` for a single-region scan (tests/manual). A tile that fails all
+    Overpass mirrors is skipped (logged) so one bad tile never aborts the run. Real OSM only,
+    never fabricated. Returns ``{tiles_scanned, found, new, target, met, region, cursor}``."""
     if ledger is None:
         from utah.product.ledger import Ledger
         ledger = Ledger()
     load = cursor_load or _load_cursor
     save = cursor_save or _save_cursor
 
-    tiles = frontier_tiles(bbox)
-    if not tiles:
+    # tagged = [(region_name, tile), ...] — combined regions (production) or one (explicit bbox)
+    if bbox is None:
+        tagged = _all_frontier_tiles()
+    else:
+        tagged = [(region, t) for t in frontier_tiles(bbox)]
+    if not tagged:
         return {"tiles_scanned": 0, "found": 0, "new": 0, "target": target,
                 "met": False, "region": region, "cursor": 0}
-    start = load() % len(tiles)
+    start = load() % len(tagged)
     i = start
     found = new = scanned = 0
-    while new < target and scanned < max_tiles and scanned < len(tiles):
-        tile = tiles[i % len(tiles)]
+    hit: set[str] = set()
+    while new < target and scanned < max_tiles and scanned < len(tagged):
+        rname, tile = tagged[i % len(tagged)]
         try:
-            res = scout(ledger, bbox=tile, region=_tile_region(region, tile), fetch=fetch)
+            res = scout(ledger, bbox=tile, region=_tile_region(rname, tile), fetch=fetch)
             found += res["found"]
             new += res["new"]
+            hit.add(rname)
         except Exception as exc:  # noqa: BLE001 — a bad tile must not abort the run
             log.warning("leads tile %s failed, skipping: %s", tile, exc)
         scanned += 1
-        i = (i + 1) % len(tiles)
+        i = (i + 1) % len(tagged)
     save(i)
     out = {"tiles_scanned": scanned, "found": found, "new": new, "target": target,
-           "met": new >= target, "region": region, "cursor": i}
-    log.info("leads cron (moving frontier): %s", out)
+           "met": new >= target, "region": "+".join(sorted(hit)) or region, "cursor": i}
+    log.info("leads cron (self-replenishing frontier): %s", out)
     return out
 
 
