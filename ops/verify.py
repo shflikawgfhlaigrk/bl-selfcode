@@ -85,8 +85,13 @@ def run_suite() -> tuple[int, float, list[str]]:
     env = dict(os.environ, UTAH_TEST_DSN=TEST_DSN)
     start = time.time()
     try:
+        # iCloud Desktop spawns "<name> 2.py"/".orig"/".bak" conflict copies that
+        # pytest would collect as stale duplicate modules and fail on. They are never
+        # source — ignore them so the gate reflects the real tree, not iCloud noise.
         proc = subprocess.run(
-            [PY, "-m", "pytest", "-p", "no:cacheprovider", "-q", "--tb=line", "-rf"],
+            [PY, "-m", "pytest", "-p", "no:cacheprovider", "-q", "--tb=line", "-rf",
+             "--ignore-glob=* 2.py", "--ignore-glob=* 2", "--ignore-glob=*.orig",
+             "--ignore-glob=*.bak", "--ignore-glob=*.bak-*"],
             cwd=str(ROOT), env=env, stdin=subprocess.DEVNULL,
             capture_output=True, text=True, timeout=SUITE_TIMEOUT,
         )

@@ -15,3 +15,12 @@ venv/
 
 # build artifacts (Flutter/Xcode regenerate these)
 /build/
+
+# iCloud Desktop conflict copies (Finder/iCloud spawn these; never source)
+* 2.py
+* 2.html
+* 2.plist
+* 2
+*.orig
+*.bak
+*.bak-*
