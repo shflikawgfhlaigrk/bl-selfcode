@@ -19,11 +19,16 @@ def test_utility_zero_score_keeps_efficiency_terms():
 
 
 def test_utility_max_cost_and_time_zero_efficiency():
-    assert sica.utility(1.0, 10.0, 300.0, False) == 0.5  # .5 + 0 + 0
+    # Inputs derived from the actual limits (which are env-overridable via
+    # UTAH_SELFCODE_TIME_LIMIT/COST_LIMIT — the launchd job raises them) so the
+    # invariant "cost==limit & time==limit -> zero efficiency terms" holds in ANY
+    # env, not just the 300s/$10 default. Hardcoding 300.0 here made the suite go
+    # RED under the launchd gate (env=900) and silently blocked every auto-merge.
+    assert sica.utility(1.0, sica.COST_LIMIT_USD, sica.TIME_LIMIT_S, False) == 0.5  # .5 + 0 + 0
 
 
 def test_utility_half_cost_half_time():
-    assert sica.utility(1.0, 5.0, 150.0, False) == 0.75  # .5 + .125 + .125
+    assert sica.utility(1.0, sica.COST_LIMIT_USD / 2, sica.TIME_LIMIT_S / 2, False) == 0.75  # .5 + .125 + .125
 
 
 def test_utility_clamps_overflow():
