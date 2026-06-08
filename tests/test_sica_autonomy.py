@@ -56,6 +56,26 @@ def test_cycle_aborts_if_repo_not_ready(monkeypatch, tmp_path):
     assert r["ran"] is False and "not ready" in r["reason"]
 
 
+def test_cycle_defers_under_high_load(monkeypatch, tmp_path):
+    """Self-coding is the heaviest thing Ace runs — under a load storm it must DEFER (skip
+    + retry), never spawn a claude run that hangs to the 900s timeout and flaps Postgres."""
+    monkeypatch.setattr(selfcode, "KILL_SWITCH", tmp_path / "nope")
+    r = sica_autonomy.run_cycle(repo=tmp_path, brain_fn=lambda p: "x",
+                                foundation_gate=lambda cap: None,   # substrate green
+                                load_fn=lambda: 5.0)                # load storm
+    assert r["ran"] is False and "load" in r["reason"] and "defer" in r["reason"].lower()
+
+
+def test_cycle_proceeds_past_load_gate_when_calm(monkeypatch, tmp_path):
+    """Normal load passes the load gate (it then short-circuits at sync) — proves the gate
+    is a defer-under-storm, not a wall."""
+    monkeypatch.setattr(selfcode, "KILL_SWITCH", tmp_path / "nope")
+    r = sica_autonomy.run_cycle(repo=tmp_path / "missing", brain_fn=lambda p: "x",
+                                foundation_gate=lambda cap: None, load_fn=lambda: 0.3,
+                                sync_fn=lambda repo: False)
+    assert r["ran"] is False and "not ready" in r["reason"]   # passed load gate, failed at sync
+
+
 def test_cycle_runs_meta_task_through_governed(monkeypatch, tmp_path):
     monkeypatch.setattr(selfcode, "KILL_SWITCH", tmp_path / "nope")
     # archive so the meta-agent has context; capture what the governed proposer got

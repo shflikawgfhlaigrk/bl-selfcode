@@ -159,8 +159,21 @@ def sync_repo(repo: Path) -> bool:
     return True
 
 
+#: Defer a self-code cycle when the machine is already loaded. A `claude` coding run is by
+#: far the heaviest thing Ace spawns; launching it into a load storm (often one a previous
+#: selfcode caused) is exactly what produced the live 900s claude timeouts and the correlated
+#: Postgres flaps. Skip and retry next interval rather than burn a 15-minute run that can't
+#: make progress — so self-coding stays RELIABLE, the precondition for "Ace fixes himself".
+SELFCODE_MAX_LOAD_PER_CORE = float(os.environ.get("UTAH_SELFCODE_MAX_LOAD", "2.0"))
+
+
+def _load_per_core() -> float:
+    return os.getloadavg()[0] / (os.cpu_count() or 1)
+
+
 def run_cycle(*, repo=None, brain_fn=None, propose_fn=None, sync_fn=None, task_fn=None,
-              propagate_fn=None, verify_fn=None, foundation_gate=None, discover_fn=None) -> dict:
+              propagate_fn=None, verify_fn=None, foundation_gate=None, discover_fn=None,
+              load_fn=None) -> dict:
     """One autonomous improvement cycle. Boundaries injected for unit-proof.
 
     The task is chosen by the domain-rotating goal source (sica_goals): each cycle
@@ -175,6 +188,10 @@ def run_cycle(*, repo=None, brain_fn=None, propose_fn=None, sync_fn=None, task_f
     skip = gate("selfcode")
     if skip:
         return skip
+    lpc = (load_fn or _load_per_core)()
+    if lpc > SELFCODE_MAX_LOAD_PER_CORE:
+        return {"ran": False, "reason": f"load {lpc:.2f}/core > {SELFCODE_MAX_LOAD_PER_CORE:.1f} "
+                                        f"— deferring self-code (avoid claude timeout/PG flap)"}
     repo = Path(repo) if repo else REPO_DIR
     if not (sync_fn or sync_repo)(repo):
         return {"ran": False, "reason": f"dedicated repo not ready: {repo} "
