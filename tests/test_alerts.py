@@ -84,14 +84,20 @@ def test_trade_fire_message_has_engine_direction_entry():
     assert "BREAKOUT" in msg and "LONG" in msg and "4321.5" in msg and "#7" in msg
 
 
-def test_brief_carries_deck_tailnet_link():
+def test_brief_carries_deck_tailnet_link(monkeypatch):
+    # brief is priority 0 → quiet-hours gated; pin the clock to noon so the test
+    # is deterministic regardless of when the suite/verify-gate runs (was flaky-RED at night).
+    monkeypatch.setattr(alerts, "_now", lambda: datetime(2026, 6, 7, 12, 0, 0))
     s = _capture()
     alerts.brief("UTAH MORNING BRIEF\n164 leads", sender=s)
     assert s.calls[0]["url"] == config.DECK_TAILNET_URL
     assert "164 leads" in s.calls[0]["message"]
 
 
-def test_leads_and_probate_summaries():
+def test_leads_and_probate_summaries(monkeypatch):
+    # leads_probate is priority <1 → quiet-hours gated; pin the clock to noon so the
+    # test is deterministic regardless of run time (was flaky-RED at night).
+    monkeypatch.setattr(alerts, "_now", lambda: datetime(2026, 6, 7, 12, 0, 0))
     s = _capture()
     alerts.leads_probate({"new": 33, "found": 197, "tiles_scanned": 12}, kind="leads", sender=s)
     alerts.leads_probate({"new": 5, "found": 64}, kind="probate", sender=s)

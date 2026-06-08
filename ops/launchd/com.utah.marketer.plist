@@ -42,8 +42,11 @@
   <key>StartInterval</key>
   <integer>86400</integer>
 
+  <!-- RunAtLoad MUST be true: a StartInterval job with RunAtLoad=false fires its first
+       tick one full interval (86400s) AFTER load, and every reload/sleep resets that
+       clock — so the first run was never reached and this job had run 0 times. -->
   <key>RunAtLoad</key>
-  <false/>
+  <true/>
 
   <key>StandardOutPath</key>
   <string>/Users/michaelbarber/.utah/logs/marketer.log</string>
