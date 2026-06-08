@@ -3,12 +3,12 @@
 <!--
   com.utah.brief — morning brief cron (daily 06:35, just after quiet hours end 06:30).
 
-  Runs utah.product.brief.run(push_fn=alerts.brief): composes the brief from LIVE Postgres
-  state (revenue ledger, memory size, newest leads, open failure items) and PUSHES it to
-  Michael's phone via Pushover, carrying a tap-through to the Utah deck over the tailnet.
-  Push is the working delivery path while the Gmail app-password is rejected (mail/send_failed
-  in the AUDIT log) — the brief no longer depends on email. Brief stream is priority 0, so it
-  respects quiet hours; 06:35 is deliberately past the 06:30 window so it lands.
+  Runs utah.product.brief.deliver(): composes the brief from LIVE Postgres state (revenue
+  ledger, memory size, newest leads, open failure items) and delivers it BOTH ways that work:
+  PUSHES it to Michael's phone via Pushover (tap-through to the Utah deck over the tailnet)
+  AND EMAILS it to Michael via Gmail SMTP (recorded in mail_ledger; subject date-stamped so
+  the daily send is never suppressed). Email auto-gates if creds are absent. Brief stream is
+  priority 0, so it respects quiet hours; 06:35 is deliberately past the 06:30 window.
 
   Install:
     cp ops/launchd/com.utah.brief.plist ~/Library/LaunchAgents/
@@ -25,7 +25,7 @@
   <array>
     <string>/Users/michaelbarber/.utah/venv/bin/python</string>
     <string>-c</string>
-    <string>import logging; logging.basicConfig(level=logging.INFO); from utah.product.brief import run; from utah import alerts; print(run(push_fn=alerts.brief))</string>
+    <string>import logging; logging.basicConfig(level=logging.INFO); from utah.product.brief import deliver; print(deliver())</string>
   </array>
 
   <key>WorkingDirectory</key>

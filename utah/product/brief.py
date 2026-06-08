@@ -9,11 +9,28 @@ pure; gather/speak/email are injectable.
 """
 from __future__ import annotations
 
+import datetime
 import logging
+import os
 
 from utah import failures
 
 log = logging.getLogger("utah.product.brief")
+
+
+def _brief_recipient() -> str:
+    """Who the brief is emailed to. Env override wins; otherwise Michael's own Gmail
+    ``from`` address (he emails himself the brief). Empty string -> no email recipient."""
+    env = os.environ.get("UTAH_BRIEF_EMAIL", "").strip()
+    if env:
+        return env
+    try:
+        import json
+
+        from utah import mail
+        return str(json.loads(mail.GMAIL_CREDS.read_text()).get("from", "")).strip()
+    except Exception:  # noqa: BLE001 — no creds / unreadable -> no recipient (gated)
+        return ""
 
 
 def compose_brief(*, ledger_counts: dict, memory_live: int,
@@ -97,4 +114,40 @@ def run(*, gather=gather, speak_fn=None, email_fn=None, can_email=False,
             "email_gated": email_gated, "pushed": pushed}
 
 
-__all__ = ["compose_brief", "gather", "run"]
+def _email_brief(text: str, *, send_fn=None, ledger=None, to=None) -> bool:
+    """Email the brief to Michael and record the send in ``mail_ledger`` (caller-side, the
+    same pattern as outreach). The subject is DATE-STAMPED so the daily brief is never
+    suppressed by the never-twice ``UNIQUE(recipient, subject)`` constraint. Never raises."""
+    from utah import mail
+
+    send = send_fn or mail.send
+    to = to or _brief_recipient()
+    if not to:
+        return False
+    subject = f"Utah morning brief — {datetime.date.today().isoformat()}"
+    res = send(to, subject, text)
+    if res.get("sent"):
+        try:
+            lg = ledger
+            if lg is None:
+                from utah.product.ledger import get_ledger
+                lg = get_ledger()
+            lg.record_mail(to, subject, status="sent", channel="email")
+        except Exception as exc:  # noqa: BLE001 — ledger is observability, never the send
+            log.debug("brief mail_ledger record skipped: %s", exc)
+    return bool(res.get("sent"))
+
+
+def deliver(*, push: bool = True, email: bool = True) -> dict:
+    """The cron entrypoint: compose the brief from live state and deliver it both ways that
+    work now — PUSH to the phone (Pushover) AND EMAIL to Michael (Gmail SMTP, recorded in
+    mail_ledger). Email auto-gates if no creds are present; push is best-effort. Never raises."""
+    from utah import alerts, mail
+
+    push_fn = alerts.brief if push else None
+    can_email = bool(email and mail.creds_available() and _brief_recipient())
+    return run(push_fn=push_fn, can_email=can_email,
+               email_fn=_email_brief if can_email else None)
+
+
+__all__ = ["compose_brief", "gather", "run", "deliver"]
