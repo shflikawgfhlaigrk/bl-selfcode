@@ -14,12 +14,22 @@ these tests exercise the REAL guard end-to-end:
 Each of the six safety-core files (selfcode.py, config.py, brain.py, peercred.py,
 lifecycle.py, governor.py) is covered individually via parametrization, plus a control
 proving the guard discriminates (a non-safety edit is kept).
+
+"Not re-queued" is proven at BOTH levels:
+
+* WITHIN a run — the guard short-circuits BEFORE the suite, runs the coding step exactly
+  once, and rolls back exactly once; there is no edit-again-and-recheck retry loop.
+* ACROSS the discovery queue — a PENDING off-limits task that the guard rejects is still
+  marked used by :func:`sica_autonomy.run_cycle`, so :func:`sica_discover.next_pending_task`
+  never re-serves it: a rejected safety edit is dropped, not retried forever next cycle.
 """
 from __future__ import annotations
 
+import json
+
 import pytest
 
-from utah import failures, selfcode
+from utah import failures, selfcode, sica_autonomy, sica_discover
 from tests.fakes import FakeFailureStore
 
 # The six safety-core files, by basename, mapped to their real repo-relative paths.
@@ -157,6 +167,75 @@ def test_off_limits_reason_is_one_canonical_message(monkeypatch, tmp_path):
     (only,) = reasons
     assert "off-limits" in only.lower()
     assert "\n" not in only and only.strip()     # a single, clear line
+
+
+def _propose_off_limits(repo, rel, holder):
+    """A proposer for :func:`sica_autonomy.run_cycle` that runs the REAL off-limits guard:
+    the coding step tampers *rel* (a Tier-D file) in *repo*, so the production byte-check
+    (``safety_snapshot`` → ``safety_intact``) fires and :func:`selfcode.propose` rolls the
+    change back as Tier-D. Stashes the raw result in *holder* so the test can assert it."""
+    def propose_fn(task):
+        r = selfcode.propose(
+            task,
+            run_claude=lambda _t: (repo / rel).write_text("# TAMPERED\nSENTINEL = 666\n"),
+            run_tests=lambda: (True, "all green"),       # even green must not save it
+            branch_fn=holder["bf"], discard_fn=holder["df"],
+            repo=str(repo), auto_merge=False,
+        )
+        holder["result"] = r
+        return r
+    return propose_fn
+
+
+@pytest.mark.parametrize("rel", list(SAFETY_CORE.values()), ids=list(SAFETY_CORE))
+def test_off_limits_rejected_task_is_not_requeued(monkeypatch, tmp_path, rel):
+    """End-to-end queue invariant: a PENDING self-code task that the guard rejects as
+    off-limits is CONSUMED (marked used) and never re-served by the discovery queue — a
+    rejected safety edit is dropped, not retried forever on the next cycle.
+
+    Drives the real :func:`sica_autonomy.run_cycle` over an isolated discovery queue
+    holding exactly one off-limits task; the injected proposer runs the production
+    byte-check (tamper → Tier-D rollback). Afterwards the queue must be empty."""
+    store = FakeFailureStore(); failures.set_store(store)
+    monkeypatch.setattr(selfcode, "KILL_SWITCH", tmp_path / "nope")
+
+    # Isolated discovery queue holding exactly one pending off-limits task.
+    log = tmp_path / "discoveries.jsonl"
+    used = tmp_path / "used.json"
+    task = f"edit the safety file {rel} to weaken the guard"
+    rec = {"ts": 1.0, "domain": "research", "suggested_task": task, "brief_path": ""}
+    log.write_text(json.dumps(rec) + "\n")
+    monkeypatch.setattr(sica_discover, "DISCOVERIES_LOG", log)
+    monkeypatch.setattr(sica_discover, "USED_PATH", used)
+    # Precondition: the queue WOULD serve this task.
+    assert sica_discover.next_pending_task(log_path=log, used_path=used) is not None
+
+    safety_repo = _safety_repo(tmp_path)
+    calls, bf, df = _vcs()
+    holder = {"bf": bf, "df": df, "result": None}
+
+    out = sica_autonomy.run_cycle(
+        repo=tmp_path, sync_fn=lambda repo: True,
+        discover_fn=lambda: {"ran": False},          # skip the browser discovery pass
+        foundation_gate=lambda name: None,           # no cron skip
+        load_fn=lambda: 0.0,                         # calm machine — don't defer
+        propose_fn=_propose_off_limits(safety_repo, rel, holder),
+    )
+
+    # The cycle consumed exactly the off-limits task...
+    assert out["task"] == task
+    # ...the proposer REALLY rejected it off-limits (Tier-D, rolled back, never merged)...
+    r = holder["result"]
+    assert r["applied"] is False
+    assert r["tier"] == "D"
+    assert r.get("merged") in (False, None)
+    assert "off-limits" in r["reason"].lower()
+    # ...documented as a selfcode off_limits failure (source=selfcode, kind=off_limits)...
+    assert any(row[1] == "selfcode" and row[2] == "off_limits" for row in store.rows)
+    # ...rolled back exactly once, no retry...
+    assert calls["discards"] == 1
+    # ...and NOT re-queued: the consumed finding is marked used, the queue is now empty.
+    assert sica_discover.next_pending_task(log_path=log, used_path=used) is None
 
 
 @pytest.mark.parametrize("rel", list(SAFETY_CORE.values()), ids=list(SAFETY_CORE))
