@@ -24,6 +24,23 @@ def test_resolve_property_owner_not_found_is_honest():
     assert r["available"] is True and r["address"] is None      # honest miss, not fabricated
 
 
+def test_resolve_property_extracts_arv_from_county_value_field():
+    # harris is registered with value_field='Value' (the county fair-market value)
+    fetch = lambda u, w: {"features": [{"attributes": {
+        "Owner": "JOY JOWERS", "PhisicalAddress": "1 Pine St", "PARCEL_NO": "001",
+        "Value": "108892"}}]}
+    r = prop.resolve_property("JOY JOWERS", "harris", fetch=fetch)
+    assert r["address"] == "1 Pine St" and r["arv"] == 108892   # real value, a deal with a price
+
+
+def test_to_money_parses_real_values_and_rejects_zero_and_junk():
+    assert prop._to_money("108892") == 108892
+    assert prop._to_money(150800) == 150800
+    assert prop._to_money("$1,234") == 1234
+    for bad in (0, "0", "", None, "n/a"):
+        assert prop._to_money(bad) is None                      # never a fabricated $0 ARV
+
+
 def test_resolve_property_no_source_gates_not_fabricates():
     failures.set_store(FakeFailureStore())
     r = prop.resolve_property("JOY JOWERS", "testco")          # no fetch, county not registered

@@ -35,6 +35,7 @@ COUNTY_ARCGIS: dict[str, dict[str, str]] = {
         "owner_field": "Owner",
         "addr_field": "PhisicalAddress",
         "parcel_field": "PARCEL_NO",
+        "value_field": "Value",          # fair-market value (= FMVRES+FMVACC+land), e.g. 108892
     },
     # The rest live-verified 2026-06-07 (owner-LIKE '%SMITH%' returned real owner+situs).
     # All polygon layers, so resolve gets address (parcel too) and enrich GEOCODES the
@@ -43,6 +44,7 @@ COUNTY_ARCGIS: dict[str, dict[str, str]] = {
         "url": "https://services1.arcgis.com/Ug5xGQbHsD8zuZzM/arcgis/rest/services/"
                "HoustonCoParcels_withOwner/FeatureServer/0/query",
         "owner_field": "LASTNAME", "addr_field": "ADDRESS", "parcel_field": "PARCEL_NO",
+        "value_field": "CURR_VAL",       # current appraised value, e.g. 150800
     },
     "bulloch": {  # StaGIS (stabull.org) MapServer/0 — situs FULL_ADDRE
         "url": "https://stabull.org/server/rest/services/Bulloch_Parcels/MapServer/0/query",
@@ -56,6 +58,7 @@ COUNTY_ARCGIS: dict[str, dict[str, str]] = {
     "hall": {  # Hall County GIS server, GeneralTab MapServer/1
         "url": "https://hallgis.hallcounty.org/arcgis/rest/services/GeneralTab/MapServer/1/query",
         "owner_field": "OWNER", "addr_field": "SITE_LOCATION", "parcel_field": "PIN",
+        "value_field": "CUR_VALUE",      # current value (land+improvement), e.g. 16500
     },
     "bryan": {  # Bryan County GIS server, Parcels MapServer/0
         "url": "https://bryangis.bryan-county.org/arcgis/rest/services/Parcels/MapServer/0/query",
@@ -67,6 +70,16 @@ COUNTY_ARCGIS: dict[str, dict[str, str]] = {
         "owner_field": "OWNERNME1", "addr_field": "SITEADDRESS", "parcel_field": "PARCELID",
     },
 }
+
+
+def _to_money(v) -> int | None:
+    """County value field → a positive integer dollar amount, or None. Handles '108892',
+    150800, '$1,234'; treats 0/blank/garbage as None (never a fabricated $0 ARV)."""
+    try:
+        n = int(float(str(v).replace(",", "").replace("$", "").strip()))
+    except (TypeError, ValueError):
+        return None
+    return n if n > 0 else None
 
 
 def _arcgis_query(url: str, where: str, fetch=None, timeout: int = 20) -> dict:
@@ -122,8 +135,10 @@ def resolve_property(case_name: str, county: str, *, fetch=None) -> dict:
         lng = geom.get("x") if "x" in geom else None
         pf = reg.get("parcel_field", "")
         parcel = (attrs.get(pf) if pf else None) or attrs.get("PARCELID") or attrs.get("PARID")
+        vf = reg.get("value_field")
+        arv = _to_money(attrs.get(vf)) if vf else None   # county appraised/fair-market value
         return {"available": True, "gated": False, "county": cty, "source": "arcgis",
-                "address": attrs.get(af), "parcel": parcel,
+                "address": attrs.get(af), "parcel": parcel, "arv": arv,
                 "owner": attrs.get(of), "lat": lat, "lng": lng}
     except Exception as exc:  # noqa: BLE001
         failures.record("property", "arcgis_failed", f"{case_name[:40]} ({cty}): {exc}")
@@ -166,7 +181,8 @@ def enrich(case_name: str, county: str, *, fetch=None, geocode_fetch=None,
         if geo.get("available") and geo.get("lat") is not None:
             lat, lng = geo["lat"], geo["lng"]
     payload = {"address": prop.get("address"), "parcel": prop.get("parcel"),
-               "owner": prop.get("owner"), "lat": lat, "lng": lng, "source": prop.get("source")}
+               "owner": prop.get("owner"), "arv": prop.get("arv"),
+               "lat": lat, "lng": lng, "source": prop.get("source")}
     if lat is not None and lng is not None:
         payload["comps"] = radius_check(lat, lng, places_fetch=places_fetch, smb_fetch=smb_fetch)
     return payload
@@ -193,7 +209,7 @@ def enrich_ledger(limit: int = 25, *, ledger=None, fetch=None, geocode_fetch=Non
         try:
             payload = enrich(case_name, county, fetch=fetch, geocode_fetch=geocode_fetch,
                              places_fetch=places_fetch, smb_fetch=smb_fetch)
-            lg.update_probate(case_name, county, heir_contact=payload)
+            lg.update_probate(case_name, county, heir_contact=payload, arv=payload.get("arv"))
             resolved += 1 if payload.get("address") else 0
             gated += 0 if payload.get("address") else 1
         except Exception as exc:  # noqa: BLE001 — one bad row must not abort the pass
