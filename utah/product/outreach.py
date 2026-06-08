@@ -86,6 +86,15 @@ def _recipient(contact: dict, channel: str) -> str:
     return contact.get("email") if channel == "email" else contact.get("phone")
 
 
+def _footer_is_real(footer: dict | None) -> bool:
+    """True only when the CAN-SPAM physical address is a real business input — not the
+    placeholder. Sending with the placeholder address is a non-compliant email that burns
+    the prospect's one shot, so a send is refused until this is real (the module contract).
+    Creds are gated in mail.send; the physical address is gated here."""
+    addr = ((footer or DEFAULT_FOOTER).get("address") or "").strip()
+    return bool(addr) and addr != DEFAULT_FOOTER["address"] and "[CAN-SPAM" not in addr
+
+
 def queue(ledger, campaign: str, leads: list[dict], footer: dict | None = None,
           can_send: bool = False, send_fn=None) -> dict:
     """Compose + lint + suppression-queue each lead, and (when allowed) SEND. The send
@@ -95,6 +104,15 @@ def queue(ledger, campaign: str, leads: list[dict], footer: dict | None = None,
     provider yet, so it always stays queued. ``send_fn`` is injectable for tests.
     ``recipient`` for suppression is the email or phone."""
     sender = send_fn or mail.send
+    # Address gate: never SEND with a placeholder CAN-SPAM physical address — that is a
+    # non-compliant email that burns the prospect. Refuse, document it, and fall through to
+    # queue-only (the lead stays, never sent). (Creds are separately gated in mail.send.)
+    do_send = can_send and _footer_is_real(footer)
+    addr_gated = ""
+    if can_send and not do_send:
+        addr_gated = ("send refused: CAN-SPAM physical address not configured "
+                      "(Michael's business input) — leads stay queued, never sent")
+        failures.record("outreach", "send_gated", f"{campaign}: {addr_gated}")
     queued = suppressed = needs_contact = blocked = sent = 0
     for lead in leads:
         channel = pick_channel(lead.get("contact"))
@@ -108,7 +126,7 @@ def queue(ledger, campaign: str, leads: list[dict], footer: dict | None = None,
                             f"{lead.get('name')}: pitch tripped the spam-content gate")
             continue
         recipient = _recipient(lead.get("contact", {}), channel)
-        if can_send and channel == "email":
+        if do_send and channel == "email":
             # SEND-NOW: don't burn the prospect's one shot on a gated/failed send. Check
             # suppression read-only, send, and commit the never-twice row ONLY on success.
             if getattr(ledger, "is_contacted", lambda r, c: False)(recipient, campaign):
@@ -132,7 +150,7 @@ def queue(ledger, campaign: str, leads: list[dict], footer: dict | None = None,
         else:
             suppressed += 1         # already contacted for this campaign — never twice
 
-    gated = ""
+    gated = addr_gated
     if queued and not can_send:
         gated = ("outreach send is gated: needs sending creds (SMS/email) + a real "
                  "CAN-SPAM physical address (Michael's business inputs)")

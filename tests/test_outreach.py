@@ -73,3 +73,43 @@ def test_send_gate_is_documented_in_failure_log():
     lg = _RecLedger()
     outreach.queue(lg, "c1", [{"name": "Phone Co", "contact": {"phone": "555-1"}}])
     assert any("gated" in row[2] or "gate" in row[2] for row in store.rows)  # why-it-didn't-send recorded
+
+
+def test_send_refused_with_placeholder_canspam_address():
+    """can_send=True must NOT send when the CAN-SPAM physical address is still the
+    placeholder — that is a non-compliant email that burns the prospect's one shot. Refuse,
+    document the gate, keep the lead queued (never sent). This is the module's stated contract."""
+    store = FakeFailureStore()
+    failures.set_store(store)
+    lg = _RecLedger()
+    sent_to: list[str] = []
+
+    def fake_send(to, subject, body):
+        sent_to.append(to)
+        return {"sent": True}
+
+    leads = [{"name": "Email Co", "contact": {"email": "x@y.com"}}]
+    r = outreach.queue(lg, "c1", leads, can_send=True, send_fn=fake_send)  # footer=None -> placeholder addr
+    assert sent_to == []                                   # NO non-compliant email left the building
+    assert r["sent"] == 0
+    assert "address" in r["gated"].lower()                 # the refusal is surfaced to the caller/deck
+    # rows are (seq, source, kind, detail) — the gate names WHY in the detail too
+    assert any("address" in row[3].lower() for row in store.rows)
+
+
+def test_send_proceeds_with_real_canspam_address():
+    """With a real physical address, the send actually proceeds (the gate is a gate, not a wall)."""
+    store = FakeFailureStore()
+    failures.set_store(store)
+    lg = _RecLedger()
+    sent_to: list[str] = []
+
+    def fake_send(to, subject, body):
+        sent_to.append(to)
+        return {"sent": True}
+
+    leads = [{"name": "Email Co", "contact": {"email": "x@y.com"}}]
+    footer = {"address": "123 Main St, Newnan GA 30263", "unsubscribe": "Reply STOP to opt out."}
+    r = outreach.queue(lg, "c1", leads, footer=footer, can_send=True, send_fn=fake_send)
+    assert sent_to == ["x@y.com"]                          # real address -> real send proceeds
+    assert r["sent"] == 1
