@@ -43,6 +43,17 @@ def test_admission_denies_bad_confidence(mem):
         memory.store("a fact", confidence=-0.1)
 
 
+def test_admission_rejects_turn_shaped_and_deadcode_as_facts(mem):
+    """Confabulation guard: a durable fact can't be a stored conversation turn or a dead
+    old-AceOS code dump — the exact shapes that flooded the fact source (rap lyrics, mic
+    garble, [acesd/...] code). The 'turn' source IS legitimately Q/A, so it stays admissible."""
+    for bad in ("Q: where do I live\nA: noted", "[acesd/voice/wake.py] old code description"):
+        with pytest.raises(AdmissionDenied, match="durable fact"):
+            memory.store(bad, source="fact")
+    assert memory.store("Michael lives in Gulf Shores", source="fact")   # real fact admits
+    assert memory.store("Q: hi\nA: hello", source="turn")                # a genuine turn admits
+
+
 def test_admission_requires_embedding(mem):
     """Embed failure -> nothing is stored. A row without a vector never exists."""
     mem.embedder.fail = True

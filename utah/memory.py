@@ -717,6 +717,15 @@ def store(
         )
     if not 0.0 <= confidence <= 1.0:
         raise AdmissionDenied(f"admission denied: confidence {confidence} not in [0, 1]")
+    # Confabulation guard: a durable fact must be a FACT — not a stored conversation turn
+    # (``Q: …\nA: …``) nor a dead old-AceOS code dump (``[acesd/…]``). Those exact shapes
+    # flooded the fact source (3,340 junk rows purged 2026-06-08 — they surfaced rap lyrics
+    # and mic-garble in recall). The 'turn' source is legitimately Q/A, so it is exempt.
+    if source != "turn":
+        head = text.lstrip()
+        if head.startswith("[acesd/") or (head.startswith("Q:") and "\nA:" in text):
+            raise AdmissionDenied(
+                "admission denied: turn-shaped or dead-code content is not a durable fact")
 
     vector = embed(text)  # EmbedError propagates: no vector, no admission
     backend = get_backend()
