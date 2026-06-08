@@ -105,13 +105,30 @@ def test_propagate_fast_forwards_clean_live(tmp_path):
     assert (live / "auto.txt").exists()   # autonomous work now in the live repo
 
 
-def test_propagate_skips_dirty_live(tmp_path):
+def test_propagate_lands_under_nonoverlapping_dirty(tmp_path):
+    """DURABLE: a dirty live tree must NOT permanently strand self-improvement. When the
+    uncommitted dev work touches DIFFERENT files than the autonomous commit, propagation
+    stash-guards the dev work (stash -u -> ff -> pop): the autonomous commit lands AND the
+    dev work is preserved untouched. (Old contract skipped here, which is why nothing ever
+    propagated — the live tree is ~always dirty.)"""
     live, clone = _init_live_and_clone(tmp_path)
-    _autonomous_commit(clone)
-    (live / "uncommitted.txt").write_text("dev WIP")   # live tree dirty
+    _autonomous_commit(clone)                          # autonomous commit touches auto.txt
+    (live / "dev_wip.txt").write_text("dev WIP")       # dirty, but DIFFERENT file
     r = sica_autonomy.propagate(live=live, clone=clone)
-    assert r["propagated"] is False and "dirty" in r["reason"]
-    assert not (live / "auto.txt").exists()            # dev work untouched, nothing applied
+    assert r["propagated"] is True                     # self-improvement landed despite dirty tree
+    assert (live / "auto.txt").read_text() == "auto"   # autonomous work now in live
+    assert (live / "dev_wip.txt").read_text() == "dev WIP"  # dev work preserved, untouched
+
+
+def test_propagate_skips_overlapping_dirty(tmp_path):
+    """When the uncommitted dev work touches the SAME file the autonomous commit changes,
+    landing it would clobber/conflict — so propagation safely SKIPS and leaves dev work be."""
+    live, clone = _init_live_and_clone(tmp_path)
+    _autonomous_commit(clone)                          # autonomous commit ADDS auto.txt
+    (live / "auto.txt").write_text("dev's own auto")   # dirty on the SAME path -> overlap
+    r = sica_autonomy.propagate(live=live, clone=clone)
+    assert r["propagated"] is False and "overlap" in r["reason"].lower()
+    assert (live / "auto.txt").read_text() == "dev's own auto"  # dev work untouched
 
 
 def test_propagate_skips_non_fast_forward(tmp_path):

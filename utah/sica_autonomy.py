@@ -78,18 +78,49 @@ def propagate(live=None, clone=None) -> dict:
 
     if not (live / ".git").exists() or not (clone / ".git").exists():
         return {"propagated": False, "reason": "live or clone repo missing"}
-    if g(live, "status", "--porcelain").stdout.strip():
-        return {"propagated": False, "reason": "live tree dirty — skipped (safe; will retry when clean)"}
     g(live, "fetch", str(clone), "main")
     before = g(live, "rev-parse", "HEAD").stdout.strip()
+    target = g(live, "rev-parse", "FETCH_HEAD").stdout.strip()
+    if before == target:
+        return {"propagated": False, "reason": "already up to date"}
+    if g(live, "merge-base", "--is-ancestor", before, "FETCH_HEAD").returncode != 0:
+        return {"propagated": False, "reason": "not a fast-forward: live has commits the clone lacks"}
+
+    # DURABLE dirty-tree guard: a dirty live tree must not PERMANENTLY strand
+    # self-improvement (the live tree is ~always dirty, which is why nothing ever
+    # propagated). If the uncommitted dev work touches NONE of the files the
+    # autonomous commits change, stash-guard it (stash -u -> ff -> pop) so the
+    # autonomous work lands AND dev work is preserved. Only a real OVERLAP skips.
+    dirty = (set(g(live, "diff", "--name-only", "HEAD").stdout.split())
+             | set(g(live, "ls-files", "--others", "--exclude-standard").stdout.split()))
+    stashed = False
+    if dirty:
+        auto_files = set(g(live, "diff", "--name-only", before, "FETCH_HEAD").stdout.split())
+        overlap = dirty & auto_files
+        if overlap:
+            return {"propagated": False,
+                    "reason": f"live tree dirty — overlaps autonomous files "
+                              f"({', '.join(sorted(overlap))[:80]}); skipped (safe)"}
+        st = g(live, "stash", "push", "-u", "-m", "utah-propagate-guard")
+        stashed = st.returncode == 0 and "No local changes" not in st.stdout
+        if not stashed:
+            return {"propagated": False, "reason": "live tree dirty — stash failed; skipped (safe)"}
+
     res = g(live, "merge", "--ff-only", "FETCH_HEAD")
     after = g(live, "rev-parse", "HEAD").stdout.strip()
+    pop_conflict = False
+    if stashed:
+        pop = g(live, "stash", "pop")
+        pop_conflict = pop.returncode != 0   # no overlap => should be clean; surface if not
     if res.returncode != 0:
         return {"propagated": False, "reason": f"not a fast-forward: {res.stderr.strip()[:120]}"}
     if before == after:
         return {"propagated": False, "reason": "already up to date"}
     log.info("propagated autonomous work to live main: %s -> %s", before[:8], after[:8])
-    return {"propagated": True, "from": before[:8], "to": after[:8]}
+    out = {"propagated": True, "from": before[:8], "to": after[:8]}
+    if pop_conflict:
+        out["dev_work"] = "preserved in stash@{0} — pop conflicted, resolve manually"
+    return out
 
 
 def sync_repo(repo: Path) -> bool:
