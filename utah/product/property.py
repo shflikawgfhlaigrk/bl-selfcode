@@ -24,7 +24,49 @@ log = logging.getLogger("utah.product.property")
 #: Per-county open ArcGIS parcel FeatureServers that expose an owner field. Each entry:
 #: ``county: {"url": <FeatureServer/0/query>, "owner_field": <col>, "addr_field": <col>}``.
 #: Seed verified counties here; everything else gates honestly. (Lower-cased county keys.)
-COUNTY_ARCGIS: dict[str, dict[str, str]] = {}
+COUNTY_ARCGIS: dict[str, dict[str, str]] = {
+    # Harris County, GA — open GARC (Georgia Assoc. of Regional Commissions) hub layer
+    # behind the county's official Data HUB. Polygon parcels w/ Owner + PhisicalAddress.
+    # LIVE-VERIFIED 2026-06-07: UPPER(Owner) LIKE '%SMITH%' -> "SMITH AARON JR & ANITA K",
+    # "906 Cedar Street", parcel 001A008, geom near -85.17,32.87 (Harris Co GA). 21,044 parcels.
+    "harris": {
+        "url": "https://services1.arcgis.com/Ug5xGQbHsD8zuZzM/arcgis/rest/services/"
+               "Parcels4_2026_HUB/FeatureServer/0/query",
+        "owner_field": "Owner",
+        "addr_field": "PhisicalAddress",
+        "parcel_field": "PARCEL_NO",
+    },
+    # The rest live-verified 2026-06-07 (owner-LIKE '%SMITH%' returned real owner+situs).
+    # All polygon layers, so resolve gets address (parcel too) and enrich GEOCODES the
+    # address for lat/lng (geometry x/y is None on polygons). Covers 59 of 64 probate rows.
+    "houston": {  # Middle GA Regional Commission hub; 'LASTNAME' holds the full owner string
+        "url": "https://services1.arcgis.com/Ug5xGQbHsD8zuZzM/arcgis/rest/services/"
+               "HoustonCoParcels_withOwner/FeatureServer/0/query",
+        "owner_field": "LASTNAME", "addr_field": "ADDRESS", "parcel_field": "PARCEL_NO",
+    },
+    "bulloch": {  # StaGIS (stabull.org) MapServer/0 — situs FULL_ADDRE
+        "url": "https://stabull.org/server/rest/services/Bulloch_Parcels/MapServer/0/query",
+        "owner_field": "LASTNAME", "addr_field": "FULL_ADDRE", "parcel_field": "PARCEL_NO",
+    },
+    "effingham": {  # Effingham County GIS AGOL org; current-year Parcels2024
+        "url": "https://services.arcgis.com/9scQWTgPOi3GxJRr/arcgis/rest/services/"
+               "Parcels2024/FeatureServer/0/query",
+        "owner_field": "LASTNAME", "addr_field": "StreetAdd", "parcel_field": "PARCEL_NO",
+    },
+    "hall": {  # Hall County GIS server, GeneralTab MapServer/1
+        "url": "https://hallgis.hallcounty.org/arcgis/rest/services/GeneralTab/MapServer/1/query",
+        "owner_field": "OWNER", "addr_field": "SITE_LOCATION", "parcel_field": "PIN",
+    },
+    "bryan": {  # Bryan County GIS server, Parcels MapServer/0
+        "url": "https://bryangis.bryan-county.org/arcgis/rest/services/Parcels/MapServer/0/query",
+        "owner_field": "LASTNAME", "addr_field": "STREET_NAM", "parcel_field": "PIN",
+    },
+    "forsyth": {  # Forsyth County EnerGov parcel+address MapServer/1
+        "url": "https://geo.forsythco.com/gis/rest/services/EnerGov/"
+               "EnerGovParcelAddressMapService/MapServer/1/query",
+        "owner_field": "OWNERNME1", "addr_field": "SITEADDRESS", "parcel_field": "PARCELID",
+    },
+}
 
 
 def _arcgis_query(url: str, where: str, fetch=None, timeout: int = 20) -> dict:
@@ -55,7 +97,15 @@ def resolve_property(case_name: str, county: str, *, fetch=None) -> dict:
     reg = reg or {"url": "INJECTED", "owner_field": "OWNER", "addr_field": "SITEADDR"}
     name = (case_name or "").strip().upper().replace("'", "")
     of, af = reg["owner_field"], reg["addr_field"]
-    where = f"UPPER({of}) LIKE '%{name}%'"
+    # Parcel owner fields store the name "LAST FIRST MIDDLE" but a probate decedent is
+    # "FIRST MIDDLE LAST" — a single LIKE on the full string never matches across that
+    # reorder. Require the SURNAME and the GIVEN name to BOTH appear (order-agnostic).
+    toks = [t for t in name.replace(",", " ").split() if len(t) > 1]
+    if len(toks) >= 2:
+        surname, given = toks[-1], toks[0]
+        where = f"UPPER({of}) LIKE '%{surname}%' AND UPPER({of}) LIKE '%{given}%'"
+    else:
+        where = f"UPPER({of}) LIKE '%{name}%'"
     try:
         d = _arcgis_query(reg["url"], where, fetch=fetch)
         feats = d.get("features") or []
@@ -66,10 +116,14 @@ def resolve_property(case_name: str, county: str, *, fetch=None) -> dict:
                     "address": None, "parcel": None}
         attrs = feats[0].get("attributes") or {}
         geom = feats[0].get("geometry") or {}
+        # Point layers give x/y; the registered counties are POLYGON layers (rings, no x/y)
+        # → lat/lng stay None here and enrich() geocodes the situs address for the point.
         lat = geom.get("y") if "y" in geom else None
         lng = geom.get("x") if "x" in geom else None
+        pf = reg.get("parcel_field", "")
+        parcel = (attrs.get(pf) if pf else None) or attrs.get("PARCELID") or attrs.get("PARID")
         return {"available": True, "gated": False, "county": cty, "source": "arcgis",
-                "address": attrs.get(af), "parcel": attrs.get("PARCELID") or attrs.get("PARID"),
+                "address": attrs.get(af), "parcel": parcel,
                 "owner": attrs.get(of), "lat": lat, "lng": lng}
     except Exception as exc:  # noqa: BLE001
         failures.record("property", "arcgis_failed", f"{case_name[:40]} ({cty}): {exc}")

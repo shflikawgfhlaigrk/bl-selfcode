@@ -14,19 +14,19 @@ def _arcgis_hit(url, where):
 
 
 def test_resolve_property_arcgis_hit():
-    r = prop.resolve_property("JOY JOWERS", "harris", fetch=_arcgis_hit)
+    r = prop.resolve_property("JOY JOWERS", "testco", fetch=_arcgis_hit)
     assert r["available"] and r["address"] == "123 Pine St" and r["parcel"] == "H-42"
     assert r["lat"] == 32.76 and r["lng"] == -84.87
 
 
 def test_resolve_property_owner_not_found_is_honest():
-    r = prop.resolve_property("NOBODY", "harris", fetch=lambda u, w: {"features": []})
+    r = prop.resolve_property("NOBODY", "testco", fetch=lambda u, w: {"features": []})
     assert r["available"] is True and r["address"] is None      # honest miss, not fabricated
 
 
 def test_resolve_property_no_source_gates_not_fabricates():
     failures.set_store(FakeFailureStore())
-    r = prop.resolve_property("JOY JOWERS", "houston")          # no fetch, county not registered
+    r = prop.resolve_property("JOY JOWERS", "testco")          # no fetch, county not registered
     assert r["available"] is False and r["gated"] is True and r["source"] == "none"
 
 
@@ -51,7 +51,7 @@ def test_enrich_full_pipeline_injected():
     # arcgis hit WITHOUT geometry → forces the geocode fallback path
     arcgis = lambda u, w: {"features": [{"attributes": {"OWNER": "X", "SITEADDR": "9 Oak St",
                                                         "PARCELID": "P1"}}]}
-    out = prop.enrich("JOY JOWERS", "harris", fetch=arcgis, geocode_fetch=geo,
+    out = prop.enrich("JOY JOWERS", "testco", fetch=arcgis, geocode_fetch=geo,
                       places_fetch=places, smb_fetch=smbs)
     assert out["address"] == "9 Oak St" and out["lat"] == 32.7      # geocode fallback worked
     assert "Nearby Shop" in out["comps"]["no_website_smbs"]
@@ -59,5 +59,5 @@ def test_enrich_full_pipeline_injected():
 
 def test_enrich_unresolved_is_honest_marker():
     failures.set_store(FakeFailureStore())
-    out = prop.enrich("JOY JOWERS", "houston")                  # no source → unresolved
+    out = prop.enrich("JOY JOWERS", "testco")                  # no source → unresolved
     assert out["property"] == "unresolved" and "comps" not in out
