@@ -6,9 +6,21 @@ error so the voice loop never crashes on a bad clip.
 from __future__ import annotations
 
 import logging
+import os
 from typing import Protocol
 
 from utah import config
+
+# ── Offline model resolution (deaf-window fix) ──────────────────────────────
+# Moonshine STT runs on the mic-muted critical path. moonshine_onnx resolves its
+# weights through huggingface_hub, which fires a network HEAD to huggingface.co on
+# EVERY transcribe unless told to stay local — so a network blip is a multi-second
+# deaf window and a full outage is dead voice. This MUST be enforced in code, not
+# only via a launchd plist: `kickstart -k` never re-reads plist env, and the shipped
+# Sovereign buyer package has no launchd at all. setdefault so a deliberate cold
+# download (HF_HUB_OFFLINE=0) still wins. Runs before the lazy `import moonshine_onnx`.
+os.environ.setdefault("HF_HUB_OFFLINE", "1")
+os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
 
 log = logging.getLogger("utah.voice.stt")
 
