@@ -23,7 +23,7 @@ class Governor:
         self,
         *,
         ncpu: int | None = None,
-        max_load_per_core: float = 8.0,
+        max_load_per_core: float = 1.5,
         max_inflight: int = 64,
     ) -> None:
         self._ncpu = ncpu or os.cpu_count() or 1
@@ -37,6 +37,7 @@ class Governor:
         return {
             "load1": round(load1, 2),
             "load_per_core": round(load1 / self._ncpu, 3),
+            "max_load_per_core": self._max_load_per_core,
             "inflight": self._inflight,
             "max_inflight": self._max_inflight,
             "ncpu": self._ncpu,

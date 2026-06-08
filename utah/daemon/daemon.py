@@ -33,7 +33,10 @@ log = logging.getLogger("utah.daemon")
 # -- deploy seams (env-overridable; bounded by design) -----------------------
 POOL_LIMIT = int(os.environ.get("UTAH_POOL_LIMIT", "16"))
 GOV_MAX_INFLIGHT = int(os.environ.get("UTAH_MAX_INFLIGHT", "64"))
-GOV_MAX_LOAD_PER_CORE = float(os.environ.get("UTAH_MAX_LOAD_PER_CORE", "8.0"))
+# 1.5 = shed heavy work once the box is 50% oversubscribed (load1 > 1.5*ncpu).
+# Was 8.0 (load1 > 144 on 18 cores) — it never tripped, so the load storm that
+# killed AceOS could recur. ping/status bypass keeps the daemon answerable.
+GOV_MAX_LOAD_PER_CORE = float(os.environ.get("UTAH_MAX_LOAD_PER_CORE", "1.5"))
 DRAIN_TIMEOUT_S = float(os.environ.get("UTAH_DRAIN_TIMEOUT", "10.0"))
 #: Grace after a stop is requested, so a `shutdown` RPC's ack flushes to the
 #: caller before the socket is torn down (clean `utah stop`).

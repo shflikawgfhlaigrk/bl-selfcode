@@ -16,7 +16,7 @@ from utah import failures
 
 log = logging.getLogger("utah.watchdog")
 
-LOAD_CRITICAL = 8.0  # per-core; matches the governor's max_load_per_core
+LOAD_CRITICAL = 1.5  # per-core; matches the governor's max_load_per_core
 
 
 def _live_status():
