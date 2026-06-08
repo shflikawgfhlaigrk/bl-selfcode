@@ -120,6 +120,19 @@ def test_local_route_answers_quick_without_the_brain(mem, fake_brain):
     assert all(r.source != "turn" for r in mem.store.rows.values())
 
 
+def test_weather_stream_skips_recall_before_capability(mem, fake_brain, monkeypatch):
+    """Streaming path must match tell(): capability before recall (voice latency)."""
+    def boom_recall(*a, **k):
+        raise AssertionError("recall must not run before capability on weather stream")
+
+    monkeypatch.setattr("utah.memory.recall", boom_recall)
+    monkeypatch.setattr("utah.product.weather.answer", lambda t: "LIVE: 80°F and clear.")
+    events = list(core.tell_stream("what's the weather", voice=True))
+    assert ("source", "capability") in events
+    answer = "".join(c for ch, c in events if ch == "answer")
+    assert "LIVE" in answer
+
+
 def test_capability_wins_over_a_stale_memory_hit(mem, fake_brain, monkeypatch):
     # the live bug: a memory turn served day-old weather (74°) instead of the live
     # capability. A capability is LIVE and must win over even a confident memory hit.

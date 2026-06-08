@@ -85,6 +85,14 @@ class Segmenter:
         self._run_speech = 0
         self._run_silence = 0
 
+    def arm(self) -> None:
+        """Start capturing immediately (after an audio wake hit) using preroll."""
+        if not self._capturing:
+            self._capturing = True
+            self._buf = bytearray(b"".join(self._pre))
+            self._run_silence = 0
+            self._run_speech = self.onset
+
     def feed(self, frame: bytes, is_speech: bool) -> bytes | None:
         if not self._capturing:
             self._pre.append(frame)

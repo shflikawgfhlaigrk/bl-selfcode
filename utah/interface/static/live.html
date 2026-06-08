@@ -642,8 +642,8 @@ async function loadSelfcode(body, quiet){
   // Don't let the 2.5s background poll clobber a half-typed edit or an in-flight job
   // (it would wipe the input / reset the diff). Only the explicit tab-click (quiet=false)
   // or a one-time empty render rebuilds the page; the job box self-updates via polling.
-  const inEl=$("sc-edit-in");
-  if(quiet && (_scEditJob || (inEl && document.activeElement===inEl))) return;
+  const focusEl=$("sc-edit-in");
+  if(quiet && (_scEditJob || (focusEl && document.activeElement===focusEl))) return;
   // fetch all four sections in parallel; each is real-or-empty
   const [gov,cyc,goals,research]=await Promise.all([
     getPanel("selfcode").catch(()=>({})),

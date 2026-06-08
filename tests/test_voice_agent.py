@@ -4,6 +4,7 @@ latency) -> publish the turn so it shows in the deck chat box. No wake => ignore
 (the mic never acts on un-addressed speech)."""
 from __future__ import annotations
 
+from utah.objects import Reply, ReplySource
 from utah.voice import agent
 
 
@@ -31,13 +32,18 @@ def test_no_wake_is_ignored():
 
 def test_wake_runs_brain_speaks_and_publishes():
     spoken, published = [], []
-    def fake_tell(cmd, want_thinking=True):
+    def fake_tell(cmd):
         assert cmd == "what is utah"
+        return Reply(text="", source=ReplySource.BRAIN)
+    def fake_stream(cmd, want_thinking=True, voice=False):
+        assert cmd == "what is utah"
+        assert want_thinking is False
+        assert voice is True
         return iter([("source", "brain"), ("thinking", "reasoning"),
                      ("answer", "Utah is the rebuild."), ("done", "Utah is the rebuild.")])
     r = agent.handle_utterance(
         "ace what is utah",
-        tell_stream=fake_tell, speak_stream=_collect(spoken),
+        tell=fake_tell, tell_stream=fake_stream, speak_stream=_collect(spoken),
         publish=lambda ch, ev: published.append((ch, ev)),
     )
     assert r["command"] == "what is utah"
@@ -47,28 +53,54 @@ def test_wake_runs_brain_speaks_and_publishes():
     assert any(ev.get("q") == "what is utah" for ch, ev in published)  # shown on deck
 
 
+def test_instant_capability_skips_tell_stream():
+    """Weather/time/social go through tell() only — no stream generator on the hot path."""
+    spoken = []
+    stream_called = []
+    def fake_tell(cmd):
+        return Reply(text="Gulf Shores: sunny, 75°F.", source=ReplySource.CAPABILITY)
+    def fake_stream(*a, **k):
+        stream_called.append(1)
+        return iter([])
+    r = agent.handle_utterance(
+        "ace what's the weather",
+        tell=fake_tell, tell_stream=fake_stream, speak_stream=_collect(spoken),
+        publish=lambda *a: None,
+    )
+    assert r["answer"] == "Gulf Shores: sunny, 75°F."
+    assert r["source"] == "capability"
+    assert spoken == ["Gulf Shores: sunny, 75°F."]
+    assert stream_called == []
+
+
 def test_voice_skips_the_thinking_block_for_latency():
     """Voice never speaks the <thinking> block, so it must tell the brain to skip it —
     otherwise the model generates (and we discard) a whole reasoning pass before the
     first spoken word. handle_utterance must call tell_stream with want_thinking=False."""
     captured = {}
-    def fake_tell(cmd, want_thinking=True):
+    def fake_tell(cmd):
+        return Reply(text="", source=ReplySource.BRAIN)
+    def fake_stream(cmd, want_thinking=True, voice=False):
         captured["want_thinking"] = want_thinking
+        captured["voice"] = voice
         return iter([("source", "brain"), ("answer", "Hi.")])
-    agent.handle_utterance("ace hi there", tell_stream=fake_tell,
+    agent.handle_utterance("ace hi there", tell=fake_tell, tell_stream=fake_stream,
                            speak_stream=_collect([]), publish=lambda *a: None)
     assert captured.get("want_thinking") is False
+    assert captured.get("voice") is True
 
 
 def test_only_answer_text_is_spoken_not_thinking():
     """The speaker receives ONLY answer text — the brain's thinking is shown on the
     deck but never read aloud."""
     spoken = []
-    def fake_tell(cmd, want_thinking=True):
+    def fake_tell(cmd):
+        return Reply(text="", source=ReplySource.BRAIN)
+    def fake_stream(cmd, want_thinking=True, voice=False):
         return iter([("source", "brain"),
                      ("thinking", "let me reason about this at length"),
                      ("answer", "The answer is 42.")])
-    agent.handle_utterance("ace the question", tell_stream=fake_tell,
+    agent.handle_utterance("ace the question", tell=fake_tell, tell_stream=fake_stream,
                            speak_stream=_collect(spoken), publish=lambda *a: None)
     assert spoken == ["The answer is 42."]               # no thinking leaked to TTS
 
@@ -77,14 +109,14 @@ def test_on_speaking_fires_when_audio_begins():
     """on_speaking flips the deck state thinking → speaking exactly when the first
     real sentence is sent to the speaker."""
     fired = []
-    def fake_tell(cmd, want_thinking=True):
-        return iter([("answer", "Hello there.")])
+    def fake_tell(cmd):
+        return Reply(text="Hello there.", source=ReplySource.SOCIAL)
     def fake_speak(chunks, on_start=None):
         text = "".join(chunks)
         if on_start and text.strip():
             on_start()
         return text
-    agent.handle_utterance("ace hi", tell_stream=fake_tell, speak_stream=fake_speak,
+    agent.handle_utterance("ace hi", tell=fake_tell, speak_stream=fake_speak,
                            publish=lambda *a: None, on_speaking=lambda: fired.append(1))
     assert fired == [1]
 
@@ -94,7 +126,10 @@ def test_wake_publishes_immediate_wake_event_before_brain():
     brain turn — so the deck orb emits its wave immediately and Michael sees it heard
     'ace' (like old Ace), not 14s later when the answer lands."""
     published, order = [], []
-    def fake_tell(cmd, want_thinking=True):
+    def fake_tell(cmd):
+        order.append("tell")
+        return Reply(text="", source=ReplySource.BRAIN)
+    def fake_stream(cmd, want_thinking=True, voice=False):
         order.append("brain")
         return iter([("answer", "ok.")])
     def fake_speak(chunks, on_start=None):
@@ -102,7 +137,7 @@ def test_wake_publishes_immediate_wake_event_before_brain():
     def pub(ch, ev):
         published.append((ch, ev))
         order.append(ch)
-    agent.handle_utterance("ace what is utah", tell_stream=fake_tell,
+    agent.handle_utterance("ace what is utah", tell=fake_tell, tell_stream=fake_stream,
                            speak_stream=fake_speak, publish=pub)
     assert any(ch == "wake" for ch, _ in published)   # orb gets its pulse
     assert order[0] == "wake"                          # and BEFORE the brain runs
@@ -125,11 +160,30 @@ def test_empty_answer_is_not_spoken():
     spoken = []
     r = agent.handle_utterance(
         "ace hello",
-        tell_stream=lambda c, want_thinking=True: iter([("source", "brain"), ("answer", "  ")]),
+        tell=lambda c: Reply(text="", source=ReplySource.BRAIN),
+        tell_stream=lambda c, want_thinking=True, voice=False: iter(
+            [("source", "brain"), ("answer", "  ")]),
         speak_stream=_collect(spoken), publish=lambda *a: None,
     )
     assert spoken == []  # nothing meaningful to say -> stays silent
     assert r["answer"] == ""
+
+
+def test_audio_wake_accepts_stt_when_text_wake_missing():
+    """Stage A armed + Moonshine dropped 'ace' — Stage B still answers (capability fast path)."""
+    spoken = []
+    def fake_tell(cmd):
+        assert cmd == "what's the weather right now buddy?"
+        return Reply(text="Clear and mild.", source=ReplySource.CAPABILITY)
+    r = agent.handle_utterance(
+        "Is what's the weather right now buddy?",
+        audio_wake=True,
+        tell=fake_tell,
+        speak_stream=_collect(spoken),
+        publish=lambda *a: None,
+    )
+    assert r["command"] == "what's the weather right now buddy?"
+    assert spoken == ["Clear and mild."]
 
 
 def test_handler_never_raises_if_speak_or_publish_fail():
@@ -139,7 +193,8 @@ def test_handler_never_raises_if_speak_or_publish_fail():
         raise RuntimeError("audio device gone")
     r = agent.handle_utterance(
         "ace hi",
-        tell_stream=lambda c, want_thinking=True: iter([("answer", "hey")]),
+        tell=lambda c: Reply(text="hey", source=ReplySource.BRAIN),
+        tell_stream=lambda c, want_thinking=True, voice=False: iter([("answer", "hey")]),
         speak_stream=boom_speak,
         publish=lambda *a: (_ for _ in ()).throw(RuntimeError("bus down")),
     )

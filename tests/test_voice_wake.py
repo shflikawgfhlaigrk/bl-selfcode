@@ -66,3 +66,39 @@ def test_case_insensitive_and_punctuation():
 def test_empty_or_blank_is_none():
     assert wake.extract_command("") is None
     assert wake.extract_command("   ") is None
+
+
+def test_utah_wake_synonym():
+    assert wake.extract_command("utah what's the weather") == "what's the weather"
+    assert wake.extract_command("hey utah summarize today's leads") == "summarize today's leads"
+
+
+def test_stt_drops_ace_to_leading_is_on_questions():
+    assert wake.extract_command("Is what's the weather right now buddy?") == (
+        "what's the weather right now buddy?"
+    )
+    assert wake.extract_command("is how are you doing") == "how are you doing"
+
+
+def test_leading_is_does_not_fire_on_random_speech():
+    assert wake.extract_command("is that true") is None
+    assert wake.extract_command("is it raining") is None
+
+
+def test_resolve_command_audio_wake_accepts_dropped_wake():
+    assert wake.resolve_command(
+        "Is what's the weather right now buddy?", audio_wake=True,
+    ) == "what's the weather right now buddy?"
+
+
+def test_resolve_command_audio_wake_bare_wake():
+    assert wake.resolve_command("", audio_wake=True) == ""
+    assert wake.resolve_command("   ", audio_wake=True) == ""
+
+
+def test_resolve_command_without_audio_wake_still_strict():
+    # mishear fallback also works text-only (no audio_wake required)
+    assert wake.resolve_command("Is what's the weather right now buddy?") == (
+        "what's the weather right now buddy?"
+    )
+    assert wake.resolve_command("tell me the weather") is None

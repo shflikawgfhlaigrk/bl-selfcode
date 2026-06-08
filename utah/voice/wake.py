@@ -1,6 +1,7 @@
-"""Wake-word gate. The wake word is "ace" (or "hey ace"). A turn only fires when
-the transcript contains it as a standalone token — 'face'/'place'/'space'/'ace-high'
-must NOT fire. The command is the rest of the utterance with the wake word removed.
+"""Wake-word gate. The wake word is "ace" / "utah" (or "hey ace", "hey utah"). A turn
+only fires when the transcript contains it as a standalone token — 'face'/'place'/
+'space'/'ace-high' must NOT fire. The command is the rest of the utterance with the
+wake word removed.
 
 STT robustness — "ace" is a single short syllable (vowel-initial, ~300ms), the
 hardest kind of token for an on-device recognizer to catch alone, so Moonshine pads
@@ -10,6 +11,10 @@ before "ace" is part of the WAKE (never the command — bare "save ace" is a bar
 not the command "save"), and the plural/possessive tails fire too. The near-miss
 guard ('face'/'place'/'space'/'ace-high') is unchanged: a filler is only consumed
 when it is a whole word sitting right before a standalone "ace".
+
+Moonshine also drops the wake entirely and mishears the leading syllable as "is"
+("ace, what's the weather" → "is what's the weather"). A conservative leading-"is"
+fallback fires only when the remainder starts with a clear command verb.
 """
 from __future__ import annotations
 
@@ -19,11 +24,15 @@ import re
 #: "ace" is swallowed into the wake so it never leaks out as a junk command.
 _FILLER = r"(?:hey|hay|say|says|save|saved|ok|okay|oh|a|ay|eh)"
 
-#: Optional filler + "ace"/"aces"/"ace's", bounded by start/whitespace on the left and
-#: whitespace/terminal-punctuation/apostrophe/end on the right — a hyphen ("ace-high")
-#: deliberately does NOT match, and 'face'/'place'/'space' lack the required boundary.
+#: Optional filler + wake name ("ace"/"utah" + common STT plural/possessive tails).
+_WAKE_NAMES = r"aces?(?:['’]s)?|utah"
 _WAKE = re.compile(
-    rf"(?:^|\s)(?:{_FILLER}\s+)?aces?(?:['’]s)?(?=\s|['’,.!?:;]|$)",
+    rf"(?:^|\s)(?:{_FILLER}\s+)?(?:{_WAKE_NAMES})(?=\s|['’,.!?:;]|$)",
+    re.IGNORECASE,
+)
+#: Leading "is" mishearing when Moonshine drops "ace" but the user clearly asked a question.
+_MISHEARD_IS = re.compile(
+    r"^is\s+(what|how|who|when|where|why|tell|give|summarize|check|show|read)\b",
     re.IGNORECASE,
 )
 _STRIP = " ,.:;!?-'’\t\n"
@@ -38,8 +47,31 @@ def extract_command(transcript: str) -> str | None:
         return None
     m = _WAKE.search(t)
     if not m:
+        mm = _MISHEARD_IS.match(t)
+        if mm:
+            return t[mm.start(1):].lstrip(_STRIP)  # treat leading "is" as dropped wake
         return None
     after = t[m.end():].lstrip(_STRIP)
     if after:
         return after
     return t[: m.start()].strip(_STRIP)  # wake at end → command precedes it
+
+
+def resolve_command(transcript: str, *, audio_wake: bool = False) -> str | None:
+    """Stage B wake gate — decide whether an utterance is addressed to Utah.
+
+    * ``audio_wake=False`` (default): transcript regex only — room speech ignored.
+    * ``audio_wake=True``: openWakeWord already armed this segment (Stage A). The
+      transcript is accepted as the command when the text wake is absent but STT
+      still captured a real question (Moonshine often drops the short "ace" syllable).
+      An empty transcript after audio wake is a bare wake (``""``), not ``None``.
+    """
+    cmd = extract_command(transcript)
+    if cmd is not None:
+        return cmd
+    if not audio_wake:
+        return None
+    t = (transcript or "").strip()
+    if not t:
+        return ""  # bare audio wake — orb pulse only
+    return t.lstrip(_STRIP)

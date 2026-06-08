@@ -323,6 +323,13 @@ async def deck_data(request):
     st = await _daemon_status()
     log.info("deck GET /%s (daemon=%s)", route, "up" if st is not None else "down")
     state = _deck_state(st)
+    # Memory counts — daemon ``status`` is spine-only; pull real counts for /state.
+    try:
+        mem = await ctl.call("memory_stats", timeout=5.0)
+        if mem:
+            state["memory"] = mem
+    except Exception:
+        pass
     # AUDIT LEDGER panel — live from the durable failure log (off-loop; empty on error)
     state["audit"] = await run_in_threadpool(_audit_rows)
     # Revenue panels — live from the Postgres product ledger (real rows or empty).
