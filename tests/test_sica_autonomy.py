@@ -131,3 +131,33 @@ def test_run_cycle_no_propagate_when_not_merged(monkeypatch, tmp_path):
         propose_fn=lambda t: {"utility": 0.5, "tests_passed": False, "merged": False, "cost_usd": 0},
         propagate_fn=lambda clone=None: called.update(ok=True) or {})
     assert "ok" not in called and "propagation" not in r
+
+
+def test_run_cycle_verifies_frontend_in_browser_after_merge(monkeypatch, tmp_path):
+    """Closed loop: after a FRONTEND change merges, the cycle re-renders the live deck and
+    records the observation — verify in the real UI, not guess."""
+    monkeypatch.setattr(selfcode, "KILL_SWITCH", tmp_path / "nope")
+    from utah import sica_goals
+    monkeypatch.setattr(sica_goals, "next_cycle_index", lambda: 0)
+    monkeypatch.setattr(sica_goals, "pick_domain", lambda n: "frontend")
+    monkeypatch.setattr(sica_goals, "next_task", lambda d, **kw: "make the dormant panel honest")
+    obs = {"rendered": True, "url": sica_goals.DASHBOARD_URL, "chars": 42, "markers": {"DORMANT": 1}}
+    r = sica_autonomy.run_cycle(
+        repo=tmp_path, sync_fn=lambda repo: True,
+        propose_fn=lambda t: {"utility": 0.9, "tests_passed": True, "merged": True, "cost_usd": 0},
+        propagate_fn=lambda clone=None: {"propagated": True},
+        verify_fn=lambda: obs)
+    assert r["domain"] == "frontend"
+    assert r["frontend_verify"] == obs            # browser re-looked at the live deck after the change
+
+
+def test_run_cycle_no_frontend_verify_on_nonfrontend_merge(monkeypatch, tmp_path):
+    """Non-frontend merges never spawn the browser — verify is frontend-only."""
+    monkeypatch.setattr(selfcode, "KILL_SWITCH", tmp_path / "nope")
+    called = {}
+    r = sica_autonomy.run_cycle(
+        repo=tmp_path, sync_fn=lambda repo: True, task_fn=lambda: "do x",   # domain="injected"
+        propose_fn=lambda t: {"utility": 0.9, "tests_passed": True, "merged": True, "cost_usd": 0},
+        propagate_fn=lambda clone=None: {"propagated": True},
+        verify_fn=lambda: called.update(ran=True) or {})
+    assert "frontend_verify" not in r and "ran" not in called

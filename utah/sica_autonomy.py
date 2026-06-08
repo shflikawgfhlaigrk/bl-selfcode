@@ -129,7 +129,7 @@ def sync_repo(repo: Path) -> bool:
 
 
 def run_cycle(*, repo=None, brain_fn=None, propose_fn=None, sync_fn=None, task_fn=None,
-              propagate_fn=None) -> dict:
+              propagate_fn=None, verify_fn=None) -> dict:
     """One autonomous improvement cycle. Boundaries injected for unit-proof.
 
     The task is chosen by the domain-rotating goal source (sica_goals): each cycle
@@ -160,6 +160,12 @@ def run_cycle(*, repo=None, brain_fn=None, propose_fn=None, sync_fn=None, task_f
            "attempts": res.attempts, "best_after": res.best_after}
     if any(a.get("merged") for a in res.attempts):
         out["propagation"] = (propagate_fn or propagate)(clone=repo)
+        # Closed loop: after a FRONTEND change lands, Ace re-renders its OWN live deck through
+        # headless Chrome and records what actually came back — verifying the change in the real
+        # UI instead of guessing it worked. Other domains don't touch the browser.
+        if domain == "frontend":
+            from utah import sica_goals
+            out["frontend_verify"] = (verify_fn or sica_goals.observe_deck)()
     _log_cycle(out)
     log.info("sica cycle: domain=%s task=%r steps=%d propagation=%s",
              domain, task[:60], res.steps, out.get("propagation"))

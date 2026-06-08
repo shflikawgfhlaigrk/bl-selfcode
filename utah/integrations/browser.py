@@ -19,7 +19,13 @@ log = logging.getLogger("utah.integrations.browser")
 
 CHROME_FLAG = runtime.UTAH_HOME / "secrets" / "chrome.json"
 RENDER_TIMEOUT_S = 30
-VIRTUAL_TIME_BUDGET_MS = 6000  # let JS settle before the DOM is dumped
+#: Cap how long ``--dump-dom`` waits for "load" before dumping the DOM it has. A page with a
+#: PERSISTENT connection (SSE ``EventSource`` / long-poll) — like Ace's own live deck — never
+#: reaches network-idle, so without this cap ``--dump-dom`` hangs until the subprocess timeout.
+#: With it, Chrome runs the JS and dumps the live rendered DOM after the cap (proven: the live
+#: deck renders in ~2s, ~86k chars). ``--virtual-time-budget`` does NOT work here (the endless
+#: SSE event stream consumes the budget) — ``--timeout`` is the correct primitive.
+LOAD_SETTLE_MS = 5000
 
 #: Common Chrome/Chromium install locations (macOS + linux). chrome.json {"binary": "..."}
 #: overrides; otherwise the first that exists wins.
@@ -56,16 +62,18 @@ def available() -> bool:
 def _chrome_render(url: str, timeout: int = RENDER_TIMEOUT_S) -> str:
     """Render *url* with headless Chrome and return the post-JS DOM. Raises on failure.
 
-    NOTE: ``--dump-dom`` dumps once the page reaches network-idle, so a page with a
-    PERSISTENT connection (an SSE ``EventSource``, a long-poll) never settles and this
-    times out. Such pages should be rendered via a quiescent twin (see the frontend
-    self-inspection lane), or fetched as data — not force-dumped."""
+    Uses ``--dump-dom`` (runs the page's JS, dumps the rendered DOM) bounded by ``--timeout``
+    so a page with a PERSISTENT connection (an SSE ``EventSource`` / long-poll) — like Ace's
+    OWN live deck — dumps its live, JS-rendered DOM after the settle cap instead of hanging
+    forever. The cap is held a few seconds under the subprocess ``timeout`` so Chrome dumps
+    before we give up. Static/quiescent pages still dump immediately on load."""
     chrome = chrome_binary()
     if not chrome:
         raise RuntimeError("no Chrome binary found")
+    settle_ms = max(1000, min(LOAD_SETTLE_MS, timeout * 1000 - 3000))
     proc = subprocess.run(
         [chrome, "--headless=new", "--disable-gpu", "--no-sandbox", "--dump-dom",
-         f"--virtual-time-budget={VIRTUAL_TIME_BUDGET_MS}", url],
+         f"--timeout={settle_ms}", url],
         capture_output=True, text=True, timeout=timeout,
     )
     if proc.returncode != 0 or not proc.stdout:

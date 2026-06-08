@@ -39,11 +39,12 @@ CYCLE_N = runtime.RUN_DIR / "selfcode-cycle.n"
 VERIFY_JSON = runtime.RUN_DIR / "verify.json"
 #: Ace's own live deck — what the browser renders during frontend discovery.
 DASHBOARD_URL = os.environ.get("UTAH_DASHBOARD_URL", "http://127.0.0.1:8766/")
-#: The quiescent structural twin (/sim) — the live deck holds a persistent SSE
-#: connection so headless --dump-dom never settles on it; /sim renders cleanly and
-#: carries the same panel structure to critique. Brief live attempt, reliable fallback.
+#: The quiescent structural twin (/sim) — FALLBACK only. The live deck renders now
+#: (browser.py caps --dump-dom with --timeout so the persistent SSE no longer hangs it);
+#: /sim carries the same panel structure if a live render ever fails.
 DASHBOARD_SIM_URL = os.environ.get("UTAH_DASHBOARD_SIM_URL", "http://127.0.0.1:8766/sim")
-#: Fast-fail on the live deck (it won't settle) so discovery falls back, not blocks 30s.
+#: Bound the live-deck render so a slow/hung Chrome falls back to /sim instead of blocking
+#: (the live deck normally dumps in ~2s; this is the safety cap, not a fast-fail-by-design).
 _LIVE_RENDER_TIMEOUT_S = int(os.environ.get("UTAH_FRONTEND_RENDER_TIMEOUT", "8"))
 
 
@@ -138,10 +139,10 @@ def _frontend_signal(render_fn=None) -> str:
     Chrome and report what actually came back, so the brain proposes a REAL, grounded
     frontend/UX optimization — not a guess about markup it never saw.
 
-    The LIVE deck holds a persistent SSE connection, so ``--dump-dom`` won't settle on
-    it; we try it briefly (a render-hang is itself a real, reportable finding) then fall
-    back to the quiescent ``/sim`` twin, which carries the same panel structure and
-    renders cleanly. Degrades to a safe generic prompt only if BOTH fail. Never raises."""
+    Renders the LIVE deck (/) FIRST — ``browser.render`` now bounds ``--dump-dom`` with a
+    settle cap (``--timeout``), so the persistent-SSE deck dumps its real live DOM (~2s)
+    instead of hanging. Falls back to the quiescent ``/sim`` twin only if the live render
+    fails, then to a safe generic prompt if BOTH fail. Never raises."""
     from utah.integrations import browser
 
     fn = render_fn or browser.render
@@ -152,21 +153,47 @@ def _frontend_signal(render_fn=None) -> str:
         except Exception as exc:  # noqa: BLE001 — discovery is best-effort
             return {"rendered": False, "error": f"{type(exc).__name__}: {exc}", "url": url}
 
-    # The LIVE deck (/) holds a persistent SSE connection, so headless --dump-dom never settles
-    # on it. Trying it every cycle only spawned a doomed 8s Chrome render and spammed
-    # browser/render_failed for a gap we ALREADY know about. Render the quiescent /sim twin (same
-    # panel structure) instead, and carry the known live-deck render gap as a static note so the
-    # brain can still target it — without manufacturing a failure each cycle.
-    live_note = ("the live deck (/) holds a persistent SSE connection, so headless --dump-dom "
-                 "won't settle on it — a known robustness gap worth fixing")
+    # Look at the REAL live deck first — browser.py caps --dump-dom with --timeout so the SSE
+    # stream no longer hangs it (proven: the live deck dumps ~86k chars in ~2s). Fall back to the
+    # quiescent /sim structural twin only if the live render fails, then to a generic prompt.
+    live = _try(DASHBOARD_URL, timeout=_LIVE_RENDER_TIMEOUT_S)
+    if live.get("rendered"):
+        return (f"Ace rendered its OWN LIVE deck {DASHBOARD_URL} through headless Chrome and "
+                f"observed: {_summarize_dom(live.get('html', ''))}. " + _FRONTEND_ASK)
     twin = _try(DASHBOARD_SIM_URL)
     if twin.get("rendered"):
-        return (f"Ace rendered the deck's quiescent structural twin {DASHBOARD_SIM_URL} through "
-                f"headless Chrome and observed: {_summarize_dom(twin.get('html', ''))}. "
-                f"(Note: {live_note}.) " + _FRONTEND_ASK)
+        return (f"Ace's live deck didn't render ({live.get('error', 'render failed')}); rendered the "
+                f"quiescent structural twin {DASHBOARD_SIM_URL} instead and observed: "
+                f"{_summarize_dom(twin.get('html', ''))}. " + _FRONTEND_ASK)
     why = "no headless Chrome installed" if twin.get("gated") else twin.get("error", "render failed")
-    return (f"(browser frontend discovery unavailable: {why}; also {live_note}). Propose a small, "
-            "safe frontend robustness fix to utah/interface/static/live.html or utah/interface/web.py.")
+    return (f"(browser frontend discovery unavailable: {why}). Propose a small, safe frontend "
+            "robustness fix to utah/interface/static/live.html or utah/interface/web.py.")
+
+
+def observe_deck(render_fn=None) -> dict:
+    """Render the live deck (fallback /sim) → a STRUCTURED observation
+    ``{rendered, url, chars, markers}``. Lets the self-code loop re-look at its OWN face
+    AFTER a frontend change and record what actually rendered — the closed self-optimizing
+    browser loop (verify in the real UI, not guess). Never raises; ``rendered=False`` if
+    neither URL renders."""
+    from utah.integrations import browser
+
+    fn = render_fn or browser.render
+
+    def _try(url, **kw):
+        try:
+            return fn(url, **kw) if render_fn is None else fn(url)
+        except Exception:  # noqa: BLE001 — observation is best-effort
+            return {"rendered": False, "url": url}
+
+    for url, kw in ((DASHBOARD_URL, {"timeout": _LIVE_RENDER_TIMEOUT_S}), (DASHBOARD_SIM_URL, {})):
+        r = _try(url, **kw)
+        if r.get("rendered"):
+            html = r.get("html", "") or ""
+            low = html.lower()
+            markers = {m: low.count(m.lower()) for m in _DOM_MARKERS if low.count(m.lower())}
+            return {"rendered": True, "url": url, "chars": len(html), "markers": markers}
+    return {"rendered": False, "url": DASHBOARD_URL, "chars": 0, "markers": {}}
 
 
 _FRONTEND_ASK = (
@@ -208,4 +235,4 @@ def next_task(domain: str, *, brain_fn, **inject) -> str:
 
 
 __all__ = ["DOMAINS", "pick_domain", "next_cycle_index", "gather_signals",
-           "build_prompt", "next_task", "CYCLE_N", "DASHBOARD_URL"]
+           "build_prompt", "next_task", "observe_deck", "CYCLE_N", "DASHBOARD_URL"]

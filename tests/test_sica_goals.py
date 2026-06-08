@@ -38,31 +38,34 @@ def test_baseline_signal_reads_verifier():
     assert "state=green" in sig and "coverage" in sig.lower()
 
 
-def test_frontend_signal_renders_sim_twin_and_grounds_in_the_dom():
-    """Ace uses its OWN browser, but renders the quiescent /sim twin — the live deck's
-    persistent SSE stops headless --dump-dom settling, so force-dumping it every cycle just
-    spammed render_failed. The twin's real DOM markers still ground the brain."""
+def test_frontend_signal_renders_live_deck_and_grounds_in_the_dom():
+    """Ace uses its OWN browser to render its OWN LIVE deck (/) — browser.render caps
+    --dump-dom with --timeout so the persistent-SSE deck dumps its real DOM. The live DOM
+    markers ground the brain's proposal."""
     seen = []
     def fake_render(url):
         seen.append(url)
         return {"rendered": True, "html": "<div>DORMANT</div><div>GATED</div> awaiting events…",
                 "chars": 48, "url": url}
     sig = sica_goals.gather_signals("frontend", render_fn=fake_render)
-    assert seen == [sica_goals.DASHBOARD_SIM_URL]    # ONLY the twin — the live deck is not dumped
-    assert "structural twin" in sig
-    assert "dormant" in sig.lower()                 # observed marker fed to the brain
+    assert seen == [sica_goals.DASHBOARD_URL]        # the LIVE deck, rendered first
+    assert "LIVE deck" in sig
+    assert "dormant" in sig.lower()                  # observed marker fed to the brain
     assert "live.html" in sig and "web.py" in sig    # the editable frontend surface
 
 
-def test_frontend_signal_carries_the_live_deck_render_gap_note():
-    """No doomed live render each cycle, but the known live-deck SSE render gap is still
-    carried as a static note so the brain can target it."""
+def test_frontend_signal_falls_back_to_sim_twin_when_live_fails():
+    """If the live deck fails to render, discovery falls back to the quiescent /sim twin
+    (same panel structure) instead of blocking — both are tried; the twin grounds the brain."""
+    seen = []
     def fake_render(url):
-        assert url == sica_goals.DASHBOARD_SIM_URL
+        seen.append(url)
+        if url == sica_goals.DASHBOARD_URL:
+            return {"rendered": False, "error": "render failed", "url": url}
         return {"rendered": True, "html": "<div class='card'>panels here</div>", "url": url}
     sig = sica_goals.gather_signals("frontend", render_fn=fake_render)
-    assert "structural twin" in sig                  # rendered the /sim twin
-    assert "persistent SSE" in sig                   # live-deck render gap still flagged
+    assert seen == [sica_goals.DASHBOARD_URL, sica_goals.DASHBOARD_SIM_URL]  # live tried, then twin
+    assert "structural twin" in sig                  # fell back to the /sim twin
     assert "live.html" in sig
 
 
@@ -78,6 +81,29 @@ def test_frontend_signal_defensive_on_render_error():
         raise RuntimeError("chrome crashed")
     sig = sica_goals.gather_signals("frontend", render_fn=boom)
     assert "unavailable" in sig and "live.html" in sig   # never raises into the loop
+
+
+def test_observe_deck_returns_structured_live_observation():
+    """observe_deck renders the LIVE deck and returns structured markers for the closed loop."""
+    seen = []
+    def fake_render(url):
+        seen.append(url)
+        return {"rendered": True, "html": "<x>DORMANT</x><x>OFFLINE</x>", "url": url}
+    obs = sica_goals.observe_deck(render_fn=fake_render)
+    assert seen == [sica_goals.DASHBOARD_URL]            # live deck first
+    assert obs["rendered"] and obs["url"] == sica_goals.DASHBOARD_URL
+    assert obs["markers"]["DORMANT"] == 1 and obs["markers"]["OFFLINE"] == 1
+
+
+def test_observe_deck_falls_back_then_gates_without_raising():
+    def half(url):                                       # live fails → /sim used
+        if url == sica_goals.DASHBOARD_URL:
+            return {"rendered": False, "url": url}
+        return {"rendered": True, "html": "<x>GATED</x>", "url": url}
+    obs = sica_goals.observe_deck(render_fn=half)
+    assert obs["rendered"] and obs["url"] == sica_goals.DASHBOARD_SIM_URL
+    none = sica_goals.observe_deck(render_fn=lambda url: {"rendered": False, "url": url})
+    assert none["rendered"] is False and none["markers"] == {}   # never raises
 
 
 def test_autonomy_signal_summarizes_archive(tmp_path):
