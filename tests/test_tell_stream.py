@@ -101,7 +101,8 @@ def test_tell_stream_remembers_the_turn_after_brain(monkeypatch):
     monkeypatch.setattr(memory, "recall", lambda t, *a, **k: [])
     monkeypatch.setattr(memory, "store", lambda content, **k: stored.update(content=content, source=k.get("source")))
     brain.set_stream_runner(ScriptedStreamRunner(_brain_lines("reason", "The answer.")))
-    list(core.tell_stream("q?"))
+    # A substantive question — room-speech grunts ("q?") are deliberately not stored.
+    list(core.tell_stream("who painted the Mona Lisa?"))
     assert "The answer." in stored.get("content", "")
     assert stored.get("source") == "turn"
 

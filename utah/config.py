@@ -138,6 +138,19 @@ WHISPER_MODEL: str = os.environ.get("UTAH_WHISPER", "mlx-community/whisper-base.
 PIPER_MODEL: str = os.environ.get(
     "UTAH_PIPER", os.path.expanduser("~/.utah/models/piper/en_GB-cori-high.onnx")
 )
+#: openWakeWord ONNX for audio-level "hey ace" arming (Stage A — never opens a turn alone).
+#: v3 is the trained keyword model; falls back to legacy ~/.ace path when missing.
+WAKE_MODEL: str = os.environ.get(
+    "UTAH_WAKE_MODEL",
+    os.path.expanduser("~/.utah/models/wake/hey_ace_v3.onnx"),
+)
+#: Confidence to arm command capture. ONNX arms only — STT/text still resolves the command.
+WAKE_THRESHOLD: float = float(os.environ.get("UTAH_WAKE_THRESHOLD", "0.55"))
+#: Seconds after an audio wake hit to capture the command utterance (STT runs once).
+WAKE_ARM_S: float = float(os.environ.get("UTAH_WAKE_ARM_S", "8.0"))
+#: VAD trailing-silence frames before STT (32 ms/frame). Lower = faster end-of-utterance.
+VAD_OFFSET: int = int(os.environ.get("UTAH_VAD_OFFSET", "12"))          # was 20 (~640 ms)
+VAD_OFFSET_ARMED: int = int(os.environ.get("UTAH_VAD_OFFSET_ARMED", "6"))  # ~192 ms post-wake
 
 #: Durable cache for the fastembed reranker model. MUST live under ~/.utah
 #: (where every Utah model lives) — fastembed's default is macOS temp
@@ -209,11 +222,14 @@ CURATED_SOURCES: frozenset[str] = frozenset({"core", "knowledge", "code"})
 CURATED_LANE_K: int = 5
 
 #: Additive ranking prior per source — a source-authority prior on the rerank score.
-#: Bounded (≈ENTITY_BOOST scale) so a STRONG match in ANY source still wins outright;
-#: it only tips the LOW-confidence regime (vague query, nothing scores well) toward
-#: curated wisdom over low-value migrated facts. It shifts rerank ORDER only, never a
-#: hit's ``sim``, so the no-fabrication answer gate (which reads sim) is unaffected.
-SOURCE_BOOST: dict[str, float] = {"core": 1.5, "knowledge": 1.0, "code": 0.5}
+#: Bounded by ENTITY_BOOST scale (≤0.5) so a STRONG match in ANY source still wins
+#: outright; it only tips the LOW-confidence regime (vague query, nothing scores well)
+#: toward curated wisdom over low-value migrated facts. It shifts rerank ORDER only,
+#: never a hit's ``sim``, so the no-fabrication answer gate (which reads sim) is
+#: unaffected. NOTE: the reranker emits logits whose relevant-vs-irrelevant spread is
+#: only ~1–2; the prior was 1.5 (same scale), which could lift an *irrelevant* curated
+#: row over a *relevant* fact. Kept ≤ENTITY_BOOST so it can only break genuine ties.
+SOURCE_BOOST: dict[str, float] = {"core": 0.5, "knowledge": 0.3, "code": 0.2}
 
 # --- no-fabrication answer gate ----------------------------------------------
 #: Answer straight from memory ONLY when BOTH hold; otherwise fall to the brain

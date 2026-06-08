@@ -124,10 +124,26 @@ def _try_local(text: str, context: str, *, heavy: bool) -> str | None:
     return out if out and not local.is_refusal(out) else None
 
 
+def _is_substantive_turn(text: str) -> bool:
+    """True when a question is worth remembering as a durable fact.
+
+    The mic is always on, so room speech and grunts ("No,no,no…", "uh uh", "?",
+    a single word) get transcribed and would otherwise be stored as a
+    confidence-0.5 ``turn`` that recalls #1 on the next ask — a self-answer
+    confabulation loop. Require real content: ≥2 word-tokens AND ≥2 *distinct*
+    ones (rejects a single repeated grunt)."""
+    words = re.findall(r"[a-z0-9]{2,}", (text or "").lower())
+    return len(words) >= 2 and len(set(words)) >= 2
+
+
 def _remember_turn(text: str, reply_text: str) -> None:
     """Store one exchange so future recall compounds. Refusals carry nothing
-    durable and are skipped; storage is best-effort (the reply already went out)."""
+    durable and are skipped; non-substantive room speech is skipped so it never
+    becomes a recallable fact; storage is best-effort (the reply already went out)."""
     if not reply_text or local.is_refusal(reply_text):
+        return
+    if not _is_substantive_turn(text):
+        log.debug("not remembering non-substantive turn: %r", (text or "")[:40])
         return
     try:
         memory.store(f"Q: {text}\nA: {reply_text}", source="turn", confidence=0.5)
@@ -297,7 +313,7 @@ def tell(text: str) -> Reply:
     return Reply(text=reply_text, source=ReplySource.BRAIN, hits=hits)
 
 
-def tell_stream(text: str, *, want_thinking: bool = True) -> Iterator[tuple[str, str]]:
+def tell_stream(text: str, *, want_thinking: bool = True, voice: bool = False) -> Iterator[tuple[str, str]]:
     """Streaming turn: recall → ground → stream the brain's reasoning+answer →
     remember. Same no-fabrication contract as :func:`tell`, but yields ordered
     ``(channel, chunk)`` events so chat AND voice can show reasoning live like
@@ -308,6 +324,10 @@ def tell_stream(text: str, *, want_thinking: bool = True) -> Iterator[tuple[str,
     ``want_thinking`` (default True) drives the live "reasoning like Claude" chat UX.
     VOICE passes ``False``: it never speaks the thinking block, so requesting it is pure
     latency before first audio — see :func:`brain.think_stream`.
+
+    ``voice=True`` skips the grounding transparency event (voice never renders it).
+    Capability/social routing matches :func:`tell` — BEFORE recall — so weather/time
+    do not pay a Postgres vector round-trip on the hot path.
     """
     text = (text or "").strip()
     if not text:
@@ -316,11 +336,13 @@ def tell_stream(text: str, *, want_thinking: bool = True) -> Iterator[tuple[str,
         yield ("done", "I didn't catch that.")
         return
 
+    route = router.route(text)
+
     # 0. SOCIAL fast-path — a whole-message greeting/ack/thanks gets an instant canned
     #    reply in the STREAMING path too (chat box + voice), not just tell(). Without
     #    this, "hey" fell through to the brain — a ~15s round-trip for a pleasantry.
     #    No model, no recall, no memory write. Threaded for follow-up continuity.
-    if router.route(text) is Route.SOCIAL:
+    if route is Route.SOCIAL:
         canned = social.reply(text)
         if canned:
             yield ("source", "social")
@@ -329,10 +351,18 @@ def tell_stream(text: str, *, want_thinking: bool = True) -> Iterator[tuple[str,
             yield ("done", canned)
             return
 
-    # 1. RECALL — pull memory as GROUNDING for the tiers. Memory feeds cognition;
-    #    it never short-circuits the stream. The interactive turn ALWAYS reasons so
-    #    the chat box (and voice) show thinking live, like Claude — even when the
-    #    answer is "known". (The non-streaming tell() keeps the verbatim fast-path.)
+    # 1. CAPABILITY / KNOWLEDGE — LIVE deterministic answers (weather, brief, time).
+    #    MUST run before recall (same order as :func:`tell`) so voice/chat do not pay a
+    #    vector recall round-trip for a question the capability answers in milliseconds.
+    cap = _capability_reply(text, route, hits=[])
+    if cap is not None:
+        yield ("source", "capability")
+        yield ("answer", cap.text)
+        _CONVO.append((text, cap.text))
+        yield ("done", cap.text)
+        return
+
+    # 2. RECALL — grounding for reasoning tiers only (past the instant lanes above).
     hits: list = []
     try:
         hits = memory.recall(text)
@@ -341,24 +371,15 @@ def tell_stream(text: str, *, want_thinking: bool = True) -> Iterator[tuple[str,
         failures.record("memory", "unavailable", str(exc))
         hits = []
     context = _build_context(hits)
-    route = router.route(text)
 
-    # 1.5 L1 CAPABILITY — deterministic grounded answer (real data; not stored).
-    cap = _capability_reply(text, route, hits)
-    if cap is not None:
-        yield ("source", "capability")
-        yield ("answer", cap.text)
-        _CONVO.append((text, cap.text))
-        yield ("done", cap.text)
-        return
-
-    # 1.55 GROUNDING (transparency) — surface the REAL recalled memory the reasoning
+    # 2.5 GROUNDING (transparency) — surface the REAL recalled memory the reasoning
     #      tiers (local/learn/brain) are about to stand on, so the chat box can render
     #      "grounded in N facts" with a drill-down into the exact rows. Capabilities
     #      already returned above (they are deterministic, not memory-grounded), so this
     #      reflects only reasoning turns. Empty recall → no event (cold; the brain then
     #      says "I don't know" or learns). Never fabricated — these are live rows.
-    if hits:
+    #      Voice skips this — it never renders the drill-down, only latency.
+    if hits and not voice:
         yield ("grounding", json.dumps([
             {"id": getattr(h, "id", None),
              "source": getattr(h, "source", "") or "",
