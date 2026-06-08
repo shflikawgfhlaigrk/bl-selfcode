@@ -1,4 +1,5 @@
-"""WealthCharts feed bridge — pure frame parsing + the gated, real-only run loop."""
+"""WealthCharts feed bridge — pure frame parsing + closed-bar aggregation + the gated,
+real-only, bar-based run loop (no firing on tick jitter)."""
 from __future__ import annotations
 
 from utah.integrations import wc_feed
@@ -9,20 +10,39 @@ REAL = ('{"cmd":"feed","data":{"type":"candle","c":"CM.MNQM6","candle":'
         '"cts":224622,"cq":"1","cepoch":1781045182,"type":"rt"}}}')
 
 
-def test_parse_candle_extracts_symbol_and_ohlc():
+def test_parse_candle_extracts_symbol_ohlc_epoch():
     c = wc_feed.parse_candle(REAL)
-    assert c["symbol"] == "CM.MNQM6"
+    assert c["symbol"] == "CM.MNQM6" and c["epoch"] == 1781045182
     assert c["close"] == 29376.5 and c["open"] == 29374.0
     assert c["high"] == 29380.0 and c["low"] == 29370.0
-    assert c["epoch"] == 1781045182
 
 
-def test_parse_candle_ignores_keepalive_and_junk():
+def test_parse_candle_ignores_keepalive_junk_and_missing_fields():
     assert wc_feed.parse_candle('{"cmd":"keepalive","ref":81}') is None
-    assert wc_feed.parse_candle("2") is None                       # scalar frame
+    assert wc_feed.parse_candle("2") is None
     assert wc_feed.parse_candle("not json") is None
-    assert wc_feed.parse_candle('{"cmd":"feed","data":{"type":"quote"}}') is None  # non-candle
-    assert wc_feed.parse_candle('{"cmd":"feed","data":{"type":"candle","c":"X","candle":{}}}') is None
+    assert wc_feed.parse_candle('{"cmd":"feed","data":{"type":"quote"}}') is None
+    # candle with no close OR no epoch -> rejected (never a fabricated price/time)
+    assert wc_feed.parse_candle('{"cmd":"feed","data":{"type":"candle","c":"X","candle":{"cc":1}}}') is None
+
+
+def test_closed_bars_buckets_by_epoch_and_excludes_forming_bar():
+    # bar_seconds=10: epochs 100-109 -> bar 10, 110-119 -> bar 11, 120 -> bar 12 (forming)
+    ticks = [(100, 1.0), (105, 2.0), (109, 3.0),   # bar 10 closes at 3.0
+             (110, 4.0), (119, 5.0),               # bar 11 closes at 5.0
+             (120, 6.0)]                           # bar 12 still forming -> excluded
+    bars = wc_feed.closed_bars(ticks, bar_seconds=10)
+    assert bars == [(10, 3.0), (11, 5.0)]          # last close per closed bucket, forming dropped
+
+
+def test_ingest_persists_and_dedups_across_overlapping_windows():
+    state = {}
+    # window 1: bars 10 (closes 3.0) and 11 (closes 5.0) complete; bar 12 still forming (9.0)
+    wc_feed.ingest(state, "X", [(100, 1.0), (109, 3.0), (110, 5.0), (120, 9.0)], bar_seconds=10)
+    # window 2 OVERLAPS — re-sends bar 11, completes bar 12 (last tick 7.0), bar 13 forming.
+    # bar 11 must NOT double-count; bar 12 lands once.
+    closes = wc_feed.ingest(state, "X", [(110, 5.0), (120, 6.0), (129, 7.0), (130, 8.0)], bar_seconds=10)
+    assert closes == [3.0, 5.0, 7.0]               # bars 10,11,12 — each once; 13 still forming
 
 
 def test_run_gates_when_feed_unavailable(monkeypatch):
@@ -31,26 +51,28 @@ def test_run_gates_when_feed_unavailable(monkeypatch):
     assert r["available"] is False and r["fires"] == 0
 
 
-def test_run_records_a_real_fire_on_breakout(monkeypatch):
-    """Latest close breaks the prior lookback high → one REAL (synthetic=False) long fire."""
+def test_run_fires_on_a_real_closed_bar_breakout(monkeypatch):
+    """A breakout of the prior closed-bar range fires ONE real (synthetic=False) long — and
+    only once enough CLOSED bars exist (no firing on the forming bar / tick jitter)."""
     monkeypatch.setattr(wc_feed, "feed_available", lambda: True)
     fired: list = []
 
     class FakeLedger:
         def record_fire(self, engine, direction, entry=None, synthetic=False):
-            fired.append((engine, direction, entry, synthetic))
-            return 1
+            fired.append((direction, synthetic)); return 1
 
-    closes = [100, 101, 102, 101, 103, 104, 110]   # 7 closes; last breaks prior-5 high
-    r = wc_feed.run(ledger=FakeLedger(), lookback=5,
-                    collect_fn=lambda seconds: {"CM.MNQM6": closes})
-    assert r["available"] is True and r["evaluated"] == 1 and r["fires"] == 1
-    assert fired[0][1] == "long" and fired[0][3] is False           # real, never synthetic
+    # 7 ticks across 7 distinct 1s bars; the 7th (forming) is excluded -> 6 closed bars:
+    # 100,101,102,101,103,110 ; with lookback 5 the last CLOSED bar 110 breaks prior-5 high
+    ticks = {"CM.MNQM6": [(0, 100.0), (1, 101.0), (2, 102.0), (3, 101.0),
+                          (4, 103.0), (5, 110.0), (6, 111.0)]}
+    r = wc_feed.run(ledger=FakeLedger(), bar_seconds=1, lookback=5,
+                    collect_fn=lambda seconds: ticks)
+    assert r["available"] is True and r["ready"] == 1 and r["fires"] == 1
+    assert fired == [("long", False)]                  # real, never synthetic
 
 
-def test_run_no_fire_when_range_bound(monkeypatch):
+def test_run_no_fire_before_enough_bars(monkeypatch):
     monkeypatch.setattr(wc_feed, "feed_available", lambda: True)
-    closes = [100, 101, 100, 101, 100, 101, 100]   # oscillating, no breakout
-    r = wc_feed.run(ledger=object(), lookback=5,
-                    collect_fn=lambda seconds: {"X": closes})
-    assert r["fires"] == 0 and r["evaluated"] == 1
+    ticks = {"X": [(0, 100.0), (1, 101.0), (2, 99.0)]}   # only 2 closed bars, lookback 5
+    r = wc_feed.run(ledger=object(), bar_seconds=1, lookback=5, collect_fn=lambda s: ticks)
+    assert r["ready"] == 0 and r["fires"] == 0           # warms up, never fakes a signal

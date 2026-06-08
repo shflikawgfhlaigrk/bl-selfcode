@@ -1,16 +1,17 @@
 """WealthCharts live feed bridge — attach to Michael's logged-in WC dashboard over the
-Chrome DevTools Protocol and stream its realtime candle feed into Utah's trading engines.
+Chrome DevTools Protocol and stream its realtime feed into Utah's trading engines.
 
-WC runs in a dedicated, already-logged-in Chrome profile (``~/.ace/chrome-wc``) launched with
-``--remote-debugging-port``. Its dashboard opens a WebSocket to WC's market server and receives
-frames like::
+WC streams ~1-second candle updates (multiple tick updates per second), e.g.::
 
     {"cmd":"feed","data":{"type":"candle","c":"CM.MNQM6",
-     "candle":{"co":29374.0,"cM":29374.0,"cm":29374.0,"cc":29374.0,"cepoch":1781045182,"type":"rt"}}}
+     "candle":{"co":29374.0,"cM":29380.0,"cm":29370.0,"cc":29376.5,"cepoch":1781045182,"type":"rt"}}}
 
-We read those frames READ-ONLY via CDP (never send an order) and feed the per-symbol close
-series to ``trading.evaluate`` → ``ledger.record_fire``. Real data, real fires, never faked —
-when WC isn't reachable the gate is recorded and the engines stay dormant.
+Evaluating EVERY tick is noise (the first cut fired ~never on real lookback and only on tick
+jitter when forced). So we AGGREGATE ticks into CLOSED BARS per symbol (bucket by
+``cepoch // BAR_SECONDS``; the last close of a completed bucket is the bar's close, the
+still-forming bucket is excluded), keep a persistent per-symbol bar history, and evaluate the
+engines on the bar series → ``ledger.record_fire`` on a real breakout. Read-only (never sends
+an order); gates honestly when WC is unreachable; never fabricates a price.
 """
 from __future__ import annotations
 
@@ -25,6 +26,10 @@ CDP_PORT = int(os.environ.get("UTAH_WC_CDP_PORT", "9222"))
 WC_HOST = "app.wealthcharts.com"
 CHROME = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
 WC_PROFILE = os.path.expanduser(os.environ.get("UTAH_WC_PROFILE", "~/.ace/chrome-wc"))
+#: Bar size in seconds (the feed is ~1s candles; 15s bars + lookback 20 = a 5-minute
+#: breakout — a real intraday timeframe, not tick jitter). Tune with UTAH_WC_BAR_SECONDS.
+BAR_SECONDS = int(os.environ.get("UTAH_WC_BAR_SECONDS", "15"))
+MAX_BARS = 400
 
 
 def _f(v):
@@ -37,8 +42,8 @@ def _f(v):
 def parse_candle(payload: str) -> dict | None:
     """Parse one WC WebSocket frame → ``{symbol, close, open, high, low, epoch}`` or None.
 
-    PURE (unit-tested). Returns None for keepalives, non-feed, or non-candle frames, and for
-    malformed JSON — so a junk frame never crashes the bridge or fabricates a price."""
+    PURE (unit-tested). Returns None for keepalives, non-feed, non-candle, malformed, or
+    value-less frames — so junk never crashes the bridge or fabricates a price."""
     try:
         obj = json.loads(payload)
     except (ValueError, TypeError):
@@ -53,16 +58,46 @@ def parse_candle(payload: str) -> dict | None:
     if not isinstance(candle, dict) or not symbol:
         return None
     close = _f(candle.get("cc"))
-    if close is None:
+    epoch = candle.get("cepoch")
+    if close is None or epoch is None:
         return None
     return {"symbol": symbol, "close": close, "open": _f(candle.get("co")),
-            "high": _f(candle.get("cM")), "low": _f(candle.get("cm")),
-            "epoch": candle.get("cepoch")}
+            "high": _f(candle.get("cM")), "low": _f(candle.get("cm")), "epoch": int(epoch)}
+
+
+def closed_bars(ticks, bar_seconds: int = BAR_SECONDS) -> list[tuple[int, float]]:
+    """``ticks``: time-ordered ``[(epoch, close), ...]`` → ``[(bar_key, close), ...]`` for the
+    CLOSED bars only (the still-forming final bucket is excluded). PURE (unit-tested)."""
+    order: list[int] = []
+    last: dict[int, float] = {}
+    for ep, cl in ticks:
+        if ep is None or cl is None:
+            continue
+        k = int(ep) // bar_seconds
+        if k not in last:
+            order.append(k)
+        last[k] = cl
+    closed = order[:-1] if len(order) >= 2 else []
+    return [(k, last[k]) for k in closed]
+
+
+def ingest(state: dict, symbol: str, ticks, *, bar_seconds: int = BAR_SECONDS,
+           max_bars: int = MAX_BARS) -> list[float]:
+    """Merge a window of ``ticks`` into *symbol*'s persistent closed-bar history in *state*,
+    deduped by bar_key so overlapping collection windows never double-count. Returns the
+    symbol's rolling list of closed-bar closes. PURE (unit-tested)."""
+    s = state.setdefault(symbol, {"last_key": -1, "closes": []})
+    for k, close in closed_bars(ticks, bar_seconds):
+        if k > s["last_key"]:
+            s["closes"].append(close)
+            s["last_key"] = k
+    if len(s["closes"]) > max_bars:
+        del s["closes"][:-max_bars]
+    return s["closes"]
 
 
 def _wc_page() -> dict | None:
-    """The logged-in WC dashboard CDP target, or None if WC isn't reachable / on the login
-    page. Bounced-to-login (no session) reads as unavailable — never a fake feed."""
+    """The logged-in WC dashboard CDP target, or None if WC isn't reachable / on /login."""
     try:
         pages = json.load(urllib.request.urlopen(
             f"http://127.0.0.1:{CDP_PORT}/json", timeout=4))
@@ -82,17 +117,16 @@ def feed_available() -> bool:
     return _wc_page() is not None
 
 
-def collect_closes(seconds: float = 12.0, *, page=None) -> dict[str, list[float]]:
-    """Attach to the live WC feed and collect per-symbol realtime closes for *seconds*.
-    Read-only (only Network.enable is sent — never an order). Returns ``{symbol: [close,...]}``
-    in arrival order. Never raises (a feed hiccup yields whatever was collected)."""
+def collect_ticks(seconds: float = 30.0, *, page=None) -> dict[str, list[tuple[int, float]]]:
+    """Attach to the live WC feed and collect ``{symbol: [(epoch, close), ...]}`` for
+    *seconds*. Read-only (only Network.enable). Never raises."""
     import asyncio
     import time as _time
 
     page = page or _wc_page()
     if not page:
         return {}
-    series: dict[str, list[float]] = {}
+    series: dict[str, list[tuple[int, float]]] = {}
 
     async def _run():
         import websockets
@@ -110,7 +144,7 @@ def collect_closes(seconds: float = 12.0, *, page=None) -> dict[str, list[float]
                     continue
                 cd = parse_candle(m["params"]["response"]["payloadData"])
                 if cd:
-                    series.setdefault(cd["symbol"], []).append(cd["close"])
+                    series.setdefault(cd["symbol"], []).append((cd["epoch"], cd["close"]))
 
     try:
         asyncio.run(_run())
@@ -119,31 +153,36 @@ def collect_closes(seconds: float = 12.0, *, page=None) -> dict[str, list[float]
     return series
 
 
-def run(ledger, *, seconds: float = 20.0, lookback: int = 20, engine: str = "breakout",
-        collect_fn=None) -> dict:
-    """Stream the live WC feed and record a REAL fire for any symbol whose latest close breaks
-    its recent range (trading.evaluate). GATED: if WC isn't reachable, record the gate and fire
-    nothing (never faked). Returns ``{available, symbols, fires, evaluated}``. Never raises."""
+def run(ledger, *, seconds: float = 30.0, bar_seconds: int = BAR_SECONDS, lookback: int = 20,
+        engine: str = "breakout", state: dict | None = None, collect_fn=None) -> dict:
+    """One window: collect live ticks, aggregate to CLOSED bars (merged into persistent
+    *state* across windows), and record a REAL fire for any symbol whose latest closed bar
+    breaks its recent range. GATED: if WC is unreachable, record the gate (never faked).
+    Returns ``{available, symbols, evaluated, fires, ready}``. Never raises."""
     from utah import failures
     from utah.product import trading
 
+    state = state if state is not None else {}
     if not feed_available():
         failures.record("trading", "feed_gated",
                         "WC dashboard not reachable on CDP — launch chrome-wc + log in (Michael)")
-        return {"available": False, "symbols": 0, "fires": 0, "evaluated": 0}
-    series = (collect_fn or collect_closes)(seconds)
-    fires = evaluated = 0
-    for symbol, closes in series.items():
+        return {"available": False, "symbols": 0, "evaluated": 0, "fires": 0, "ready": 0}
+    ticks = (collect_fn or collect_ticks)(seconds)
+    fires = evaluated = ready = 0
+    for symbol, tk in ticks.items():
+        closes = ingest(state, symbol, tk, bar_seconds=bar_seconds)
         if len(closes) < lookback + 1:
             continue
+        ready += 1
         evaluated += 1
         sig = trading.evaluate(closes, lookback=lookback, engine=engine)
         if sig and sig.get("direction"):
             ledger.record_fire(engine, sig["direction"], entry=closes[-1], synthetic=False)
             fires += 1
-            log.info("wc_feed FIRE: %s %s @ %.2f", symbol, sig["direction"], closes[-1])
-    log.info("wc_feed run: symbols=%d evaluated=%d fires=%d", len(series), evaluated, fires)
-    return {"available": True, "symbols": len(series), "fires": fires, "evaluated": evaluated}
+            log.info("wc_feed FIRE: %s %s @ %.2f (%d bars)", symbol, sig["direction"],
+                     closes[-1], len(closes))
+    return {"available": True, "symbols": len(ticks), "evaluated": evaluated,
+            "fires": fires, "ready": ready}
 
 
 def ensure_chrome_wc() -> bool:
@@ -177,18 +216,20 @@ def ensure_chrome_wc() -> bool:
 
 
 def main() -> int:
-    """``com.utah.wcfeed`` entry — keep the WC feed flowing into the engines forever. Each
-    cycle ensures chrome-wc is up, collects a window of live closes, and records real fires
-    (gates honestly when WC is unreachable). Tunables: UTAH_WC_INTERVAL, UTAH_WC_LOOKBACK."""
+    """``com.utah.wcfeed`` entry — keep the WC feed flowing into the engines forever. A single
+    persistent per-symbol bar history accumulates across windows (so the lookback warms up and
+    breakouts are real bars, not tick jitter). Tunables: UTAH_WC_INTERVAL, UTAH_WC_BAR_SECONDS,
+    UTAH_WC_LOOKBACK."""
     import time as _time
 
     from utah import failures
     from utah.product.ledger import Ledger
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
-    interval = float(os.environ.get("UTAH_WC_INTERVAL", "60"))
+    interval = float(os.environ.get("UTAH_WC_INTERVAL", "30"))
     lookback = int(os.environ.get("UTAH_WC_LOOKBACK", "20"))
     ledger = Ledger()
+    state: dict = {}
     while True:
         if not ensure_chrome_wc():
             failures.record("trading", "feed_gated",
@@ -196,14 +237,16 @@ def main() -> int:
             _time.sleep(interval)
             continue
         try:
-            log.info("wcfeed cycle: %s", run(ledger, seconds=interval * 0.8, lookback=lookback))
+            r = run(ledger, seconds=interval, lookback=lookback, state=state)
+            bars = {s: len(v["closes"]) for s, v in state.items()}
+            log.info("wcfeed cycle: %s | bars=%s", r, bars)
         except Exception as exc:  # noqa: BLE001 — never let one cycle kill the loop
             log.warning("wcfeed cycle failed: %s", exc)
-        _time.sleep(max(2.0, interval * 0.2))
+        _time.sleep(1.0)
 
 
-__all__ = ["parse_candle", "feed_available", "collect_closes", "run",
-           "ensure_chrome_wc", "main", "CDP_PORT", "WC_HOST"]
+__all__ = ["parse_candle", "closed_bars", "ingest", "feed_available", "collect_ticks",
+           "run", "ensure_chrome_wc", "main", "CDP_PORT", "WC_HOST", "BAR_SECONDS"]
 
 
 if __name__ == "__main__":
