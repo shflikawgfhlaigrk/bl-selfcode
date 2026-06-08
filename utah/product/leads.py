@@ -406,6 +406,15 @@ def run_scheduled(region: str = "Georgia Frontier", target: int = DAILY_TARGET,
             log.warning("leads chain-purge skipped: %s", exc)
     out = {"tiles_scanned": scanned, "found": found, "new": new, "target": target,
            "met": new >= target, "region": "+".join(sorted(hit)) or region, "cursor": i}
+    # Audit the ingest run on the deck (sync_log) — every ingest auditable, real-or-nothing.
+    # Defensive getattr keeps test fakes / minimal ledgers working (same pattern as outreach).
+    try:
+        getattr(ledger, "record_sync", lambda **k: None)(
+            source="osm_leads", kind="ingest", rows_in=new, cursor=str(i),
+            status="ok" if out["met"] else "partial",
+            detail=f"{scanned} tiles scanned, {found} found, {new} new")
+    except Exception as exc:  # noqa: BLE001 — audit is observability, never the ingest
+        log.debug("leads sync_log record skipped: %s", exc)
     log.info("leads cron (self-replenishing frontier): %s", out)
     return out
 
