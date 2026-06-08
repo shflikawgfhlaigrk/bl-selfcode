@@ -314,6 +314,7 @@
   .leg-row{display:grid;grid-template-columns:auto auto 1fr;gap:8px;align-items:baseline;font-size:10px}
   .leg-row b{color:var(--txt);letter-spacing:1px;font-size:9.5px;text-transform:uppercase;white-space:nowrap}
   .leg-row span:last-child{color:var(--mut);font-size:10px;line-height:1.4}
+  .leg-row.mk{grid-template-columns:auto 1fr}  /* marker legend: no color dot, just MARKER → meaning */
   .leg-led{width:8px;height:8px;border-radius:50%;background:var(--dim);align-self:center;flex:none}
   .leg-led.ok{background:var(--ok);box-shadow:0 0 8px var(--okglow)}
   .leg-led.warn{background:var(--warn);box-shadow:0 0 8px rgba(231,169,59,.5)}
@@ -411,6 +412,10 @@
       <summary>◆ STATUS KEY — WHAT EACH BADGE COLOR &amp; STATE MEANS</summary>
       <div class="legend-body" id="legend-body"></div>
     </details>
+    <details class="legend" id="legend-markers">
+      <summary>◆ STATE KEY — WHAT EACH PANEL MARKER MEANS</summary>
+      <div class="legend-body" id="legend-markers-body"></div>
+    </details>
     <div class="footer">LIVE · REAL DATA ONLY · DORMANT/GATED = NO PRODUCER WIRED YET (NEVER SIMULATED) · SOURCE: UTAH CONTROL PLANE · <span id="f-stamp">—</span></div>
   </div>
 </div>
@@ -469,6 +474,14 @@ function renderLegend(){
   const el=$("legend-body"); if(!el) return;
   el.innerHTML=Object.entries(STATE_EXPLAIN).map(([k,e])=>
     `<div class="leg-row"><span class="leg-led ${k}"></span><b>${esc(e.label)}</b><span>${esc(e.tip)}</span></div>`).join("");
+}
+/* render the collapsible MARKER legend straight from STATE_LABELS — the eight short
+   panel markers (GATED, DORMANT, no producer, OFFLINE, unavailable, LOADING, error,
+   awaiting) each mapped to its plain-English meaning. Stays in sync with the map forever. */
+function renderMarkerLegend(){
+  const el=$("legend-markers-body"); if(!el) return;
+  el.innerHTML=Object.entries(STATE_LABELS).map(([k,v])=>
+    `<div class="leg-row mk"><b>${esc(k)}</b><span>${esc(v)}</span></div>`).join("");
 }
 
 /* ---- marker text → plain-language meaning. The short markers that surface inside
@@ -1193,7 +1206,7 @@ function drillGated(){
   ];
   let h=xpBlock("gated",true);
   h+=sec(items.length+" FEATURES WAITING ON A DATA SOURCE — tap any to learn more");
-  h+=items.map(it=>`<div class="item drillable" onclick="${it.drill==='trading'?"openLab()":"drill('"+it.drill+"')"}"><div class="h"><span class="nm">${esc(it.nm)}<span class="hint">TAP</span></span><span class="meta">GATED</span></div><div class="body" style="-webkit-line-clamp:2">${esc(it.why)}</div></div>`).join("");
+  h+=items.map(it=>`<div class="item drillable" onclick="${it.drill==='trading'?"openLab()":"drill('"+it.drill+"')"}"><div class="h"><span class="nm">${esc(it.nm)}<span class="hint">TAP</span></span><span class="meta"${markerAttrs("GATED")}>GATED</span></div><div class="body" style="-webkit-line-clamp:2">${esc(it.why)}</div></div>`).join("");
   drillOpen("◆ WHAT'S GATED & WHY", h);
 }
 
@@ -1244,7 +1257,7 @@ document.addEventListener("keydown",e=>{ if(e.key==="Escape")drillClose(); });
 function clock(){$("clock").textContent=new Date().toLocaleTimeString([],{hour:"2-digit",minute:"2-digit",second:"2-digit"})+" · ET";}
 // label the static "awaiting events…" placeholder from STATE_LABELS (first-paint a11y)
 $("ticker").innerHTML=`<div${markerAttrs("awaiting events…")}>awaiting events…</div>`;
-renderLegend(); renderTabs(); loadDash("overview");
+renderLegend(); renderMarkerLegend(); renderTabs(); loadDash("overview");
 poll(); setInterval(poll,2500);
 clock(); setInterval(clock,1000);
 // JOIN DISCORD — light the header button only when an invite is configured.
