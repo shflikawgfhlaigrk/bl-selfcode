@@ -60,7 +60,19 @@ def _build_context(hits: list, web: str = "") -> str:
     if web:
         parts.append("FRESHLY RESEARCHED (web sources, grounded):\n" + web)
     if hits:
-        parts.append("RECALLED MEMORY:\n" + "\n".join(f"- {h.content}" for h in hits))
+        # Code is YOUR OWN committed source — present it in its own AUTHORITATIVE block,
+        # not buried in generic "RECALLED MEMORY" bullets next to chatty turns. Without
+        # this the brain treated indexed code as untrusted memory and refused to name its
+        # own files/functions ("oauth.py isn't in my context") even with the code in hand.
+        code_hits = [h for h in hits if getattr(h, "source", "") == "code"]
+        other_hits = [h for h in hits if getattr(h, "source", "") != "code"]
+        if code_hits:
+            parts.append(
+                "YOUR OWN SOURCE CODE (committed + indexed — authoritative; you MAY name "
+                "these files, functions, and symbols directly):\n"
+                + "\n".join(f"- {h.content}" for h in code_hits))
+        if other_hits:
+            parts.append("RECALLED MEMORY:\n" + "\n".join(f"- {h.content}" for h in other_hits))
     return "\n\n".join(parts)
 
 

@@ -273,13 +273,23 @@ ENTITY_BOOST: float = 0.5
 
 #: Curated sources (the identity creed + the reference library) are ~150 high-value
 #: rows competing against thousands of facts. Two mechanisms keep them reachable:
-#: a guaranteed retrieval lane and a small ranking prior.
-CURATED_SOURCES: frozenset[str] = frozenset({"core", "knowledge", "code"})
+#: a guaranteed retrieval lane and a small ranking prior. ``code`` was REMOVED from this
+#: shared lane (its ~1300 rows crowded the ~150 core/knowledge out of the 5 slots) and
+#: given its OWN lane below.
+CURATED_SOURCES: frozenset[str] = frozenset({"core", "knowledge"})
 
 #: Top-N nearest curated rows are ALWAYS merged into the candidate pool (as their own
 #: RRF lane), so they reach the reranker even when the general pool is swamped by the
 #: fact pile — the diagnosed root cause (a relevant Law never even reached rerank).
 CURATED_LANE_K: int = 5
+
+#: Indexed source code (``source='code'``, ~1300 chunks) gets its OWN guaranteed lane so a
+#: code/self question surfaces the relevant FUNCTION even when chatty 'turn' rows fill the
+#: general pool — the diagnosed miss where the brain refused to name its own functions
+#: because their chunks never reached the reranker. Separate from the curated lane so code's
+#: volume never crowds core/knowledge (and vice-versa).
+CODE_SOURCES: tuple[str, ...] = ("code",)
+CODE_LANE_K: int = 6
 
 #: Additive ranking prior per source — a source-authority prior on the rerank score.
 #: Bounded by ENTITY_BOOST scale (≤0.5) so a STRONG match in ANY source still wins

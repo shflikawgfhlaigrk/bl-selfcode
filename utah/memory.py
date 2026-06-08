@@ -775,6 +775,7 @@ def recall(query: str, k: int = config.RECALL_K) -> list[Hit]:
 
     dense: list[DenseRow] = []
     curated: list[DenseRow] = []
+    code: list[DenseRow] = []
     try:
         vector = embed(query)
         dense = backend.dense_search(vector, pool)
@@ -782,20 +783,24 @@ def recall(query: str, k: int = config.RECALL_K) -> list[Hit]:
         # own RRF list), so they reach the reranker even when the general pool is full
         # of facts — the diagnosed miss (a relevant Law never reaching rerank).
         curated = backend.curated_search(vector, config.CURATED_LANE_K, tuple(config.CURATED_SOURCES))
+        # Code lane: the nearest source-code chunks get their OWN guaranteed slot so a
+        # code/self question surfaces the relevant FUNCTION even when chatty 'turn' rows
+        # swamp the general pool — the diagnosed miss where the brain couldn't name its
+        # own functions because their chunks never reached the reranker.
+        code = backend.curated_search(vector, config.CODE_LANE_K, config.CODE_SOURCES)
     except EmbedError as exc:
         log.warning("dense lane down (embed failed), sparse-only recall: %s", exc)
     sparse = backend.sparse_search(query, pool)
 
-    fused = rrf_fuse([[r.id for r in dense], [r.id for r in sparse], [r.id for r in curated]])
+    fused = rrf_fuse([[r.id for r in dense], [r.id for r in sparse],
+                      [r.id for r in curated], [r.id for r in code]])
     if not fused:
         return []
     meta: dict[int, tuple[str, str]] = {r.id: (r.content, r.source) for r in dense}
-    for r in sparse:
-        meta.setdefault(r.id, (r.content, r.source))
-    for r in curated:
+    for r in (*sparse, *curated, *code):
         meta.setdefault(r.id, (r.content, r.source))
     sims: dict[int, float] = {r.id: r.sim for r in dense}
-    for r in curated:
+    for r in (*curated, *code):
         sims.setdefault(r.id, r.sim)
 
     candidates = sorted(fused, key=lambda i: fused[i], reverse=True)[:pool]
@@ -863,6 +868,13 @@ def answer(query: str, k: int = config.RECALL_K) -> tuple[str | None, list[Hit]]
     if not hits:
         return None, []
     best = hits[0]
+    # A conversational TURN is a record of a PAST exchange — keep it as CONTEXT for the
+    # brain, but never re-serve it verbatim as the authoritative answer. Echoing a past
+    # hedge/refusal ossifies it and bypasses fresh reasoning over NEWER context (e.g. the
+    # now-indexed source code): that is exactly why a self/code question kept replaying an
+    # old "I can't name it" turn. Only durable sources shortcut; a turn falls to the brain.
+    if getattr(best, "source", "") == "turn":
+        return None, hits
     if not passes_gate(best.sim, lexical_overlap(query, best.content)):
         return None, hits
     if entity_grounds(query, best.content) is False:

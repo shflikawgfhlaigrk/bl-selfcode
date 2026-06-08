@@ -43,6 +43,26 @@ def test_brain_path_grounded_in_recalled_context(mem, fake_brain):
     assert "Get tea" in turns[0].content
 
 
+def test_code_hits_form_their_own_authoritative_source_code_block(mem, fake_brain):
+    """source='code' hits reach the brain in a labelled, AUTHORITATIVE 'SOURCE CODE' block —
+    not buried in generic RECALLED MEMORY bullets next to chatty turns. Without this the brain
+    treated its own indexed code as untrusted memory and refused to name its functions
+    ('oauth.py isn't in my context') even with the code in context."""
+    code = ("FILE utah/integrations/oauth.py — copy_ace_to_utah_if_correct "
+            "def copy_ace_to_utah_if_correct(): reuse the existing google token")
+    mem.embedder.register(code, basis(0))
+    mem.embedder.register("which function reuses the existing google token?",
+                          blend(basis(0), basis(1), 0.40))
+    memory.store(code, source="code")
+    fake_brain.respond = "copy_ace_to_utah_if_correct reuses it."
+
+    core.tell("which function reuses the existing google token?")
+
+    assert "YOUR OWN SOURCE CODE" in fake_brain.last_prompt          # authoritative, labelled
+    after = fake_brain.last_prompt.split("YOUR OWN SOURCE CODE", 1)[1]
+    assert "copy_ace_to_utah_if_correct" in after                    # the code rode its own block
+
+
 def test_conversation_thread_labels_the_assistant_as_ace(monkeypatch, fake_brain):
     """The live thread fed back to the brain labels the assistant 'Ace:', not 'Utah:'
     — one consistent identity (Utah is the system; Ace is who Michael talks to). A

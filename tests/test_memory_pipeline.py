@@ -261,6 +261,19 @@ def test_answer_gate_passes_when_both_hold(mem):
     assert hits[0].sim >= config.ANSWER_MIN_SIM
 
 
+def test_answer_never_re_serves_a_conversational_turn(mem):
+    """A 'turn' (record of a past exchange) must NOT be re-served as the authoritative
+    answer even when it's the top, gate-passing hit — echoing a past hedge ossifies it and
+    bypasses fresh reasoning over newer context. It stays a hit (context); answer is None."""
+    past = "Q: which oauth function reuses the token\nA: I can't name it, the code isn't in my context"
+    mem.embedder.register(past, basis(0))
+    mem.embedder.register("which oauth function reuses the token", blend(basis(0), basis(1), 0.90))
+    memory.store(past, source="turn", confidence=0.5)
+    answer, hits = memory.answer("which oauth function reuses the token")
+    assert answer is None                              # NOT re-served as the answer
+    assert any(h.source == "turn" for h in hits)       # still available to the brain as context
+
+
 def test_answer_gate_rejects_wrong_entity_even_with_word_overlap(mem):
     """The live bug: an 'Everest' fact answered a 'Kilimanjaro' question because
     generic words (tall, mount, metres) gave a passing overlap. The hit's entity is
@@ -364,6 +377,27 @@ def test_curated_lane_rescues_a_row_the_general_pool_drops(mem):
     # …but recall surfaces it anyway — it rode the curated lane to the reranker.
     hits = memory.recall("seeking power and influence", k=5)
     assert any(h.source == "knowledge" for h in hits)
+
+
+def test_code_lane_rescues_a_code_function_the_general_pool_drops(mem):
+    """A code/self question's answer is a specific FUNCTION chunk. Chatty 'turn' rows sit
+    CLOSER to the query and swamp the general pool — without the dedicated code lane the
+    function never reaches the reranker (the diagnosed miss where the brain couldn't name
+    its own functions). The code lane gives it a slot."""
+    for i in range(25):                                 # 25 turns CLOSER than the code fn
+        v = blend(basis(0), basis(i + 4), 0.85)
+        mem.embedder.register(f"turn {i}: earlier chat about google tokens and auth", v)
+        memory.store(f"turn {i}: earlier chat about google tokens and auth", source="turn")
+    fn = ("FILE utah/integrations/oauth.py — copy_ace_to_utah_if_correct "
+          "def copy_ace_to_utah_if_correct(): reuse the existing google token")
+    mem.embedder.register(fn, blend(basis(0), basis(1), 0.5))   # FARTHER than every turn
+    memory.store(fn, source="code")
+
+    # the general dense pool DROPS it (25 closer turns > pool)…
+    assert fn not in [r.content for r in mem.store.dense_search(basis(0), 20)]
+    # …but recall surfaces it — it rode the dedicated CODE lane to the reranker.
+    hits = memory.recall("which function reuses the existing google token", k=5)
+    assert any(h.source == "code" and "copy_ace_to_utah_if_correct" in h.content for h in hits)
 
 
 def test_source_prior_never_overrides_a_strong_match(mem):
