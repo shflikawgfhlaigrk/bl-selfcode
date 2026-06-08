@@ -7,14 +7,66 @@ direct unit tests, and are NOT runtime-tunable (changing them is a spec change).
 """
 from __future__ import annotations
 
+import json
 import os
+from pathlib import Path
 
 # --- deploy seams (env-overridable) -----------------------------------------
+#: Canonical owner Gmail — the ONLY send/login identity. Ace historically typo'd
+#: ``mthburnsbarber`` (stray ``h``); normalize every ingest path to this.
+OWNER_EMAIL: str = os.environ.get("UTAH_OWNER_EMAIL", "mtuburnsbarber@gmail.com")
+_OWNER_TYPO_EMAIL: str = "mthburnsbarber@gmail.com"
+
+
 #: Postgres DSN. Production (Michael's Mac): socket at /tmp, cluster on :5433.
 DB_DSN: str = os.environ.get("UTAH_DSN", "host=/tmp port=5433 dbname=utah")
 
 #: The brain command — Claude CLI on PATH (subscription; the one paid lane).
 BRAIN_CMD: str = os.environ.get("UTAH_BRAIN", "claude")
+
+
+def normalize_owner_email(email: str | None) -> str:
+    """Map the known ``mthburnsbarber`` typo → :data:`OWNER_EMAIL`."""
+    e = (email or "").strip()
+    if e.lower() == _OWNER_TYPO_EMAIL.lower():
+        return OWNER_EMAIL
+    return e
+
+#: CAN-SPAM placeholder until Michael provides a real postal address.
+CANSPAM_PLACEHOLDER: str = (
+    "[CAN-SPAM physical address — Michael's business input, required to send]"
+)
+
+UTAH_HOME: Path = Path(os.environ.get("UTAH_HOME", os.path.expanduser("~/.utah")))
+BUSINESS_CREDS: Path = UTAH_HOME / "secrets" / "business.json"
+
+
+def _canspam_is_real(addr: str) -> bool:
+    a = (addr or "").strip()
+    if not a:
+        return False
+    low = a.lower()
+    return "[can-spam" not in low and "replace" not in low and a != CANSPAM_PLACEHOLDER
+
+
+def canspam_address() -> str:
+    """Real CAN-SPAM postal address: ``UTAH_CANSPAM_ADDRESS`` env, then ``business.json``."""
+    env = os.environ.get("UTAH_CANSPAM_ADDRESS", "").strip()
+    if _canspam_is_real(env):
+        return env
+    try:
+        data = json.loads(BUSINESS_CREDS.read_text(encoding="utf-8"))
+        addr = (data.get("physical_address") or "").strip()
+        if _canspam_is_real(addr):
+            return addr
+    except (OSError, json.JSONDecodeError, TypeError, AttributeError):
+        pass
+    return CANSPAM_PLACEHOLDER
+
+
+def canspam_configured() -> bool:
+    """True when a real postal address is set (env or business.json)."""
+    return _canspam_is_real(canspam_address())
 
 #: System prompt that makes the brain a pure reasoning engine. ``--tools ""`` +
 #: ``--strict-mcp-config`` disable the TOOLS, but NOT the Claude Code agent SYSTEM
@@ -150,7 +202,15 @@ WAKE_THRESHOLD: float = float(os.environ.get("UTAH_WAKE_THRESHOLD", "0.55"))
 WAKE_ARM_S: float = float(os.environ.get("UTAH_WAKE_ARM_S", "8.0"))
 #: VAD trailing-silence frames before STT (32 ms/frame). Lower = faster end-of-utterance.
 VAD_OFFSET: int = int(os.environ.get("UTAH_VAD_OFFSET", "12"))          # was 20 (~640 ms)
-VAD_OFFSET_ARMED: int = int(os.environ.get("UTAH_VAD_OFFSET_ARMED", "6"))  # ~192 ms post-wake
+#: End-of-*command* silence after an audio wake. Was 6 (~192 ms) — shorter than the
+#: natural pause between "ace" and the command, so the armed segment ended on that gap
+#: and captured only the 0.2 s wake tail (command='' → no answer). The post-wake gap is
+#: now bridged by VAD_ARM_GRACE; this only ends the turn after the command is spoken.
+VAD_OFFSET_ARMED: int = int(os.environ.get("UTAH_VAD_OFFSET_ARMED", "20"))  # ~640 ms end-of-command
+#: After an audio wake, hold capture this many frames (32 ms/frame) waiting for the
+#: command's speech to begin before treating it as a bare "ace". Bridges the pause
+#: between the wake word and the command so "ace … what's the weather" is captured whole.
+VAD_ARM_GRACE: int = int(os.environ.get("UTAH_VAD_ARM_GRACE", "63"))    # ~2.0 s
 
 #: Durable cache for the fastembed reranker model. MUST live under ~/.utah
 #: (where every Utah model lives) — fastembed's default is macOS temp
@@ -303,7 +363,8 @@ ALERT_PRIORITY: dict[str, int] = {
 #: ``dependency_unavailable`` Postgres-restart storm and ``browser/render_failed`` /
 #: ``brain/unavailable`` noise are EXCLUDED — only genuine breakage pages.
 CRITICAL_FAILURE_KINDS: frozenset[str] = frozenset(
-    {"daemon_unreachable", "load_critical", "process_died", "engine_death", "critical"})
+    {"daemon_unreachable", "load_critical", "postgres_down", "process_died",
+     "engine_death", "critical"})
 
 #: Quiet hours (local clock). Streams without bypass are suppressed in this window.
 QUIET_HOURS_START: str = os.environ.get("UTAH_QUIET_START", "22:30")

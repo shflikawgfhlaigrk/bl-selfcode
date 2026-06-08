@@ -2,9 +2,12 @@
 and the governed run — all injected (no real git/claude/brain)."""
 from __future__ import annotations
 
+import json
 import subprocess
 
 from utah import selfcode, sica, sica_autonomy
+
+_SKIP_DISCOVER = lambda: {"ran": True, "findings": [], "count": 0}
 
 
 def _git(repo, *a):
@@ -37,6 +40,15 @@ def test_cycle_respects_kill_switch(monkeypatch, tmp_path):
     assert r["ran"] is False and r["reason"] == "kill switch"
 
 
+def test_cycle_respects_foundation_gate(monkeypatch, tmp_path):
+    monkeypatch.setattr(selfcode, "KILL_SWITCH", tmp_path / "nope")
+    gate = lambda cap: {"status": "substrate_red", "capability": cap}
+    r = sica_autonomy.run_cycle(repo=tmp_path, brain_fn=lambda p: "x",
+                                propose_fn=lambda t: {}, sync_fn=lambda repo: True,
+                                foundation_gate=gate)
+    assert r["status"] == "substrate_red"
+
+
 def test_cycle_aborts_if_repo_not_ready(monkeypatch, tmp_path):
     monkeypatch.setattr(selfcode, "KILL_SWITCH", tmp_path / "nope")
     r = sica_autonomy.run_cycle(repo=tmp_path / "missing", brain_fn=lambda p: "x",
@@ -61,7 +73,7 @@ def test_cycle_runs_meta_task_through_governed(monkeypatch, tmp_path):
 
     r = sica_autonomy.run_cycle(repo=tmp_path, sync_fn=lambda repo: True,
                                 task_fn=lambda: "add a docstring to leads.py",
-                                propose_fn=fake_propose)
+                                propose_fn=fake_propose, discover_fn=_SKIP_DISCOVER)
     assert r["ran"] is True
     assert r["task"] == "add a docstring to leads.py"
     assert seen["task"] == "add a docstring to leads.py"
@@ -79,7 +91,7 @@ def test_cycle_falls_back_to_default_task_when_brain_silent(monkeypatch, tmp_pat
 
     r = sica_autonomy.run_cycle(repo=tmp_path, sync_fn=lambda repo: True,
                                 task_fn=lambda: "   ",   # task source returns nothing usable
-                                propose_fn=fake_propose)
+                                propose_fn=fake_propose, discover_fn=_SKIP_DISCOVER)
     assert r["task"] == sica_autonomy.DEFAULT_TASK
     assert seen["task"] == sica_autonomy.DEFAULT_TASK
 
@@ -118,7 +130,8 @@ def test_run_cycle_propagates_on_merge(monkeypatch, tmp_path):
     r = sica_autonomy.run_cycle(
         repo=tmp_path, sync_fn=lambda repo: True, task_fn=lambda: "do x",
         propose_fn=lambda t: {"utility": 0.9, "tests_passed": True, "merged": True, "cost_usd": 0},
-        propagate_fn=lambda clone=None: called.update(ok=True) or {"propagated": True, "to": "abc"})
+        propagate_fn=lambda clone=None: called.update(ok=True) or {"propagated": True, "to": "abc"},
+        discover_fn=_SKIP_DISCOVER)
     assert called.get("ok") is True
     assert r["propagation"]["propagated"] is True
 
@@ -129,7 +142,8 @@ def test_run_cycle_no_propagate_when_not_merged(monkeypatch, tmp_path):
     r = sica_autonomy.run_cycle(
         repo=tmp_path, sync_fn=lambda repo: True, task_fn=lambda: "do x",
         propose_fn=lambda t: {"utility": 0.5, "tests_passed": False, "merged": False, "cost_usd": 0},
-        propagate_fn=lambda clone=None: called.update(ok=True) or {})
+        propagate_fn=lambda clone=None: called.update(ok=True) or {},
+        discover_fn=_SKIP_DISCOVER)
     assert "ok" not in called and "propagation" not in r
 
 
@@ -146,9 +160,33 @@ def test_run_cycle_verifies_frontend_in_browser_after_merge(monkeypatch, tmp_pat
         repo=tmp_path, sync_fn=lambda repo: True,
         propose_fn=lambda t: {"utility": 0.9, "tests_passed": True, "merged": True, "cost_usd": 0},
         propagate_fn=lambda clone=None: {"propagated": True},
-        verify_fn=lambda: obs)
+        verify_fn=lambda: obs, discover_fn=_SKIP_DISCOVER)
     assert r["domain"] == "frontend"
     assert r["frontend_verify"] == obs            # browser re-looked at the live deck after the change
+
+
+def test_cycle_uses_pending_finding_before_rotation(monkeypatch, tmp_path):
+    from utah import sica_discover
+
+    monkeypatch.setattr(selfcode, "KILL_SWITCH", tmp_path / "nope")
+    log = tmp_path / "discoveries.jsonl"
+    used = tmp_path / "used.json"
+    rec = {"ts": 1.0, "domain": "research", "suggested_task": "Harden browser timeout",
+           "brief_path": str(tmp_path / "f.md")}
+    log.write_text(json.dumps(rec) + "\n")
+    monkeypatch.setattr(sica_discover, "DISCOVERIES_LOG", log)
+    monkeypatch.setattr(sica_discover, "USED_PATH", used)
+    seen = {}
+
+    r = sica_autonomy.run_cycle(
+        repo=tmp_path, sync_fn=lambda repo: True, discover_fn=_SKIP_DISCOVER,
+        propose_fn=lambda t: seen.update(task=t) or {"utility": 0.5, "tests_passed": False,
+                                                     "merged": False, "cost_usd": 0},
+    )
+    assert r["task"] == "Harden browser timeout"
+    assert r["domain"] == "research"
+    assert seen["task"] == "Harden browser timeout"
+    assert sica_discover.next_pending_task(log_path=log, used_path=used) is None
 
 
 def test_run_cycle_no_frontend_verify_on_nonfrontend_merge(monkeypatch, tmp_path):
@@ -159,5 +197,5 @@ def test_run_cycle_no_frontend_verify_on_nonfrontend_merge(monkeypatch, tmp_path
         repo=tmp_path, sync_fn=lambda repo: True, task_fn=lambda: "do x",   # domain="injected"
         propose_fn=lambda t: {"utility": 0.9, "tests_passed": True, "merged": True, "cost_usd": 0},
         propagate_fn=lambda clone=None: {"propagated": True},
-        verify_fn=lambda: called.update(ran=True) or {})
+        verify_fn=lambda: called.update(ran=True) or {}, discover_fn=_SKIP_DISCOVER)
     assert "frontend_verify" not in r and "ran" not in called

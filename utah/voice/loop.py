@@ -147,13 +147,20 @@ def run() -> None:
                 level["last_loud"] = time.monotonic()
                 vad_off = (config.VAD_OFFSET_ARMED if audio_wake_ok
                            else config.VAD_OFFSET)
-                seg = vad.Segmenter(offset=vad_off)
+                seg = vad.Segmenter(offset=vad_off, arm_grace=config.VAD_ARM_GRACE)
                 detector.reset()
                 if wake_det is not None:
                     wake_det.reset()
                 armed_until = 0.0
                 vstate.update(status="listening", listening=True, speaking=False)
                 state.write(**vstate)
+                try:
+                    _dev = sd.query_devices(kind="input")
+                    log.info("voice loop: input device = %r (%d ch @ %.0f Hz default)",
+                             _dev.get("name"), _dev.get("max_input_channels"),
+                             _dev.get("default_samplerate", 0))
+                except Exception as _e:  # noqa: BLE001
+                    log.info("voice loop: input device query failed: %s", _e)
                 log.info("voice loop: mic open — Silero VAD (speech threshold %.2f)",
                          vad.SPEECH_THRESHOLD)
 
@@ -171,16 +178,22 @@ def run() -> None:
 
                 def _process_segment(pcm: bytes, *, segment_armed: bool) -> None:
                     secs = len(pcm) / 2 / SAMPLE_RATE
-                    log.info("voice: speech segment %.1fs → transcribing (audio_wake=%s)",
-                             secs, segment_armed)
+                    seg_rms = _rms(pcm)
+                    log.info("voice: speech segment %.1fs rms=%.4f → transcribing (audio_wake=%s)",
+                             secs, seg_rms, segment_armed)
                     processing.set()
                     vstate.update(status="thinking", listening=False, speaking=False)
                     state.write(**vstate)
                     try:
                         path = _write_wav(pcm)
                         try:
+                            try:  # TEMP DIAG: keep the actual captured audio for inspection
+                                import shutil
+                                shutil.copy(path, os.path.expanduser("~/.utah/run/last_segment.wav"))
+                            except Exception:  # noqa: BLE001
+                                pass
                             text = stt.transcribe(path)
-                            log.debug("voice: transcript=%r", text)
+                            log.info("voice: transcript=%r", text)  # TEMP DIAG (was debug)
                             if text:
                                 vstate["last_transcript"] = text[:120]
                             if not text and not segment_armed:

@@ -129,7 +129,7 @@ def sync_repo(repo: Path) -> bool:
 
 
 def run_cycle(*, repo=None, brain_fn=None, propose_fn=None, sync_fn=None, task_fn=None,
-              propagate_fn=None, verify_fn=None) -> dict:
+              propagate_fn=None, verify_fn=None, foundation_gate=None, discover_fn=None) -> dict:
     """One autonomous improvement cycle. Boundaries injected for unit-proof.
 
     The task is chosen by the domain-rotating goal source (sica_goals): each cycle
@@ -138,26 +138,44 @@ def run_cycle(*, repo=None, brain_fn=None, propose_fn=None, sync_fn=None, task_f
     the generator (tests / a fixed goal)."""
     if not selfcode.enabled():
         return {"ran": False, "reason": "kill switch"}
+    from utah import foundation
+
+    gate = foundation.gate_cron if foundation_gate is None else foundation_gate
+    skip = gate("selfcode")
+    if skip:
+        return skip
     repo = Path(repo) if repo else REPO_DIR
     if not (sync_fn or sync_repo)(repo):
         return {"ran": False, "reason": f"dedicated repo not ready: {repo} "
                                         f"(provision with: git clone <origin> {repo})"}
     arch = sica.Archive()
     brain = brain_fn or _brain_answer
+    from utah import sica_discover
+
+    discover_out = (discover_fn or (lambda: sica_discover.run_discover(brain_fn=brain)))()
+    pending_rec: dict | None = None
     if task_fn is not None:
         domain, task = "injected", task_fn()
     else:
-        from utah import sica_goals
-        domain = sica_goals.pick_domain(sica_goals.next_cycle_index())
-        task = sica_goals.next_task(domain, brain_fn=brain)
+        pending = sica_discover.next_pending_task()
+        if pending:
+            domain, task, pending_rec = pending
+        else:
+            from utah import sica_goals
+            domain = sica_goals.pick_domain(sica_goals.next_cycle_index())
+            task = sica_goals.next_task(domain, brain_fn=brain)
     task = (task or "").strip() or DEFAULT_TASK   # empty/whitespace → safe default
     default_propose = (lambda t: selfcode.propose_governed(
         t, repo=str(repo), auto_merge=True,
         run_claude=lambda task: sica_overseer.run_claude_supervised(task, cwd=str(repo))))
     loop = MetaLoop(archive=arch, max_steps=1, propose_fn=propose_fn or default_propose)
     res = loop.run([task])
-    out = {"ran": True, "domain": domain, "task": task, "steps": res.steps,
-           "attempts": res.attempts, "best_after": res.best_after}
+    if pending_rec is not None:
+        sica_discover.mark_used(pending_rec)
+    out = {"ran": True, "discover": discover_out, "domain": domain, "task": task,
+           "steps": res.steps, "attempts": res.attempts, "best_after": res.best_after}
+    if pending_rec:
+        out["from_finding"] = pending_rec.get("brief_path")
     if any(a.get("merged") for a in res.attempts):
         out["propagation"] = (propagate_fn or propagate)(clone=repo)
         # Closed loop: after a FRONTEND change lands, Ace re-renders its OWN live deck through
@@ -179,7 +197,14 @@ def _log_cycle(d: dict) -> None:
 
 
 def main() -> int:
+    import sys
+
     logging.basicConfig(level=logging.INFO)
+    if "--loop" in sys.argv:
+        interval = max(60, int(os.environ.get("UTAH_SELFCODE_INTERVAL", "900")))
+        while True:
+            print(json.dumps(run_cycle()), flush=True)
+            time.sleep(interval)
     print(json.dumps(run_cycle()))
     return 0
 

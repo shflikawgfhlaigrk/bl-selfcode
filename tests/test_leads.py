@@ -123,6 +123,9 @@ def _cursor_pair(start=0):
     return (lambda: box["i"]), (lambda i: box.__setitem__("i", i)), box
 
 
+_NO_GATE = lambda _cap: None
+
+
 def test_run_scheduled_moving_frontier_hits_target_and_advances_cursor():
     import json as _json
     lg = _RecLedger()
@@ -133,7 +136,8 @@ def test_run_scheduled_moving_frontier_hits_target_and_advances_cursor():
     load, save, box = _cursor_pair(0)
     r = leads.run_scheduled(region="GA", target=3, bbox=(0, 0, 1.0, 1.0),  # 16 tiles @0.25
                             max_tiles=40, ledger=lg, fetch=lambda q: sample,
-                            cursor_load=load, cursor_save=save)
+                            cursor_load=load, cursor_save=save,
+                            foundation_gate=_NO_GATE)
     assert r["met"] is True and r["new"] >= 3            # reached the floor
     assert r["tiles_scanned"] == 2                       # 2 tiles * 2 new = 4 >= target 3
     assert box["i"] == 2                                 # cursor advanced + persisted
@@ -151,11 +155,31 @@ def test_run_scheduled_caps_tiles_and_skips_failed_tile():
 
     r = leads.run_scheduled(region="GA", target=500, bbox=(0, 0, 1.0, 1.0),
                             max_tiles=3, ledger=lg, fetch=flaky,
-                            cursor_load=lambda: 0, cursor_save=lambda i: None)
+                            cursor_load=lambda: 0, cursor_save=lambda i: None,
+                            foundation_gate=_NO_GATE)
     assert r["new"] == 0 and r["tiles_scanned"] == 3 and r["met"] is False  # capped, survived
     # and a working fetch still records
     lg2 = _RecLedger()
     r2 = leads.run_scheduled(region="GA", target=1, bbox=(0, 0, 0.5, 0.5), max_tiles=40,
                              ledger=lg2, fetch=lambda q: good,
-                             cursor_load=lambda: 0, cursor_save=lambda i: None)
+                             cursor_load=lambda: 0, cursor_save=lambda i: None,
+                             foundation_gate=_NO_GATE)
     assert r2["new"] >= 1 and r2["met"] is True
+
+
+def test_run_scheduled_skips_when_substrate_red():
+    from utah import foundation
+
+    skip = foundation.gate_cron(
+        "leads",
+        status={"ok": False, "state": "red", "anomalies": ["postgres_down"]},
+    )
+    r = leads.run_scheduled(
+        target=1,
+        bbox=(0, 0, 0.5, 0.5),
+        ledger=_RecLedger(),
+        fetch=lambda q: "{}",
+        foundation_gate=lambda _cap: skip,
+    )
+    assert r["status"] == "substrate_red"
+    assert r["capability"] == "leads"

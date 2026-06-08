@@ -79,9 +79,16 @@ def spotlight(lead: dict, *, to: str | None = None, send_fn=None, ledger=None) -
             "sent": bool(res.get("sent"))}
 
 
-def run_scheduled(ledger=None, *, to: str | None = None) -> dict:
+def run_scheduled(ledger=None, *, to: str | None = None, foundation_gate=None) -> dict:
     """``com.utah.marketer`` cron — spotlight ONE not-yet-featured lead/day via email.
     UNIQUE(channel, media_ref) in marketer_posts prevents re-spotlighting the same business."""
+    from utah import foundation
+
+    gate = foundation.gate_cron if foundation_gate is None else foundation_gate
+    skip = gate("marketer")
+    if skip:
+        return skip
+
     import psycopg
 
     from utah import config

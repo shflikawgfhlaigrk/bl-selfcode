@@ -1,22 +1,23 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <!--
-  com.utah.selfcode — SICA autonomous self-improvement cycle (scheduled).
+  com.utah.selfcode — SICA autonomous self-improvement cycle (continuous loop).
 
-  Runs utah.sica_autonomy.run_cycle every 6h: the meta-agent picks the next task
-  from the archive, claude codes it in the ISOLATED dedicated repo
-  (UTAH_SELFCODE_REPO=~/.utah/selfcode-repo) under the overseer, the full suite
-  gates it, the attempt is utility-scored + archived, and a Tier-A green change
-  auto-merges (after the supervised ramp). The kill switch
-  (~/.utah/run/selfcode.disabled) stops it instantly; the automerge flag
-  (~/.utah/run/selfcode.automerge) arms merging. Autonomous git stays OFF the
-  live dev tree — it only touches the dedicated clone.
+  Runs utah.sica_autonomy --loop: one governed cycle, then sleep UTAH_SELFCODE_INTERVAL
+  (default 900s / 15m). Each cycle browses first (frontend deck + web research),
+  writes finding pages under ~/.utah/findings/, then codes the oldest unused TASK.
+  codes it in the ISOLATED dedicated repo (UTAH_SELFCODE_REPO=~/.utah/selfcode-repo)
+  under the overseer, the full suite gates it, the attempt is utility-scored + archived,
+  and a Tier-A green change auto-merges (after the supervised ramp). Skips when substrate
+  is red (foundation.json). Kill switch (~/.utah/run/selfcode.disabled) stops each cycle;
+  automerge (~/.utah/run/selfcode.automerge) arms merging.
 
   Install:
     cp ops/launchd/com.utah.selfcode.plist ~/Library/LaunchAgents/
     launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.utah.selfcode.plist
   Force-run now:  launchctl kickstart -k gui/$(id -u)/com.utah.selfcode
   Pause:          touch ~/.utah/run/selfcode.disabled   (or bootout the job)
+  Faster/slower:  set UTAH_SELFCODE_INTERVAL (seconds) in this plist, then reload
 -->
 <plist version="1.0">
 <dict>
@@ -28,6 +29,7 @@
     <string>/Users/michaelbarber/.utah/venv/bin/python</string>
     <string>-m</string>
     <string>utah.sica_autonomy</string>
+    <string>--loop</string>
   </array>
 
   <!-- WorkingDirectory is ~/.utah, NOT the TCC-protected Desktop: under launchd a
@@ -45,17 +47,22 @@
     <string>/Users/michaelbarber/.utah/selfcode-repo</string>
     <key>UTAH_SELFCODE_TIME_LIMIT</key>
     <string>900</string>
+    <key>UTAH_SELFCODE_INTERVAL</key>
+    <string>900</string>
     <key>PYTHONUNBUFFERED</key>
     <string>1</string>
     <key>PATH</key>
     <string>/Users/michaelbarber/.utah/venv/bin:/opt/homebrew/bin:/usr/local/bin:/Users/michaelbarber/.local/bin:/usr/bin:/bin</string>
   </dict>
 
-  <key>StartInterval</key>
-  <integer>21600</integer>
-
   <key>RunAtLoad</key>
-  <false/>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>ThrottleInterval</key>
+  <integer>30</integer>
+  <key>ProcessType</key>
+  <string>Background</string>
 
   <key>StandardOutPath</key>
   <string>/Users/michaelbarber/.utah/logs/selfcode.log</string>

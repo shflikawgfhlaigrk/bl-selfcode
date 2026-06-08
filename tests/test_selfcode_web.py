@@ -113,6 +113,8 @@ def test_goals_merges_count_both_repos():
 def test_run_edit_is_propose_only(monkeypatch):
     """The web edit lane MUST call propose_governed with auto_merge=False — a
     web-triggered edit can never auto-merge to main."""
+    from utah import selfcode
+    monkeypatch.setattr(selfcode, "enabled", lambda: True)  # hermetic: ignore live kill switch
     captured = {}
 
     def fake_propose(task):
@@ -158,6 +160,8 @@ def test_run_edit_respects_kill_switch(monkeypatch):
 
 
 def test_run_edit_never_raises_on_failure(monkeypatch):
+    from utah import selfcode
+    monkeypatch.setattr(selfcode, "enabled", lambda: True)  # hermetic: ignore live kill switch
     def boom(task):
         raise RuntimeError("claude crashed")
     out = selfcode_web.run_edit("x", propose_fn=boom)

@@ -5,7 +5,7 @@ GATED on Michael's business inputs (SMS/email creds + CAN-SPAM physical address)
 never faked; an attempted send records a DOCUMENTED gate to the failure log (the goal)."""
 from __future__ import annotations
 
-from utah import failures
+from utah import config, failures
 from utah.product import outreach
 from tests.fakes import FakeFailureStore
 
@@ -75,10 +75,15 @@ def test_send_gate_is_documented_in_failure_log():
     assert any("gated" in row[2] or "gate" in row[2] for row in store.rows)  # why-it-didn't-send recorded
 
 
-def test_send_refused_with_placeholder_canspam_address():
+def test_send_refused_with_placeholder_canspam_address(monkeypatch, tmp_path):
     """can_send=True must NOT send when the CAN-SPAM physical address is still the
     placeholder — that is a non-compliant email that burns the prospect's one shot. Refuse,
-    document the gate, keep the lead queued (never sent). This is the module's stated contract."""
+    document the gate, keep the lead queued (never sent). This is the module's stated contract.
+
+    Hermetic: force the *unconfigured* regime (no env address, business.json absent) so the
+    default footer falls back to the placeholder regardless of the live ~/.utah/secrets."""
+    monkeypatch.delenv("UTAH_CANSPAM_ADDRESS", raising=False)
+    monkeypatch.setattr(config, "BUSINESS_CREDS", tmp_path / "absent.json")
     store = FakeFailureStore()
     failures.set_store(store)
     lg = _RecLedger()

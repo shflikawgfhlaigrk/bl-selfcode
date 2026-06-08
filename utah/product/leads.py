@@ -359,7 +359,7 @@ def _all_frontier_tiles() -> list[tuple[str, tuple[float, float, float, float]]]
 def run_scheduled(region: str = "Georgia Frontier", target: int = DAILY_TARGET,
                   bbox=None, max_tiles: int = MAX_TILES_PER_RUN,
                   ledger=None, fetch: Fetch | None = None,
-                  cursor_load=None, cursor_save=None) -> dict:
+                  cursor_load=None, cursor_save=None, foundation_gate=None) -> dict:
     """``com.utah.leads`` cron entry — MOVING, SELF-REPLENISHING FRONTIER, ≥``target`` new/day.
 
     With ``bbox=None`` (the production default) a single persistent int cursor walks the
@@ -369,6 +369,13 @@ def run_scheduled(region: str = "Georgia Frontier", target: int = DAILY_TARGET,
     Pass an explicit ``bbox`` for a single-region scan (tests/manual). A tile that fails all
     Overpass mirrors is skipped (logged) so one bad tile never aborts the run. Real OSM only,
     never fabricated. Returns ``{tiles_scanned, found, new, target, met, region, cursor}``."""
+    from utah import foundation
+
+    gate = foundation.gate_cron if foundation_gate is None else foundation_gate
+    skip = gate("leads")
+    if skip:
+        return skip
+
     if ledger is None:
         from utah.product.ledger import Ledger
         ledger = Ledger()

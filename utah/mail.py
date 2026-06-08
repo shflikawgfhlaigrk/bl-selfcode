@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import logging
 
-from utah import failures
+from utah import config, failures
 from utah.daemon import runtime
 
 log = logging.getLogger("utah.mail")
@@ -33,6 +33,7 @@ def _gmail_send(to: str, subject: str, body: str) -> None:
     from email.message import EmailMessage
 
     creds = json.loads(GMAIL_CREDS.read_text())
+    creds["from"] = config.normalize_owner_email(creds.get("from"))
     msg = EmailMessage()
     msg["From"] = creds["from"]
     msg["To"] = to
@@ -51,6 +52,7 @@ def _gmail_login_probe() -> None:
     import ssl
 
     creds = json.loads(GMAIL_CREDS.read_text())
+    creds["from"] = config.normalize_owner_email(creds.get("from"))
     with smtplib.SMTP_SSL(creds.get("smtp_host", "smtp.gmail.com"), 465,
                           context=ssl.create_default_context(), timeout=15) as s:
         s.login(creds["from"], creds["app_password"])

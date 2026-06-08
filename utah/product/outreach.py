@@ -16,17 +16,18 @@ from __future__ import annotations
 import logging
 import re
 
-from utah import failures
-from utah import mail
+from utah import config, failures, mail
 
 log = logging.getLogger("utah.product.outreach")
 
-#: Placeholder footer — the REAL physical address + opt-out are Michael's business inputs
-#: (gated). A send is refused until these are real.
-DEFAULT_FOOTER = {
-    "address": "[CAN-SPAM physical address — Michael's business input, required to send]",
-    "unsubscribe": "Reply STOP to opt out.",
-}
+
+def default_footer() -> dict:
+    """CAN-SPAM footer — address from ``UTAH_CANSPAM_ADDRESS`` or ``secrets/business.json``."""
+    return {"address": config.canspam_address(), "unsubscribe": "Reply STOP to opt out."}
+
+
+#: Back-compat alias; prefer :func:`default_footer` (reads live creds).
+DEFAULT_FOOTER = default_footer()
 
 #: Cold-email/SMS content red flags (spam-weighted). Plain, honest copy scores ~0;
 #: it takes several genuine flags to trip the block, so good outreach is never blocked.
@@ -43,7 +44,7 @@ def compose(lead: dict, campaign: str, footer: dict | None = None) -> dict:
     """A grounded, CAN-SPAM-compliant cold pitch for a no-website SMB. Deterministic
     template (an LLM rewrite can drop in later); always stamps the physical address +
     opt-out so nothing non-compliant can be queued."""
-    f = footer or DEFAULT_FOOTER
+    f = footer or default_footer()
     name = (lead.get("name") or "there").strip()
     kind = (lead.get("kind") or "business").strip()
     subject = f"A simple website for {name}"
@@ -91,8 +92,8 @@ def _footer_is_real(footer: dict | None) -> bool:
     placeholder. Sending with the placeholder address is a non-compliant email that burns
     the prospect's one shot, so a send is refused until this is real (the module contract).
     Creds are gated in mail.send; the physical address is gated here."""
-    addr = ((footer or DEFAULT_FOOTER).get("address") or "").strip()
-    return bool(addr) and addr != DEFAULT_FOOTER["address"] and "[CAN-SPAM" not in addr
+    addr = ((footer or default_footer()).get("address") or "").strip()
+    return config._canspam_is_real(addr)  # noqa: SLF001 — shared gate with config.canspam_address
 
 
 def queue(ledger, campaign: str, leads: list[dict], footer: dict | None = None,
@@ -162,5 +163,5 @@ def queue(ledger, campaign: str, leads: list[dict], footer: dict | None = None,
             "needs_contact": needs_contact, "blocked": blocked, "sent": sent, "gated": gated}
 
 
-__all__ = ["compose", "content_score", "pick_channel", "queue",
+__all__ = ["compose", "content_score", "pick_channel", "queue", "default_footer",
            "DEFAULT_FOOTER", "SPAM_BLOCK_THRESHOLD"]

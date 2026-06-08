@@ -65,16 +65,31 @@ class Segmenter:
     never starts a turn), keeps a short ``preroll`` so the first phoneme isn't clipped,
     and ends the segment after ``offset`` consecutive non-speech frames — or at the
     ``max_frames`` hard cap. ``feed(frame, is_speech)`` returns the completed segment
-    bytes once, then None until the next segment. Frame size is the caller's (512)."""
+    bytes once, then None until the next segment. Frame size is the caller's (512).
+
+    Armed capture (:meth:`arm`, after an openWakeWord hit) is special: the wake word
+    fires at the *end* of "ace", so the audio that immediately follows is the natural
+    pause before the command. While armed-and-awaiting, the segmenter holds a rolling
+    preroll and waits for the command's speech onset — it NEVER emits the silent gap and
+    never accumulates it. Pure silence is never a segment: feeding the post-wake pause to
+    STT made Moonshine/Whisper hallucinate a phantom command the user never said ("voice
+    answers something I never said"), and emitting it stole the turn from the real command
+    that followed. The wait is unbounded by this class (the caller's armed window decides
+    how long to keep feeding); after ``arm_grace`` frames with no command, it simply
+    stands down to ordinary onset detection — still no emit. A bare "ace" yields no
+    segment at all (the deck orb already pulsed on the wake)."""
 
     def __init__(self, onset: int = 3, offset: int = 20, max_frames: int = 300,
-                 preroll: int = 6) -> None:
+                 preroll: int = 6, arm_grace: int = 63) -> None:
         self.onset = onset
         self.offset = offset
+        self.arm_grace = arm_grace
         self.max_bytes = max_frames * FRAME_BYTES
         self._pre: deque[bytes] = deque(maxlen=preroll)
         self._buf = bytearray()
         self._capturing = False
+        self._awaiting = False   # armed, holding through the post-wake gap for the command
+        self._armed_n = 0        # frames since arm() (bounds the awaiting hold)
         self._run_speech = 0
         self._run_silence = 0
 
@@ -82,18 +97,43 @@ class Segmenter:
         self._pre.clear()
         self._buf = bytearray()
         self._capturing = False
+        self._awaiting = False
+        self._armed_n = 0
         self._run_speech = 0
         self._run_silence = 0
 
     def arm(self) -> None:
-        """Start capturing immediately (after an audio wake hit) using preroll."""
-        if not self._capturing:
-            self._capturing = True
-            self._buf = bytearray(b"".join(self._pre))
-            self._run_silence = 0
-            self._run_speech = self.onset
+        """After an audio wake: await the command's speech onset. Keep a rolling preroll
+        (so the command's first phoneme isn't clipped) but do NOT capture the post-wake
+        pause and do NOT emit anything until real speech begins — a bare "ace" yields no
+        segment. How long to wait is the caller's decision (it stops feeding when its
+        armed window closes); ``arm_grace`` only decides when to fall back to plain onset
+        detection, which also never emits silence."""
+        self._awaiting = True
+        self._capturing = False
+        self._armed_n = 0
+        self._run_speech = 0
+        self._run_silence = 0
+        # _pre is retained — it holds the wake tail / first frames as preroll.
 
     def feed(self, frame: bytes, is_speech: bool) -> bytes | None:
+        if self._awaiting:
+            # Armed, command not yet started. Roll the preroll; never accumulate the gap
+            # and never emit it. Start real capture only when the command's speech onsets.
+            self._pre.append(frame)
+            self._armed_n += 1
+            self._run_speech = self._run_speech + 1 if is_speech else 0
+            if self._run_speech >= self.onset:
+                self._awaiting = False
+                self._capturing = True
+                self._buf = bytearray(b"".join(self._pre))
+                self._run_silence = 0
+            elif self._armed_n >= self.arm_grace:
+                # No command within the grace window: stand down to ordinary onset
+                # detection (still armed by the caller, still no emit on silence).
+                self._awaiting = False
+                self._run_speech = 0
+            return None
         if not self._capturing:
             self._pre.append(frame)
             self._run_speech = self._run_speech + 1 if is_speech else 0
