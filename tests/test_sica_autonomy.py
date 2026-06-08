@@ -5,9 +5,18 @@ from __future__ import annotations
 import json
 import subprocess
 
+import pytest
+
 from utah import selfcode, sica, sica_autonomy
 
 _SKIP_DISCOVER = lambda: {"ran": True, "findings": [], "count": 0}
+
+
+@pytest.fixture(autouse=True)
+def _calm_load(monkeypatch):
+    """run_cycle reads real machine load to defer self-coding under storms; pin it calm so
+    the cycle-body tests are deterministic. The two load-gate tests inject load_fn directly."""
+    monkeypatch.setattr(sica_autonomy, "_load_per_core", lambda: 0.0)
 
 
 def _git(repo, *a):
@@ -188,7 +197,10 @@ def test_run_cycle_verifies_frontend_in_browser_after_merge(monkeypatch, tmp_pat
     """Closed loop: after a FRONTEND change merges, the cycle re-renders the live deck and
     records the observation — verify in the real UI, not guess."""
     monkeypatch.setattr(selfcode, "KILL_SWITCH", tmp_path / "nope")
-    from utah import sica_goals
+    from utah import sica_discover, sica_goals
+    # isolate the discoveries log so a live pending finding can't hijack the domain under test
+    monkeypatch.setattr(sica_discover, "DISCOVERIES_LOG", tmp_path / "empty.jsonl")
+    monkeypatch.setattr(sica_discover, "USED_PATH", tmp_path / "used.json")
     monkeypatch.setattr(sica_goals, "next_cycle_index", lambda: 0)
     monkeypatch.setattr(sica_goals, "pick_domain", lambda n: "frontend")
     monkeypatch.setattr(sica_goals, "next_task", lambda d, **kw: "make the dormant panel honest")
