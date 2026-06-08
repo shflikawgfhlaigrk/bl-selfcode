@@ -153,7 +153,11 @@ def run() -> None:
                         path = _write_wav(pcm)
                         try:
                             text = stt.transcribe(path)
-                            log.info("voice: transcript=%r", text)
+                            # DEBUG, not INFO: un-addressed room speech is private — it must
+                            # not be written verbatim to disk by default (the buyer's package
+                            # logs at INFO). Addressed turns still surface at INFO below
+                            # (wake_fired / "voice turn"). Flip to DEBUG to see all transcripts.
+                            log.debug("voice: transcript=%r", text)
                             if text:
                                 vstate["last_transcript"] = text[:120]
                                 result = agent.handle_utterance(text, on_speaking=_on_speaking)
