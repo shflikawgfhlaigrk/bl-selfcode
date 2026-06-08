@@ -132,6 +132,17 @@
   .kpi{background:var(--panel2);border:1px solid var(--line);border-radius:7px;padding:10px 11px}
   .kpi b{color:var(--gold2);font-size:18px;display:block} .kpi span{color:var(--mut);font-size:9px;letter-spacing:1.5px}
   .empty{height:100%;min-height:80px;display:flex;align-items:center;justify-content:center;color:var(--dim);letter-spacing:3px;font-size:11px}
+  /* ---- status pill: the ONE consistent rendering of a panel's STATE (placeholders +
+       the state legend), emitted by normalizeState(). Exactly two visual tiers — .error
+       (a real failure just happened: red) vs .idle (dormant/gated/offline/loading/
+       unavailable/awaiting/no producer — honestly empty or still in-flight, never a
+       fault: calm dim) — so a glance never mistakes "nothing wired yet" for "broke". ---- */
+  .spill{display:inline-flex;align-items:center;gap:7px;font-size:8.5px;letter-spacing:1.6px;
+    text-transform:uppercase;padding:4px 11px;border-radius:12px;border:1px solid var(--line);
+    color:var(--mut);background:#0f0e13;line-height:1.5;text-align:left;max-width:min(100%,460px)}
+  .spill::before{content:"";width:6px;height:6px;border-radius:50%;background:currentColor;flex:none;opacity:.85}
+  .spill.idle{color:var(--mut);background:#0f0e13;border-color:#22212a}
+  .spill.error{color:#e8a59d;background:#1a0b09;border-color:#3a1714}
   .ents{display:flex;flex-wrap:wrap;gap:6px} .ent{background:var(--panel2);border:1px solid var(--line);border-radius:5px;padding:3px 8px;font-size:10.5px;color:#cdc6ad}.ent b{color:var(--gold)}
   .cores{display:flex;flex-wrap:wrap;gap:5px}.core-cell{background:var(--panel2);border:1px solid var(--line);border-radius:5px;padding:3px 7px;font-size:10px;color:#cdc6ad}.core-cell b{color:var(--gold)}
 
@@ -481,7 +492,7 @@ function renderLegend(){
 function renderMarkerLegend(){
   const el=$("legend-markers-body"); if(!el) return;
   el.innerHTML=Object.entries(STATE_LABELS).map(([k,v])=>
-    `<div class="leg-row mk"><b>${esc(k)}</b><span>${esc(v)}</span></div>`).join("");
+    `<div class="leg-row mk">${normalizeState(k)}<span>${esc(v)}</span></div>`).join("");
 }
 
 /* ---- marker text → plain-language meaning. The short markers that surface inside
@@ -512,9 +523,25 @@ function markerKey(text){
    so plain placeholders are left untouched. */
 function markerAttrs(text){ const k=markerKey(text); if(!k) return "";
   return ` role="status" title="${esc(STATE_LABELS[k])}" aria-label="${esc(text+" — "+STATE_LABELS[k])}"`; }
-/* one honest, self-explaining placeholder: an .empty badge whose marker carries its
-   own plain-language title + aria-label straight from STATE_LABELS. */
-function emptyBox(text){ return `<div class="empty"${markerAttrs(text)}>${esc(text)}</div>`; }
+
+/* ---- normalizeState(): the SINGLE place that turns any panel-state text into one
+   consistent, ARIA-labelled status PILL. The taxonomy has exactly TWO visual tiers: the
+   lone "error" tier (a real failure just happened — reads red) versus every IDLE state
+   (dormant / gated / offline / loading / unavailable / awaiting / no producer — honestly
+   empty or still in-flight, never a fault — reads calm dim). The plain-language sentence
+   comes from STATE_LABELS (one source of truth), so each pill carries a human tooltip, a
+   screen-reader sentence and role="status". The error tier stays visually apart from all
+   idle states, so a glance never confuses "nothing wired yet" with "something broke". ---- */
+const ERROR_STATES=new Set(["error"]);   // the ONE failure tier; every other marker is idle
+function stateTier(text){ const k=markerKey(text); return (k&&ERROR_STATES.has(k))?"error":"idle"; }
+function normalizeState(text){
+  const k=markerKey(text);
+  const aria=k?` title="${esc(STATE_LABELS[k])}" aria-label="${esc(text+" — "+STATE_LABELS[k])}"`:"";
+  return `<span class="spill ${stateTier(text)}" role="status"${aria}>${esc(text)}</span>`;
+}
+/* one honest, self-explaining placeholder: an .empty box wrapping the normalizeState()
+   pill, so every panel's empty/idle/error state reads as the same ARIA-labelled chip. */
+function emptyBox(text){ return `<div class="empty">${normalizeState(text)}</div>`; }
 /* set a node's text and, when that text is a marker, its self-explaining
    title/aria-label — cleared otherwise so a node that flips back to a live value
    (e.g. OFFLINE→ONLINE) doesn't keep a stale tooltip. */
