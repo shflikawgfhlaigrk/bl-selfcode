@@ -149,6 +149,9 @@ def leads_probate(result: dict, *, kind: str = "leads", sender=None) -> dict:
     r = result or {}
     if kind == "probate":
         msg = f"{r.get('new', 0)} new probate rows ({r.get('found', 0)} seen)"
+    elif kind == "outreach":
+        msg = (f"{r.get('sent', 0)} outreach emails sent "
+               f"({r.get('suppressed', 0)} already-contacted, {r.get('blocked', 0)} blocked)")
     else:
         msg = (f"{r.get('new', 0)} new leads "
                f"({r.get('found', 0)} seen, {r.get('tiles_scanned', 0)} tiles)")

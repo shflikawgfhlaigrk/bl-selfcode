@@ -102,6 +102,66 @@ def test_send_refused_with_placeholder_canspam_address(monkeypatch, tmp_path):
     assert any("address" in row[3].lower() for row in store.rows)
 
 
+def test_run_scheduled_drives_real_sends_to_uncontacted_email_leads(monkeypatch):
+    """The missing driver: run_scheduled pulls uncontacted email-leads and actually SENDS
+    (suppression-aware, CAN-SPAM footer), instead of the leads sitting in the pile forever."""
+    sent: list[str] = []
+
+    class FakeLedger:
+        def uncontacted_email_leads(self, campaign, limit):
+            leads = [{"name": "Joe's Diner", "kind": "restaurant",
+                      "contact": {"email": "joe@example.com", "address": "1 Main St"}},
+                     {"name": "Salon X", "kind": "salon",
+                      "contact": {"email": "x@salon.com", "address": "2 Oak St"}}]
+            return leads[:limit]
+        def is_contacted(self, r, c):
+            return False
+        def log_outreach(self, r, c, channel="email"):
+            return True
+        def record_mail(self, *a, **k):
+            return True
+
+    monkeypatch.setattr(outreach, "default_footer",
+                        lambda: {"address": "28 Dogwood Rd, Newnan GA", "unsubscribe": "Reply STOP"})
+    r = outreach.run_scheduled(limit=1, ledger=FakeLedger(),
+                               foundation_gate=lambda cap: None,        # substrate green
+                               send_fn=lambda to, s, b: sent.append(to) or {"sent": True})
+    assert r["sent"] == 1 and sent == ["joe@example.com"]               # capped + actually sent
+
+
+def test_run_scheduled_skips_chains_and_corporate_inboxes(monkeypatch):
+    """Autonomous outreach must NOT cold-pitch a big brand. A corporate-domain lead (Tesla)
+    is filtered; the genuine SMB behind it gets the send."""
+    sent: list[str] = []
+
+    class FakeLedger:
+        def uncontacted_email_leads(self, campaign, limit):
+            return [{"name": "Tesla Savannah", "kind": "car_repair",
+                     "contact": {"email": "savannahservice@tesla.com"}},
+                    {"name": "La Monarca", "kind": "restaurant",
+                     "contact": {"email": "lamonarca@gmail.com", "address": "1 Main"}}]
+        def is_contacted(self, r, c):
+            return False
+        def log_outreach(self, r, c, channel="email"):
+            return True
+        def record_mail(self, *a, **k):
+            return True
+
+    monkeypatch.setattr(outreach, "default_footer",
+                        lambda: {"address": "28 Dogwood Rd, Newnan GA", "unsubscribe": "Reply STOP"})
+    r = outreach.run_scheduled(limit=5, ledger=FakeLedger(), foundation_gate=lambda cap: None,
+                               send_fn=lambda to, s, b: sent.append(to) or {"sent": True})
+    assert sent == ["lamonarca@gmail.com"]               # Tesla filtered, real SMB sent
+    assert r["sent"] == 1
+
+
+def test_run_scheduled_gates_on_red_substrate(monkeypatch):
+    """A red Postgres/daemon must SKIP outreach explicitly, never send blind."""
+    r = outreach.run_scheduled(foundation_gate=lambda cap: {"status": "substrate_red"},
+                               ledger=object())
+    assert r.get("status") == "substrate_red"
+
+
 def test_send_proceeds_with_real_canspam_address():
     """With a real physical address, the send actually proceeds (the gate is a gate, not a wall)."""
     store = FakeFailureStore()

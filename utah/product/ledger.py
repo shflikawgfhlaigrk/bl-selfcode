@@ -174,6 +174,21 @@ class Ledger:
                 "SELECT 1 FROM outreach_ledger WHERE recipient=%s AND campaign=%s",
                 (recipient, campaign)).fetchone() is not None
 
+    def uncontacted_email_leads(self, campaign, limit=8) -> list[dict]:
+        """Leads that have a REAL email and have NOT been contacted for *campaign* — the
+        suppression-aware queue cold outreach pulls from (newest first). This is what was
+        missing: the send path was proven but nothing fed it the live leads."""
+        with self._conn() as c:
+            rows = c.execute(
+                "SELECT name, kind, region, contact FROM leads "
+                "WHERE contact->>'email' IS NOT NULL AND contact->>'email' <> '' "
+                "AND NOT EXISTS (SELECT 1 FROM outreach_ledger o "
+                "  WHERE o.recipient = leads.contact->>'email' AND o.campaign = %s) "
+                "ORDER BY ts DESC LIMIT %s",
+                (campaign, limit),
+            ).fetchall()
+        return [{"name": r[0], "kind": r[1], "region": r[2], "contact": r[3]} for r in rows]
+
     def record_fire(self, engine, direction, entry=None, synthetic=False) -> int:
         """Record an engine fire (real only on the board; synthetic flagged)."""
         with self._conn() as c:

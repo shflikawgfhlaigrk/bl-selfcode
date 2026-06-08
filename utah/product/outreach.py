@@ -14,11 +14,17 @@ suppression / channel selection are real and proven; the wire is the only gated 
 from __future__ import annotations
 
 import logging
+import os
 import re
 
 from utah import config, failures, mail
 
 log = logging.getLogger("utah.product.outreach")
+
+#: Conservative daily cold-email cap — protects the sending domain's deliverability and
+#: reputation (sends go through a personal Gmail). Raise via UTAH_OUTREACH_DAILY once warm.
+DAILY_OUTREACH = int(os.environ.get("UTAH_OUTREACH_DAILY", "8"))
+DEFAULT_CAMPAIGN = "smb_no_website"
 
 
 def default_footer() -> dict:
@@ -163,5 +169,56 @@ def queue(ledger, campaign: str, leads: list[dict], footer: dict | None = None,
             "needs_contact": needs_contact, "blocked": blocked, "sent": sent, "gated": gated}
 
 
+#: Email domains owned by large corporations — a no-website SMB never has one. Skip them so
+#: autonomous outreach never cold-pitches a Fortune-500 service center (e.g. savannahservice@
+#: tesla.com leaked into the lead pile as "Tesla Savannah").
+_CORP_EMAIL_DOMAINS: frozenset[str] = frozenset({
+    "tesla.com", "walmart.com", "mcdonalds.com", "starbucks.com", "amazon.com", "target.com",
+    "homedepot.com", "lowes.com", "fedex.com", "ups.com", "att.com", "verizon.com",
+    "comcast.com", "cvs.com", "walgreens.com", "costco.com", "google.com", "apple.com",
+})
+
+
+def _is_emailable_prospect(lead: dict) -> bool:
+    """A genuine no-website SMB worth cold-emailing: not a national chain, not a corporate
+    inbox. Guards autonomous outreach against pitching big brands a 'you have no website' note."""
+    from utah.product import leads as leads_mod
+
+    if leads_mod.is_national_chain(lead.get("name") or ""):
+        return False
+    email = ((lead.get("contact") or {}).get("email") or "").lower()
+    domain = email.rsplit("@", 1)[-1] if "@" in email else ""
+    return bool(domain) and domain not in _CORP_EMAIL_DOMAINS
+
+
+def run_scheduled(campaign: str = DEFAULT_CAMPAIGN, limit: int = DAILY_OUTREACH, *,
+                  ledger=None, foundation_gate=None, send_fn=None) -> dict:
+    """``com.utah.outreach`` cron — the missing DRIVER. Pull uncontacted email-leads, drop
+    chains/corporate inboxes, and actually SEND up to *limit* a CAN-SPAM-compliant pitch
+    (suppression-checked, never-twice). Measured volume protects deliverability. Gated on a
+    green substrate so a red Postgres never masquerades as 'no leads'. Never raises."""
+    from utah import foundation
+
+    gate = foundation.gate_cron if foundation_gate is None else foundation_gate
+    skip = gate("outreach")
+    if skip:
+        return skip
+    if ledger is None:
+        from utah.product.ledger import Ledger
+        ledger = Ledger()
+    # pull a buffer and filter to real SMB prospects so corporate leads don't starve real ones
+    candidates = ledger.uncontacted_email_leads(campaign, max(limit * 4, limit))
+    leads = [l for l in candidates if _is_emailable_prospect(l)][:limit]
+    if not leads:
+        return {"campaign": campaign, "sent": 0, "queued": 0,
+                "reason": "no emailable SMB prospects (chains/corporate filtered)"}
+    result = queue(ledger, campaign, leads, footer=default_footer(),
+                   can_send=True, send_fn=send_fn)
+    log.info("outreach run_scheduled: campaign=%s pulled=%d sent=%d",
+             campaign, len(leads), result.get("sent", 0))
+    return result
+
+
 __all__ = ["compose", "content_score", "pick_channel", "queue", "default_footer",
+           "run_scheduled", "DAILY_OUTREACH", "DEFAULT_CAMPAIGN",
            "DEFAULT_FOOTER", "SPAM_BLOCK_THRESHOLD"]

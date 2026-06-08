@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  com.utah.outreach — cold-outreach SENDER cron (daily, 10:00).
+
+  Runs utah.product.outreach.run_scheduled(): pull up to DAILY_OUTREACH (default 8)
+  uncontacted email-leads, drop national chains + corporate inboxes, and SEND each a
+  CAN-SPAM-compliant pitch via real SMTP (suppression-checked, never-twice). This is the
+  DRIVER that was missing — the send path was proven but nothing fed it the live leads.
+  Measured volume + a business-hour send protect the sending Gmail's deliverability.
+  RunAtLoad is FALSE so a reboot never fires a batch; it sends once a day on schedule.
+
+  Install:
+    cp ops/launchd/com.utah.outreach.plist ~/Library/LaunchAgents/
+    launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.utah.outreach.plist
+  Force-run now:  launchctl kickstart gui/$(id -u)/com.utah.outreach
+  Stop:           launchctl bootout  gui/$(id -u)/com.utah.outreach
+  Cap override:   UTAH_OUTREACH_DAILY=20 (once the domain is warmed up)
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.utah.outreach</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/michaelbarber/.utah/venv/bin/python</string>
+    <string>-c</string>
+    <string>import logging; logging.basicConfig(level=logging.INFO); from utah.product.outreach import run_scheduled; from utah import alerts; r=run_scheduled(); alerts.leads_probate(r, kind='outreach'); print(r)</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>/Users/michaelbarber/Desktop/ProjectUtah</string>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PYTHONPATH</key>
+    <string>/Users/michaelbarber/Desktop/ProjectUtah</string>
+    <key>PYTHONUNBUFFERED</key>
+    <string>1</string>
+    <key>PATH</key>
+    <string>/Users/michaelbarber/.utah/venv/bin:/opt/homebrew/bin:/usr/local/bin:/Users/michaelbarber/.local/bin:/usr/bin:/bin</string>
+  </dict>
+
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Hour</key>
+    <integer>10</integer>
+    <key>Minute</key>
+    <integer>0</integer>
+  </dict>
+
+  <key>RunAtLoad</key>
+  <false/>
+
+  <key>StandardOutPath</key>
+  <string>/Users/michaelbarber/.utah/logs/outreach.log</string>
+
+  <key>StandardErrorPath</key>
+  <string>/Users/michaelbarber/.utah/logs/outreach.err</string>
+</dict>
+</plist>
