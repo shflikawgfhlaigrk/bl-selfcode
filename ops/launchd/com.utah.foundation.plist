@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  com.utah.foundation — bottom-layer substrate probe (Postgres + supervisor + daemon).
+
+  Independent of com.utah.supervisor (same reason as com.utah.verify): must report
+  when the substrate is down even if the supervisor is dead. Writes
+  ~/.utah/run/foundation.json and records anomalies to the failures ledger.
+
+  Install:
+    cp ops/launchd/com.utah.foundation.plist ~/Library/LaunchAgents/
+    launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.utah.foundation.plist
+  Reload:  launchctl kickstart -k gui/$(id -u)/com.utah.foundation
+  Stop:    launchctl bootout gui/$(id -u)/com.utah.foundation
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.utah.foundation</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/michaelbarber/.utah/venv/bin/python</string>
+    <string>/Users/michaelbarber/Desktop/ProjectUtah/ops/foundation_check.py</string>
+    <string>--loop</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>/Users/michaelbarber/Desktop/ProjectUtah</string>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PYTHONPATH</key>
+    <string>/Users/michaelbarber/Desktop/ProjectUtah</string>
+    <key>PYTHONUNBUFFERED</key>
+    <string>1</string>
+    <key>PATH</key>
+    <string>/Users/michaelbarber/.utah/venv/bin:/opt/homebrew/bin:/usr/local/bin:/Users/michaelbarber/.local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+  </dict>
+
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>ThrottleInterval</key>
+  <integer>30</integer>
+  <key>ProcessType</key>
+  <string>Background</string>
+
+  <key>StandardOutPath</key>
+  <string>/Users/michaelbarber/.utah/logs/launchd-foundation.out.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/michaelbarber/.utah/logs/launchd-foundation.err.log</string>
+</dict>
+</plist>

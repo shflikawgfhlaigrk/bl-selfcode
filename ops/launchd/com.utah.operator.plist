@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  com.utah.operator — Ace self-heal sweep (every 5 min).
+
+  Hydrates secrets from Ace/gmail/memory, restarts dead postgres/supervisor,
+  re-hooks tailserve, probes Gmail auth, opens repair URLs + pages Michael ONLY
+  when a human must be at the screen (2FA / app-password). Also runs inside
+  foundation probe when substrate is green.
+
+  Install:
+    cp ops/launchd/com.utah.operator.plist ~/Library/LaunchAgents/
+    launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.utah.operator.plist
+  Force-run: launchctl kickstart gui/$(id -u)/com.utah.operator
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.utah.operator</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/michaelbarber/.utah/venv/bin/python</string>
+    <string>-m</string>
+    <string>utah.operator</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>/Users/michaelbarber/.utah</string>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PYTHONPATH</key>
+    <string>/Users/michaelbarber/Desktop/ProjectUtah</string>
+    <key>PYTHONUNBUFFERED</key>
+    <string>1</string>
+    <key>PATH</key>
+    <string>/Users/michaelbarber/.utah/venv/bin:/opt/homebrew/bin:/usr/local/bin:/Users/michaelbarber/.local/bin:/usr/bin:/bin</string>
+  </dict>
+
+  <key>StartInterval</key>
+  <integer>300</integer>
+
+  <key>RunAtLoad</key>
+  <true/>
+
+  <key>StandardOutPath</key>
+  <string>/Users/michaelbarber/.utah/logs/operator.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/michaelbarber/.utah/logs/operator.err</string>
+</dict>
+</plist>
