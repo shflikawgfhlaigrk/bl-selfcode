@@ -30,6 +30,11 @@ CHANNELS = 1
 MONITOR_S = 5.0                 # how often the level monitor logs observed mic RMS
 SILENCE_ALERT_S = 30.0          # mic delivering TRUE silence (zeros) this long -> failure
 TRUE_SILENCE = 0.0008           # below this = mic delivering zeros (deaf); a room reads higher
+#: A genuinely dead mic (no Microphone TCC grant -> the stream opens but delivers zeros,
+#: with occasional electrical blips that re-arm `alerted` and the stream reopening) would
+#: otherwise re-record mic_silent every minute and flood the audit log Michael reads in the
+#: morning brief. Bound it: surface a persistent-dead mic at most once per this window.
+MIC_SILENT_COOLDOWN_S = 1800.0  # 30 min
 
 
 def _rms(pcm: bytes) -> float:
@@ -68,7 +73,7 @@ def run() -> None:
     # never capture Utah's own TTS or the room during a turn (the feedback that turned
     # one reply into an endless self-conversation).
     processing = threading.Event()
-    level = {"max": 0.0, "last_loud": time.monotonic(), "alerted": False}
+    level = {"max": 0.0, "last_loud": time.monotonic(), "alerted": False, "last_record": 0.0}
     # Real voice state surfaced on the deck /voice route (heartbeat'd by _monitor).
     vstate = {"status": "starting", "listening": False, "speaking": False,
               "segments": 0, "last_transcript": None, "last_wake": None}
@@ -99,12 +104,16 @@ def run() -> None:
             mx = level["max"]; level["max"] = 0.0
             log.debug("voice: audio level (max rms / %ds) = %.4f", MONITOR_S, mx)
             quiet_for = time.monotonic() - level["last_loud"]
-            if quiet_for > SILENCE_ALERT_S and not level["alerted"]:
+            now = time.monotonic()
+            cooled = (now - level["last_record"]) > MIC_SILENT_COOLDOWN_S
+            if quiet_for > SILENCE_ALERT_S and not level["alerted"] and cooled:
                 level["alerted"] = True
+                level["last_record"] = now      # rate-limit: a dead mic surfaces once/cooldown
                 failures.record(
                     "voice", "mic_silent",
-                    f"mic delivering pure silence (zeros) for {int(quiet_for)}s — audio "
-                    "device unavailable (not a quiet room — that reads well above zero)",
+                    f"mic delivering pure silence (zeros) for {int(quiet_for)}s — audio device "
+                    "unavailable; grant Microphone permission to the Utah daemon python in "
+                    "System Settings > Privacy & Security > Microphone (TCC).",
                 )
                 log.warning("voice: TRUE silence (zeros) for %ds — recorded mic_silent", int(quiet_for))
 
