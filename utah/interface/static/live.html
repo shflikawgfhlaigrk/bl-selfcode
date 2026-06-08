@@ -471,6 +471,44 @@ function renderLegend(){
     `<div class="leg-row"><span class="leg-led ${k}"></span><b>${esc(e.label)}</b><span>${esc(e.tip)}</span></div>`).join("");
 }
 
+/* ---- marker text → plain-language meaning. The short markers that surface inside
+   placeholder / empty-state badges (DORMANT, unavailable, OFFLINE, LOADING, awaiting…)
+   are jargon on their own; this map gives each one a full sentence used as that badge's
+   title (hover) and aria-label (screen reader). ONE source of truth — keyed by the
+   marker exactly as it reads on screen, lower-cased. ---- */
+const STATE_LABELS={
+  gated:        "No live data source is wired to this panel yet — Utah shows nothing rather than fake a number, and it turns on by itself the moment a real producer starts publishing.",
+  dormant:      "Real but empty: the producer exists but has published zero rows so far. Never simulated.",
+  "no producer":"Nothing is publishing to this panel yet — it stays empty (never faked) until a real source lands.",
+  offline:      "The local core daemon isn't responding, so no live data is reaching this deck.",
+  unavailable:  "The last fetch for this panel failed, so there's nothing live to show right now.",
+  loading:      "Fetching live data from the control plane…",
+  error:        "The last fetch for this panel failed.",
+  awaiting:     "Connected and listening, but no events have arrived on the event bus yet.",
+};
+/* which marker (if any) a placeholder's text carries — the earliest-occurring one
+   wins, so "unavailable — core offline" reads as unavailable, not offline. */
+function markerKey(text){
+  const t=String(text==null?"":text).toLowerCase(); let best=null, at=Infinity;
+  for(const k of Object.keys(STATE_LABELS)){ const i=t.indexOf(k);
+    if(i>=0 && (i<at || (i===at && k.length>best.length))){ at=i; best=k; } }
+  return best;
+}
+/* attributes that make a marker explain itself: a hover tooltip (title), a
+   screen-reader sentence (aria-label) and role="status". "" when no marker matches,
+   so plain placeholders are left untouched. */
+function markerAttrs(text){ const k=markerKey(text); if(!k) return "";
+  return ` role="status" title="${esc(STATE_LABELS[k])}" aria-label="${esc(text+" — "+STATE_LABELS[k])}"`; }
+/* one honest, self-explaining placeholder: an .empty badge whose marker carries its
+   own plain-language title + aria-label straight from STATE_LABELS. */
+function emptyBox(text){ return `<div class="empty"${markerAttrs(text)}>${esc(text)}</div>`; }
+/* set a node's text and, when that text is a marker, its self-explaining
+   title/aria-label — cleared otherwise so a node that flips back to a live value
+   (e.g. OFFLINE→ONLINE) doesn't keep a stale tooltip. */
+function setMarker(el,text){ if(!el) return; el.textContent=text; const k=markerKey(text);
+  if(k){ el.setAttribute("role","status"); el.title=STATE_LABELS[k]; el.setAttribute("aria-label",text+" — "+STATE_LABELS[k]); }
+  else { el.removeAttribute("role"); el.removeAttribute("title"); el.removeAttribute("aria-label"); } }
+
 /* ============================ LIVE STATE POLL ============================ */
 /* Every value below comes from a real control-plane fetch. Nothing is hardcoded
    except units/labels. Where a producer is genuinely absent, the panel shows an
@@ -489,14 +527,14 @@ async function poll(){
   $("mic").className="micbtn"+(vlive?" live":"");
 
   if(!up){
-    $("spine").innerHTML='<div class="empty">CORE OFFLINE</div>';
-    $("spine-state").textContent="OFFLINE";
+    $("spine").innerHTML=emptyBox("CORE OFFLINE");
+    setMarker($("spine-state"),"OFFLINE");
     $("h-load").textContent="—";$("h-bus").textContent="—";
     renderFns(null,null,null);
     LAST={};return;
   }
   LAST={s,m,st};
-  $("spine-state").textContent="ONLINE";
+  setMarker($("spine-state"),"ONLINE");
   // header metrics
   $("h-load").textContent=s.governor.load_per_core;
   $("h-bus").textContent=s.bus.published;
@@ -591,7 +629,7 @@ const TAB_INTRO={
 let _tabRows={};   // remembers the rows behind the open tab so a click can resolve the full record
 function intro(tab){ return TAB_INTRO[tab]?`<div class="xp" style="margin-bottom:10px"><div class="xp-what" style="font-size:12px">${esc(TAB_INTRO[tab])}</div></div>`:""; }
 function itemRows(arr,tab){
-  if(!arr||!arr.length) return '<div class="empty">DORMANT — 0 ROWS (NO PRODUCER WIRED)</div>';
+  if(!arr||!arr.length) return emptyBox("DORMANT — 0 ROWS (NO PRODUCER WIRED)");
   _tabRows[tab]=arr;
   return arr.map((r,i)=>{
     const nm=r.name||r.case_name||r.recipient||r.title||("#"+(r.id||""));
@@ -606,11 +644,11 @@ function wireRows(){ document.querySelectorAll("#dbody .item[data-row]").forEach
   const arr=_tabRows[el.dataset.tab]; if(arr) recordDrill(el.dataset.tab, arr[+el.dataset.row]); }); }
 async function getPanel(name){ const d=await fetch("/panel/"+name).then(r=>r.json()); if(d.error)throw new Error(d.error); return d; }
 async function loadDash(tab, quiet){
-  const body=$("dbody"); if(!quiet) body.innerHTML='<div class="empty">LOADING…</div>';
+  const body=$("dbody"); if(!quiet) body.innerHTML=emptyBox("LOADING…");
   try{
     if(tab==="overview"){
       const s=LAST.s, m=LAST.m, st=LAST.st;
-      if(!s){ body.innerHTML='<div class="empty">CORE OFFLINE</div>'; return; }
+      if(!s){ body.innerHTML=emptyBox("CORE OFFLINE"); return; }
       const L=(st&&st.ledger)||{}; const voice=(st&&st.voice)||{};
       const kpi=[
         ["MEMORY · LIVE", m?m.live:"—","memory"], ["ENTITIES", m?m.entities:"—","memory"],
@@ -631,7 +669,7 @@ async function loadDash(tab, quiet){
       if(d.entities&&d.entities.length) h+='<div class="drill-sec">'+d.entities.length+' TOP ENTITIES (THINGS UTAH TRACKS)</div><div class="ents">'+d.entities.slice(0,40).map(e=>`<span class="ent">${esc(e.name)} <b>${esc(e.mentions)}</b></span>`).join("")+"</div>";
       h+='<div class="drill-sec">'+(d.rows||[]).length+' RECENT FACTS — tap to read in full</div>';
       h+= (d.rows||[]).map((r,i)=>`<div class="item drillable" data-row="${i}" data-tab="memory"><div class="h"><span class="pill">${esc(r.source||"fact")}</span><span class="meta">#${esc(r.id)} · conf ${esc(r.confidence)} · ${esc(r.ts||"")}</span></div><div class="body">${esc(r.content)}</div></div>`).join("");
-      body.innerHTML=h||'<div class="empty">DORMANT</div>'; renderTabs(); wireRows(); return;
+      body.innerHTML=h||emptyBox("DORMANT"); renderTabs(); wireRows(); return;
     }
     if(tab==="system"){
       const [pool,gov]=await Promise.all([getPanel("pool"),getPanel("governor")]);
@@ -670,7 +708,7 @@ async function loadDash(tab, quiet){
       h+=itemRows(arr, tab);
     }
     body.innerHTML=h; renderTabs(); wireRows();
-  }catch(e){ body.innerHTML='<div class="empty">unavailable — '+esc(String(e.message||e))+'</div>'; }
+  }catch(e){ body.innerHTML=emptyBox("unavailable — "+String(e.message||e)); }
 }
 
 /* ============================ SELF-CODE PAGE (4 sections) ============================ */
@@ -724,13 +762,13 @@ async function loadSelfcode(body, quiet){
   // SECTION 4 — percentage goals (top, the headline)
   h+=sec("◆ GOALS — % WIRED OFF REAL MERGES & CYCLES");
   const gl=goals.goals||[];
-  h+= gl.length? gl.map(pctBar).join("") : '<div class="empty">DORMANT — no self-code data yet</div>';
+  h+= gl.length? gl.map(pctBar).join("") : emptyBox("DORMANT — no self-code data yet");
 
   // SECTION 1 — finding on google (web-grounded facts)
   const rf=research.rows||[];
   h+=sec("◆ FINDING ON GOOGLE — "+rf.length+" WEB-GROUNDED FACTS HE LEARNED");
   h+= rf.length? rf.slice(0,12).map(r=>`<div class="item"><div class="h"><span class="pill">${esc(r.source||"web")}</span><span class="meta">#${esc(r.id)} · conf ${esc(r.confidence)} · ${esc(r.ts||"")}</span></div><div class="body">${esc(r.content)}</div></div>`).join("")
-       : '<div class="empty">DORMANT — nothing learned from the web yet</div>';
+       : emptyBox("DORMANT — nothing learned from the web yet");
 
   // SECTION 2 — correcting in himself (recent self-code cycles)
   const st=cyc.stats||{}; const rows=cyc.rows||[];
@@ -740,7 +778,7 @@ async function loadSelfcode(body, quiet){
     `<div class="kpi"><b>${esc(st.passed)}/${esc(st.attempts)}</b><span>PASSED GATE</span></div>`+
     `<div class="kpi"><b>${esc(st.merged)}</b><span>MERGED</span></div></div>`;
   h+='<div class="rail-title" style="margin:6px 0 4px"><span>✓✓ = passed gate · merged</span></div>';
-  h+= rows.length? rows.map(cycRow).join("") : '<div class="empty">DORMANT — no cycles logged yet</div>';
+  h+= rows.length? rows.map(cycRow).join("") : emptyBox("DORMANT — no cycles logged yet");
 
   // SECTION 3 — ask for an edit (chat box → real governed propose-only run)
   h+=sec("◆ ASK FOR AN EDIT — HE DOES IT (PROPOSE-ONLY · NEVER MERGES MAIN)");
@@ -1023,7 +1061,7 @@ const DRILL_TITLE={daemon:"◆ LOCAL CORE DAEMON",bus:"◆ EVENT BUS",pool:"◆ 
 
 async function drill(key){
   closeMenu();
-  drillOpen(DRILL_TITLE[key]||key, '<div class="empty">LOADING…</div>');
+  drillOpen(DRILL_TITLE[key]||key, emptyBox("LOADING…"));
   try{
     if(key==="daemon"){
       const d=await getPanel("spine"); const s=LAST.s||{};
@@ -1046,7 +1084,7 @@ async function drill(key){
       h+=dstats([["PUBLISHED",d.bus_published,"total messages sent"],["SUBSCRIBERS",d.bus_subscribers,"parts listening"],
         ["DROPPED",dropped,"should be 0"]]);
       h+=sec("LIVE CHANNELS (most recent first)");
-      h+='<div class="ticker" style="height:auto;max-height:240px">'+($("ticker").innerHTML||'<div>awaiting events…</div>')+'</div>';
+      h+='<div class="ticker" style="height:auto;max-height:240px">'+($("ticker").innerHTML||`<div${markerAttrs("awaiting events…")}>awaiting events…</div>`)+'</div>';
       return drillOpen(DRILL_TITLE[key], h);
     }
     if(key==="pool"||key==="agents"){
@@ -1127,7 +1165,7 @@ async function drill(key){
         const meta=metaOf(r);
         const cc=(r.contact&&Object.keys(r.contact).length)?'<div class="contact" style="margin-top:5px">'+contactBlock(r.contact)+'</div>':"";
         return `<div class="item drillable" data-row="${i}"><div class="h"><span class="nm">${esc(nm)}</span><span class="meta">${esc(meta)}</span></div>${cc}${r.content?`<div class="body">${esc(r.content)}</div>`:""}</div>`;
-      }).join("") : '<div class="empty">DORMANT — 0 ROWS (NO PRODUCER WIRED)</div>';
+      }).join("") : emptyBox("DORMANT — 0 ROWS (NO PRODUCER WIRED)");
       drillOpen(DRILL_TITLE[key], h);
       document.querySelectorAll("#drill-body .item[data-row]").forEach(el=>el.onclick=()=>recordDrill(key, arr[+el.dataset.row]));
       return;
@@ -1141,7 +1179,7 @@ async function drill(key){
         : '<div class="empty">no failures — nothing has broken</div>';
       return drillOpen(DRILL_TITLE.audit, h);
     }
-  }catch(e){ drillOpen(DRILL_TITLE[key]||key, xpBlock(key)+'<div class="empty">unavailable — '+esc(String(e.message||e))+'</div>'); }
+  }catch(e){ drillOpen(DRILL_TITLE[key]||key, xpBlock(key)+emptyBox("unavailable — "+String(e.message||e))); }
 }
 
 /* "GATED" header metric — explain, in plain words, exactly what is dormant and why */
@@ -1162,7 +1200,7 @@ function drillGated(){
 /* Generic console drill — render any capability panel's live state (selfcode/browser). */
 async function openConsole(panel, title){
   closeMenu();
-  drillOpen(title, '<div class="empty">LOADING…</div>');
+  drillOpen(title, emptyBox("LOADING…"));
   try{
     const d=await getPanel(panel);
     const skip=new Set(['panel','rows','engines','html']);
@@ -1172,7 +1210,7 @@ async function openConsole(panel, title){
     h+=Object.entries(d).filter(([k])=>!skip.has(k)).map(([k,v])=>
        `<div class="drill-row"><b>${esc(k)}</b><span class="drill-meta">${esc(typeof v==='object'?JSON.stringify(v):v)}</span></div>`).join("");
     drillOpen(title, h);
-  }catch(e){ drillOpen(title, '<div class="empty">unavailable — '+esc(String(e.message||e))+'</div>'); }
+  }catch(e){ drillOpen(title, emptyBox("unavailable — "+String(e.message||e))); }
 }
 
 /* Trading Engine Lab — merged roster + live fires ledger; honest GATED until WC feed lands.
@@ -1180,7 +1218,7 @@ async function openConsole(panel, title){
    rather than toggle it — toggling from the card would pop the menu over the lab drawer. */
 async function openLab(){
   closeMenu();
-  drillOpen("⚡ TRADING ENGINE LAB", '<div class="empty">LOADING…</div>');
+  drillOpen("⚡ TRADING ENGINE LAB", emptyBox("LOADING…"));
   try{
     const d=await getPanel("trading");
     const gated=d.feed!=="live";
@@ -1196,14 +1234,16 @@ async function openLab(){
     h+='<div class="drill-sec">'+((d.rows||[]).length)+' FIRES</div>';
     h+= (d.rows&&d.rows.length)
         ? d.rows.map(r=>`<div class="drill-row"><b>${esc(r.engine)}</b><span class="drill-meta">${esc(r.direction)} · ${esc(r.outcome||'open')} · ${esc(r.ts||'')}</span></div>`).join("")
-        : '<div class="empty">DORMANT — 0 FIRES (NO PRODUCER WIRED · WC FEED LANDS TOMORROW)</div>';
+        : emptyBox("DORMANT — 0 FIRES (NO PRODUCER WIRED · WC FEED LANDS TOMORROW)");
     drillOpen("⚡ TRADING ENGINE LAB", h);
-  }catch(e){ drillOpen("⚡ TRADING ENGINE LAB", '<div class="empty">unavailable — '+esc(String(e.message||e))+'</div>'); }
+  }catch(e){ drillOpen("⚡ TRADING ENGINE LAB", emptyBox("unavailable — "+String(e.message||e))); }
 }
 document.addEventListener("keydown",e=>{ if(e.key==="Escape")drillClose(); });
 
 /* ============================ BOOT ============================ */
 function clock(){$("clock").textContent=new Date().toLocaleTimeString([],{hour:"2-digit",minute:"2-digit",second:"2-digit"})+" · ET";}
+// label the static "awaiting events…" placeholder from STATE_LABELS (first-paint a11y)
+$("ticker").innerHTML=`<div${markerAttrs("awaiting events…")}>awaiting events…</div>`;
 renderLegend(); renderTabs(); loadDash("overview");
 poll(); setInterval(poll,2500);
 clock(); setInterval(clock,1000);
