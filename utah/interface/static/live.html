@@ -299,6 +299,27 @@
   .sc-job .jh{color:#7fc9e0;font-size:10px;letter-spacing:1.5px;margin-bottom:5px;display:flex;align-items:center;gap:7px}
   .sc-diff{margin-top:7px;background:#0a0a0e;border:1px solid var(--line);border-radius:7px;padding:9px 11px;max-height:230px;overflow:auto;white-space:pre;font-size:10.5px;line-height:1.45;color:#cfc8ad}
   .sc-diff .add{color:#7fd9a5} .sc-diff .del{color:#e89a92} .sc-diff .hd{color:var(--gold)}
+
+  /* ---- status legend: ONE collapsible key explaining every badge color/state,
+       for humans (visually) and screen readers (native <details> announces
+       expanded/collapsed and is keyboard-operable). ---- */
+  .legend{margin:0 20px 4px;border-top:1px solid #131319}
+  .legend>summary{list-style:none;cursor:pointer;color:var(--gold);font-size:9px;letter-spacing:1.6px;
+    padding:7px 0 6px;user-select:none;display:flex;align-items:center;gap:7px}
+  .legend>summary::-webkit-details-marker{display:none}
+  .legend>summary::before{content:"▸";color:var(--gold);display:inline-block;transition:transform .15s ease}
+  .legend[open]>summary::before{transform:rotate(90deg)}
+  .legend>summary:hover{color:var(--gold2)}
+  .legend-body{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:5px 18px;padding:2px 0 9px}
+  .leg-row{display:grid;grid-template-columns:auto auto 1fr;gap:8px;align-items:baseline;font-size:10px}
+  .leg-row b{color:var(--txt);letter-spacing:1px;font-size:9.5px;text-transform:uppercase;white-space:nowrap}
+  .leg-row span:last-child{color:var(--mut);font-size:10px;line-height:1.4}
+  .leg-led{width:8px;height:8px;border-radius:50%;background:var(--dim);align-self:center;flex:none}
+  .leg-led.ok{background:var(--ok);box-shadow:0 0 8px var(--okglow)}
+  .leg-led.warn{background:var(--warn);box-shadow:0 0 8px rgba(231,169,59,.5)}
+  .leg-led.off,.leg-led.error{background:var(--err);box-shadow:0 0 8px rgba(226,85,75,.5)}
+  .leg-led.gated{background:var(--dim)}
+  .leg-led.dormant{background:var(--dormant);border:1px solid var(--dim)}
 </style>
 </head>
 <body>
@@ -386,6 +407,10 @@
       <input id="q" placeholder="Issue a command to UTAH…  (real reasoning · streamed thinking · no fabrication)"/>
       <button class="send" onclick="ask()">SEND</button>
     </div>
+    <details class="legend" id="legend">
+      <summary>◆ STATUS KEY — WHAT EACH BADGE COLOR &amp; STATE MEANS</summary>
+      <div class="legend-body" id="legend-body"></div>
+    </details>
     <div class="footer">LIVE · REAL DATA ONLY · DORMANT/GATED = NO PRODUCER WIRED YET (NEVER SIMULATED) · SOURCE: UTAH CONTROL PLANE · <span id="f-stamp">—</span></div>
   </div>
 </div>
@@ -411,8 +436,40 @@
 const $=id=>document.getElementById(id);
 const esc=s=>String(s==null?"":s).replace(/[&<>]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[c]));
 const rows=o=>Object.entries(o).map(([k,v])=>`<div class="row"><span class="k">${esc(k)}</span><span class="v">${esc(v)}</span></div>`).join("");
-const led=(id,cls)=>{const e=$(id);if(e)e.className="led "+cls;};
+const led=(id,cls)=>{const e=$(id);if(!e)return; e.className="led "+cls;
+  // the bare connectivity dot now also speaks: name it from its chip label and
+  // attach the plain-language meaning for its state (humans + screen readers).
+  const x=STATE_EXPLAIN[cls]||STATE_EXPLAIN.off, nm=(e.parentElement?e.parentElement.textContent:id).trim();
+  e.setAttribute("role","status"); e.title=x.tip;
+  e.setAttribute("aria-label",nm+" — "+x.label+": "+x.tip);};
 const fmtUp=s=>{s=Math.round(s||0);const h=(s/3600|0),m=(s%3600/60|0);return h?h+"h "+m+"m":(m?m+"m "+(s%60)+"s":s+"s");};
+
+/* ---- state → plain-language meaning. ONE source of truth, used three ways:
+   every status badge's tooltip (humans, via title), its spoken label (screen
+   readers, via aria-label) and the collapsible legend in the dock. Keyed by the
+   health state behind each badge's color. dormant/gated/error stop being a bare
+   colored dot and start explaining themselves. ---- */
+const STATE_EXPLAIN={
+  ok:     {label:"Live",    tip:"Live & healthy — a real producer is feeding this panel right now."},
+  warn:   {label:"Busy",    tip:"Working, but under load or degraded — worth keeping an eye on."},
+  off:    {label:"Down",    tip:"Offline — the producer for this panel isn't responding."},
+  error:  {label:"Error",   tip:"Errored — the last fetch for this panel failed."},
+  gated:  {label:"Gated",   tip:"Gated — no live data source wired yet. Utah shows nothing rather than fake a number; it turns on by itself the moment a producer starts publishing."},
+  dormant:{label:"Dormant", tip:"Dormant — real but empty: the producer exists but has published 0 rows so far. Never simulated."},
+};
+/* attributes that make any status badge explain itself: a human tooltip (title),
+   a screen-reader sentence (aria-label = "<what it is> — <State>: <meaning>") and
+   role="status" so assistive tech treats it as a live status region. */
+function badgeAttrs(state, label){
+  const e=STATE_EXPLAIN[state]||STATE_EXPLAIN.off;
+  return ` role="status" title="${esc(e.tip)}" aria-label="${esc(label+" — "+e.label+": "+e.tip)}"`;
+}
+/* render the one collapsible legend straight from the map (stays in sync forever) */
+function renderLegend(){
+  const el=$("legend-body"); if(!el) return;
+  el.innerHTML=Object.entries(STATE_EXPLAIN).map(([k,e])=>
+    `<div class="leg-row"><span class="leg-led ${k}"></span><b>${esc(e.label)}</b><span>${esc(e.tip)}</span></div>`).join("");
+}
 
 /* ============================ LIVE STATE POLL ============================ */
 /* Every value below comes from a real control-plane fetch. Nothing is hardcoded
@@ -458,10 +515,12 @@ async function poll(){
     {nm:"Risk Firewall", drill:"risk", big:"GATED", sub:"trade kernel · pre-exec", st:"NO PRODUCER", led:"off", gated:true},
     {nm:"Sync & Ingest", drill:"sync", big:"GATED", sub:"wealthcharts rx · cdp", st:"NO PRODUCER", led:"off", gated:true},
   ];
-  $("spine").innerHTML=sys.map(r=>
-    `<div class="sysrow drillable${r.gated?' gated':''}" onclick="drill('${r.drill}')"><span class="led ${r.led}"></span>`+
+  $("spine").innerHTML=sys.map(r=>{
+    const state=r.gated?'gated':r.led;
+    return `<div class="sysrow drillable${r.gated?' gated':''}" onclick="drill('${r.drill}')"><span class="led ${r.led}"></span>`+
     `<div><div class="nm">${esc(r.nm)}<span class="hint">TAP</span></div><div class="sub">${esc(r.sub)}</div></div>`+
-    `<div><div class="big">${esc(r.big)}</div><div class="st">${esc(r.st)}</div></div></div>`).join("");
+    `<div><div class="big">${esc(r.big)}</div><div class="st"${badgeAttrs(state, r.nm+": "+r.big+" ("+r.st+")")}>${esc(r.st)}</div></div></div>`;
+  }).join("");
   // core orb reflects voice
   const orb=document.querySelector(".orb"); if(orb) orb.classList.toggle("listen", vlive && !orb.classList.contains("heard"));
   // right-rail function cards
@@ -486,10 +545,12 @@ function renderFns(s,m,st,voice){
     {nm:"Risk / Threat Kernel", sub:"pre-exec gate", st:"GATED", cls:"dim", gated:true, click:"drill('risk')"},
     {nm:"Self-Coding Bay", sub:"bounded autonomy", st:"LOCKED · APPROVAL", cls:"dim", gated:true, click:"openConsole('selfcode','🤖 SELF-CODING BAY')"},
   ];
-  $("fns").innerHTML=fns.map(f=>
-    `<div class="fn drillable${f.gated?' gated':''}"${f.click?` onclick="${f.click}"`:""}><span class="led ${f.cls==='off'?'off':(f.cls==='warn'?'warn':(f.cls==='dim'?'':'ok'))}"></span>`+
+  $("fns").innerHTML=fns.map(f=>{
+    const state=f.gated?'gated':(f.cls==='warn'?'warn':(f.cls==='off'?'off':'ok'));
+    return `<div class="fn drillable${f.gated?' gated':''}"${f.click?` onclick="${f.click}"`:""}><span class="led ${f.cls==='off'?'off':(f.cls==='warn'?'warn':(f.cls==='dim'?'':'ok'))}"></span>`+
     `<div><div class="nm">${esc(f.nm)}${f.click?'<span class="hint">TAP</span>':""}</div><div class="sub">${esc(f.sub)}</div></div>`+
-    `<div class="st ${f.cls}">${esc(f.st)}</div></div>`).join("");
+    `<div class="st ${f.cls}"${badgeAttrs(state, f.nm+": "+f.st)}>${esc(f.st)}</div></div>`;
+  }).join("");
   $("fn-count").textContent=fns.filter(f=>!f.gated).length+" LIVE";
   $("h-gates").textContent=fns.filter(f=>f.gated).length;
 }
@@ -1143,7 +1204,7 @@ document.addEventListener("keydown",e=>{ if(e.key==="Escape")drillClose(); });
 
 /* ============================ BOOT ============================ */
 function clock(){$("clock").textContent=new Date().toLocaleTimeString([],{hour:"2-digit",minute:"2-digit",second:"2-digit"})+" · ET";}
-renderTabs(); loadDash("overview");
+renderLegend(); renderTabs(); loadDash("overview");
 poll(); setInterval(poll,2500);
 clock(); setInterval(clock,1000);
 // JOIN DISCORD — light the header button only when an invite is configured.
