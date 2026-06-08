@@ -159,11 +159,34 @@ def mark_used(rec: dict, *, used_path: Path | None = None) -> None:
     _save_used(used, used_path)
 
 
+def file_task(domain: str, task: str, *, log_path: Path | None = None,
+              used_path: Path | None = None) -> dict:
+    """File a PRE-MADE self-code task as a pending finding (no brain/browser). The SICA
+    loop's :func:`next_pending_task` picks it up, codes it under the suite gate, and lands
+    it via durable propagation — so any subsystem can queue a concrete fix for Ace to make
+    himself. Deduped: an identical task already pending (filed, not yet used) is NOT
+    re-filed, so a subsystem that stays broken queues ONE repair, not one per sweep.
+    Returns ``{filed: bool, rec|reason}``."""
+    task = (task or "").strip()
+    if not task:
+        return {"filed": False, "reason": "empty task"}
+    used = _load_used(used_path)
+    for rec in list_findings(log_path=log_path):
+        if rec.get("suggested_task") == task and _record_key(rec) not in used:
+            return {"filed": False, "reason": "already pending", "rec": rec}
+    rec = {"ts": time.time(), "domain": domain, "brief_path": "",
+           "suggested_task": task, "source": "filed"}
+    _append_record(rec, log_path=log_path)
+    log.info("file_task: queued self-code task (%s): %r", domain, task[:70])
+    return {"filed": True, "rec": rec}
+
+
 __all__ = [
     "BROWSER_DOMAINS",
     "DISCOVERIES_LOG",
     "FINDINGS_DIR",
     "USED_PATH",
+    "file_task",
     "list_findings",
     "mark_used",
     "next_pending_task",

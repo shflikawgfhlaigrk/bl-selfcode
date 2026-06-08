@@ -188,12 +188,16 @@ def run(
     substrate_fn=None,
     integrations_fn=None,
     tailserve_fn=None,
+    revenue_fn=None,
     write_status: bool = True,
 ) -> dict:
     """One operator sweep. Never raises."""
     substrate_fn = substrate_fn or repair_substrate
     integrations_fn = integrations_fn or repair_integrations
     tailserve_fn = tailserve_fn or repair_tailserve
+    if revenue_fn is None:
+        from utah import revenue_heal
+        revenue_fn = revenue_heal.scan
 
     _remember_owner_facts()
 
@@ -202,6 +206,7 @@ def run(
         "substrate": substrate_fn(),
         "tailserve": tailserve_fn(),
         "integrations": integrations_fn(),
+        "revenue": revenue_fn(),     # producer gone dark -> Ace files a self-code repair
         "failures": sweep_failures(),
         "canspam_ready": config.canspam_configured(),
     }

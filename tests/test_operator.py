@@ -33,9 +33,11 @@ def test_run_writes_status(tmp_path, monkeypatch):
     )
     monkeypatch.setattr(operator, "sweep_failures", lambda **k: [])
     monkeypatch.setattr(operator.config, "canspam_configured", lambda: True)
+    monkeypatch.setattr("utah.revenue_heal.scan", lambda *a, **k: [])  # don't touch live DB
 
     result = operator.run(write_status=True)
     assert result["canspam_ready"] is True
+    assert result["revenue"] == []                # revenue self-heal sweep wired into the operator
     assert (run_dir / "operator.json").is_file()
 
 
