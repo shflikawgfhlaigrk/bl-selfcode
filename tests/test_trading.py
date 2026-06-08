@@ -27,7 +27,8 @@ class _RecLedger:
         return len(self.fires)
 
 
-def test_run_gated_without_feed_records_zero_and_documents():
+def test_run_gated_without_feed_records_zero_and_documents(monkeypatch):
+    monkeypatch.setattr(trading, "feed_available", lambda: False)  # hermetic: ignore live WC
     store = FakeFailureStore(); failures.set_store(store)
     lg = _RecLedger()
     r = trading.run(lg)                              # no feed, no live feed
@@ -54,9 +55,10 @@ def test_run_feed_failure_documented():
     assert any("feed_failed" in row[2] for row in store.rows)
 
 
-def test_lab_state_roster_is_gated_and_dormant():
+def test_lab_state_roster_is_gated_and_dormant(monkeypatch):
     # The merged engine lab lists the full roster; with no WC feed every engine is
     # DORMANT and the feed is GATED — never a fabricated live engine.
+    monkeypatch.setattr(trading, "feed_available", lambda: False)  # hermetic: ignore live WC
     st = trading.lab_state(fires=0)
     assert st["feed"] == "gated"
     names = {e["name"] for e in st["engines"]}

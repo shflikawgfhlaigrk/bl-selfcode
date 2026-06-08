@@ -62,9 +62,14 @@ def evaluate(closes: list[float], *, lookback: int = 20, engine: str = "breakout
 
 
 def feed_available() -> bool:
-    """Whether the live WealthCharts feed is reachable. Gated until Michael's WC login is up
-    (no live detector wired yet → False; flips on when the feed lands)."""
-    return False
+    """Whether the live WealthCharts feed is reachable — delegates to the WC CDP bridge
+    (Michael's logged-in chrome-wc on the debug port). Flips True when that session is up;
+    False otherwise so engines stay dormant and never fabricate fires."""
+    try:
+        from utah.integrations import wc_feed
+        return wc_feed.feed_available()
+    except Exception:  # noqa: BLE001 — any bridge import/probe failure = feed unavailable
+        return False
 
 
 def _live_feed() -> list[float]:  # pragma: no cover — activates with the real WC bridge

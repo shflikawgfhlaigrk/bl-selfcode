@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  com.utah.wcfeed — WealthCharts live feed bridge (continuous).
+
+  Runs utah.integrations.wc_feed.main(): ensure the logged-in chrome-wc profile is up with
+  the CDP debug port, attach READ-ONLY to its market WebSocket, parse realtime candles, and
+  feed per-symbol closes to the trading engines → ledger.record_fire on a breakout. Real WC
+  data, real fires — gates honestly (no chrome-wc / bounced to login) and never fabricates.
+
+  Requires Michael's WC session in ~/.ace/chrome-wc (the bridge will launch it; a session
+  expiry needs a one-time human login/2FA, recorded as feed_gated).
+
+  Install:
+    cp ops/launchd/com.utah.wcfeed.plist ~/Library/LaunchAgents/
+    launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.utah.wcfeed.plist
+  Stop:  launchctl bootout gui/$(id -u)/com.utah.wcfeed
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.utah.wcfeed</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/michaelbarber/.utah/venv/bin/python</string>
+    <string>-m</string>
+    <string>utah.integrations.wc_feed</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>/Users/michaelbarber/Desktop/ProjectUtah</string>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PYTHONPATH</key>
+    <string>/Users/michaelbarber/Desktop/ProjectUtah</string>
+    <key>PYTHONUNBUFFERED</key>
+    <string>1</string>
+    <key>PATH</key>
+    <string>/Users/michaelbarber/.utah/venv/bin:/opt/homebrew/bin:/usr/local/bin:/Users/michaelbarber/.local/bin:/usr/bin:/bin</string>
+  </dict>
+
+  <key>RunAtLoad</key>
+  <true/>
+
+  <key>KeepAlive</key>
+  <dict>
+    <key>SuccessfulExit</key>
+    <false/>
+  </dict>
+
+  <key>ThrottleInterval</key>
+  <integer>30</integer>
+
+  <key>StandardOutPath</key>
+  <string>/Users/michaelbarber/.utah/logs/wcfeed.log</string>
+
+  <key>StandardErrorPath</key>
+  <string>/Users/michaelbarber/.utah/logs/wcfeed.err</string>
+</dict>
+</plist>
