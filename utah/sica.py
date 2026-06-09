@@ -227,6 +227,25 @@ def record_cycle(d: dict) -> None:
         pass
 
 
+def recent_cycles(limit: int = 80) -> list[dict]:
+    """Recent self-coding cycle telemetry, NEWEST FIRST, from ``selfcode_log``. The mirror of
+    :func:`record_cycle`: a no-op (``[]``) unless the archive backend is Postgres, so unit tests
+    (in-memory backend, pinned in conftest) never touch a DB. Best-effort — any DB error → ``[]``;
+    never raises (a dead telemetry log must not break the loop that reads it)."""
+    backend = get_archive_backend()
+    if not isinstance(backend, _PgArchive):
+        return []
+    try:
+        with backend._conn() as c:
+            c.execute(_LOG_SCHEMA)
+            rows = c.execute(
+                "SELECT data FROM selfcode_log ORDER BY id DESC LIMIT %s", (limit,)
+            ).fetchall()
+        return [r[0] if isinstance(r[0], dict) else json.loads(r[0]) for r in rows]
+    except Exception:  # noqa: BLE001 — telemetry read is best-effort
+        return []
+
+
 class Archive:
     """Scored-attempt archive. Production = Postgres; passing a ``path`` forces the file
     backend (isolated tests / migration). ``best()``/``count()`` are computed over
@@ -257,5 +276,5 @@ class Archive:
 
 
 __all__ = ["utility", "score_from_pytest", "Attempt", "make_attempt", "Archive",
-           "get_archive_backend", "set_archive_backend", "record_cycle", "ARCHIVE_PATH",
-           "TIME_LIMIT_S", "COST_LIMIT_USD", "TIMEOUT_PENALTY"]
+           "get_archive_backend", "set_archive_backend", "record_cycle", "recent_cycles",
+           "ARCHIVE_PATH", "TIME_LIMIT_S", "COST_LIMIT_USD", "TIMEOUT_PENALTY"]
