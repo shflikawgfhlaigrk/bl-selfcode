@@ -25,6 +25,7 @@ from pathlib import Path
 from typing import Callable
 
 from utah.daemon import runtime
+from utah.objects import Lead
 
 log = logging.getLogger("utah.product.leads")
 
@@ -351,7 +352,10 @@ def find_no_website_smbs(bbox: tuple[float, float, float, float],
         if name.lower() in seen:           # node+way dupes of the same business
             continue
         seen.add(name.lower())
-        out.append({"name": name, "kind": kind, "contact": _extract_contact(tags)})
+        # Bind the producer to the typed Lead contract (B4): a field-name typo here is
+        # now a Struct error, not a silent dict-key drift that outreach would mis-read.
+        out.append(Lead(name=name, kind=kind, contact=_extract_contact(tags),
+                        source="osm").as_dict())
     return out
 
 
@@ -528,7 +532,7 @@ def parse_maps_place(place: dict) -> dict | None:
     contact: dict[str, str] = {"phone": phone}
     if place.get("address"):
         contact["address"] = place["address"]
-    return {"name": name, "kind": kind, "contact": contact}
+    return Lead(name=name, kind=kind, contact=contact, source="google_maps").as_dict()
 
 
 def find_maps_no_website_trades(text_query: str, lat: float, lng: float, *,

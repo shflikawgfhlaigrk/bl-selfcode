@@ -175,3 +175,34 @@ def test_reset_schema_clean_slate(pg, monkeypatch):
     memory.store("Michael lives in Utah", source="fact")
     pg.reset_schema()
     assert memory.recall("Michael") == []
+
+
+def test_pool_runs_two_transactions_concurrently_on_distinct_connections(pg):
+    """B6 fix: the store hands each transaction its OWN pooled connection, so two
+    threads hold open transactions at the SAME time on DIFFERENT connections — impossible
+    under the old single-connection + RLock (which serialized all in-daemon memory I/O)."""
+    import threading
+
+    both_in = threading.Barrier(2, timeout=10)   # both must be inside a tx at once
+    conn_ids: list[int] = []
+    errors: list[Exception] = []
+    lock = threading.Lock()
+
+    def worker():
+        try:
+            with pg._tx() as conn:
+                with lock:
+                    conn_ids.append(id(conn))
+                both_in.wait()                    # blocks until the OTHER thread is also in
+                conn.execute("SELECT 1").fetchone()
+        except Exception as exc:                  # noqa: BLE001
+            errors.append(exc)
+
+    threads = [threading.Thread(target=worker) for _ in range(2)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=15)
+
+    assert not errors                              # the barrier didn't deadlock → real concurrency
+    assert len(conn_ids) == 2 and conn_ids[0] != conn_ids[1]   # distinct connections

@@ -100,6 +100,18 @@ THINK_INSTRUCTION = (
     "final answer. Do not put the answer inside the thinking block."
 )
 
+#: VOICE brevity — spoken answers must be SHORT and plain. Voice reads the reply aloud
+#: through Piper, so a chat-length, list-formatted answer becomes a 60-90s garbled
+#: monologue (live: "what are Mark Douglas's 5 rules" → an 85s essay full of markdown
+#: + line breaks, read out literally). Injected only for voice turns; chat stays rich.
+VOICE_BRIEF = (
+    "This reply will be SPOKEN ALOUD by a voice assistant, so keep it SHORT and "
+    "conversational: at most two or three sentences, lead with the answer, plain prose "
+    "only — NO lists, NO numbered points, NO markdown, NO line breaks, no \"firstly/"
+    "secondly\". If the full answer is long, give the gist in one breath and offer to "
+    "go deeper."
+)
+
 #: stream-json content-block / delta markers we route on.
 _OPEN_THINK = "<thinking>"
 _CLOSE_THINK = "</thinking>"
@@ -111,6 +123,34 @@ EXTRACT = (
 )
 
 _JSON_ARRAY = re.compile(r"\[.*\]", re.S)
+
+
+def _truncate_context(context: str) -> str:
+    """Trim CONTEXT to the char budget WITHOUT severing a fact mid-word. The context is
+    newline-delimited (``- fact`` bullets + labelled blocks), so cut at the last line
+    boundary at or before the cap — a truncated context still ends on a whole fact, never
+    half a number or name. Falls back to a hard char cut only when the first line alone
+    already exceeds the budget."""
+    ctx = (context or "").strip()
+    cap = config.BRAIN_CONTEXT_MAX_CHARS
+    if len(ctx) <= cap:
+        return ctx
+    head = ctx[:cap]
+    nl = head.rfind("\n")
+    return head[:nl] if nl > 0 else head
+
+
+def _build_prompt(question: str, context: str, *,
+                  brief: bool = False, want_thinking: bool = False) -> str:
+    """Assemble the ONE brain prompt — PERSONA (tone) + NO_FAB (grounding) + optional
+    voice-brevity + optional ``<thinking>`` instruction + CONTEXT + QUESTION. Shared by
+    :func:`think` and :func:`think_stream` so the prompt contract can never drift between
+    the one-shot and streaming paths (the dedup the audit flagged)."""
+    ctx = _truncate_context(context)
+    brief_block = f"{VOICE_BRIEF}\n\n" if brief else ""
+    think_block = f"{THINK_INSTRUCTION}\n\n" if want_thinking else ""
+    return (f"{PERSONA}\n\n{NO_FAB}\n\n{brief_block}{think_block}"
+            f"CONTEXT:\n{ctx or '(none)'}\n\nQUESTION: {question}")
 
 
 class BrainUnavailable(UtahError):
@@ -229,6 +269,8 @@ def decode_stream(lines: Iterable[str]) -> Iterator[tuple[str, str]]:
     are skipped — only content deltas survive.
     """
     current: str | None = None  # native content-block type
+    saw_json_line = False        # at least one parseable JSON line arrived
+    saw_stream_event = False     # at least one recognized stream_event frame
     for line in lines:
         line = line.strip()
         if not line:
@@ -237,8 +279,10 @@ def decode_stream(lines: Iterable[str]) -> Iterator[tuple[str, str]]:
             evt = json.loads(line)
         except (json.JSONDecodeError, ValueError):
             continue
+        saw_json_line = True
         if not isinstance(evt, dict) or evt.get("type") != "stream_event":
             continue
+        saw_stream_event = True
         inner = evt.get("event") or {}
         etype = inner.get("type")
         if etype == "content_block_start":
@@ -256,6 +300,14 @@ def decode_stream(lines: Iterable[str]) -> Iterator[tuple[str, str]]:
                 text = delta.get("text") or ""
                 if text:
                     yield ("thinking" if current == "thinking" else "text", text)
+    # Schema-drift guard: JSON arrived but NOT a single recognizable stream_event frame
+    # means the CLI's stream-json shape changed under us (a `claude` version bump) and the
+    # thinking/answer routing has silently broken. Surface it loudly instead of degrading
+    # to a mystery-empty answer — the assertion the audit asked for.
+    if saw_json_line and not saw_stream_event:
+        log.warning("decode_stream: parseable CLI output but no 'stream_event' frames — "
+                    "stream-json schema may have changed (claude CLI version); thinking/"
+                    "answer routing degraded to empty. Check BRAIN_STREAM_ARGS / CLI version.")
 
 
 def _emit_safe(buf: str, tag: str) -> str:
@@ -338,7 +390,7 @@ def split_thinking(chunks: Iterable[str]) -> Iterator[tuple[str, str]]:
 
 
 def think_stream(
-    question: str, context: str = "", *, want_thinking: bool = True
+    question: str, context: str = "", *, want_thinking: bool = True, brief: bool = False
 ) -> Iterator[tuple[str, str]]:
     """Stream grounded reasoning + answer as ordered ``(channel, chunk)`` events.
 
@@ -352,14 +404,7 @@ def think_stream(
     (and us discard) a whole reasoning pass before the first spoken word — measured ~2s+
     of dead air before first audio. Without it the answer streams straight away.
     """
-    ctx = (context or "").strip()
-    if len(ctx) > config.BRAIN_CONTEXT_MAX_CHARS:
-        ctx = ctx[: config.BRAIN_CONTEXT_MAX_CHARS]
-    think_block = f"{THINK_INSTRUCTION}\n\n" if want_thinking else ""
-    prompt = (
-        f"{PERSONA}\n\n{NO_FAB}\n\n{think_block}"
-        f"CONTEXT:\n{ctx or '(none)'}\n\nQUESTION: {question}"
-    )
+    prompt = _build_prompt(question, context, brief=brief, want_thinking=want_thinking)
     with _runner_lock:
         runner = _stream_runner
     argv = [config.BRAIN_CMD, *config.BRAIN_STREAM_ARGS, prompt]
@@ -388,10 +433,7 @@ def think(question: str, context: str = "") -> str:
     empty. Raises :class:`BrainUnavailable` when the CLI itself fails — the
     caller decides how to degrade (it must not fabricate).
     """
-    ctx = (context or "").strip()
-    if len(ctx) > config.BRAIN_CONTEXT_MAX_CHARS:
-        ctx = ctx[: config.BRAIN_CONTEXT_MAX_CHARS]
-    prompt = f"{PERSONA}\n\n{NO_FAB}\n\nCONTEXT:\n{ctx or '(none)'}\n\nQUESTION: {question}"
+    prompt = _build_prompt(question, context)
     reply = ask(prompt)
     return reply or I_DONT_KNOW
 

@@ -124,10 +124,10 @@ def test_run_scheduled_drives_real_sends_to_uncontacted_email_leads(monkeypatch)
             return True
 
     monkeypatch.setattr(outreach, "default_footer",
-                        lambda: {"address": "28 Dogwood Rd, Newnan GA", "unsubscribe": "Reply STOP"})
+                        lambda: {"address": "28 Dogwood Rd, Newnan GA 30263", "unsubscribe": "Reply STOP"})
     r = outreach.run_scheduled(limit=1, ledger=FakeLedger(),
                                foundation_gate=lambda cap: None,        # substrate green
-                               channel="email",
+                               channel="email", now_hour=10,           # pin a business hour
                                send_fn=lambda to, s, b: sent.append(to) or {"sent": True})
     assert r["sent"] == 1 and sent == ["joe@example.com"]               # capped + actually sent
 
@@ -145,9 +145,9 @@ def test_run_scheduled_drives_sms_to_uncontacted_phone_leads(monkeypatch):
             return True
 
     monkeypatch.setattr(outreach, "default_footer",
-                        lambda: {"address": "28 Dogwood Rd", "unsubscribe": "Reply STOP"})
+                        lambda: {"address": "28 Dogwood Rd, Newnan GA 30263", "unsubscribe": "Reply STOP"})
     monkeypatch.setattr("utah.sms.send", lambda to, body: sent.append(to) or {"sent": True})
-    r = outreach.run_scheduled(limit=1, ledger=FakeLedger(),
+    r = outreach.run_scheduled(limit=1, ledger=FakeLedger(), now_hour=10,
                                foundation_gate=lambda cap: None, channel="sms")
     assert r["sent"] == 1 and sent == ["+15551234567"]
 
@@ -171,9 +171,9 @@ def test_run_scheduled_skips_chains_and_corporate_inboxes(monkeypatch):
             return True
 
     monkeypatch.setattr(outreach, "default_footer",
-                        lambda: {"address": "28 Dogwood Rd, Newnan GA", "unsubscribe": "Reply STOP"})
+                        lambda: {"address": "28 Dogwood Rd, Newnan GA 30263", "unsubscribe": "Reply STOP"})
     r = outreach.run_scheduled(limit=5, ledger=FakeLedger(), foundation_gate=lambda cap: None,
-                               channel="email",
+                               channel="email", now_hour=10,
                                send_fn=lambda to, s, b: sent.append(to) or {"sent": True})
     assert sent == ["lamonarca@gmail.com"]               # Tesla filtered, real SMB sent
     assert r["sent"] == 1
@@ -182,7 +182,7 @@ def test_run_scheduled_skips_chains_and_corporate_inboxes(monkeypatch):
 def test_run_scheduled_gates_on_red_substrate(monkeypatch):
     """A red Postgres/daemon must SKIP outreach explicitly, never send blind."""
     r = outreach.run_scheduled(foundation_gate=lambda cap: {"status": "substrate_red"},
-                               ledger=object())
+                               ledger=object(), now_hour=10)
     assert r.get("status") == "substrate_red"
 
 

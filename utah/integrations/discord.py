@@ -494,7 +494,7 @@ def _apply(dc: "Discord", guild_id: str, rep: ProvisionReport) -> None:
                 ch_id = dc.create_channel(guild_id, body)["id"]
                 rep.created_channels.append(ch.name)
 
-            if ch.webhook and ch.type == CH_TEXT or (ch.webhook and ch.type == CH_ANNOUNCEMENT):
+            if ch.webhook and ch.type in (CH_TEXT, CH_ANNOUNCEMENT):
                 try:
                     hooks = {h["name"]: h for h in dc.webhooks(ch_id)}
                     hook = hooks.get("Utah Feed") or dc.create_webhook(ch_id, "Utah Feed")

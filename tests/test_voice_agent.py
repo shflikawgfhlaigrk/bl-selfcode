@@ -199,3 +199,22 @@ def test_handler_never_raises_if_speak_or_publish_fail():
         publish=lambda *a: (_ for _ in ()).throw(RuntimeError("bus down")),
     )
     assert r["answer"] == "hey"  # turn still completes (answer captured from the stream)
+
+
+def test_speakable_shortens_and_flattens_a_long_list_answer():
+    """A recalled chat-formatted list must become a short, plain SPOKEN form — not an
+    85s monologue with markdown and '1.'/'2.' read aloud (the live regression)."""
+    from utah.voice.agent import _speakable
+
+    long_ans = ("Mark Douglas's rules (from Trading in the Zone):\n\n"
+                "1. Anything can happen.\n2. You don't need to know what's next.\n"
+                "3. Wins and losses are random.\n4. An edge is a probability.\n"
+                "5. Every moment is unique.")
+    spoken = _speakable(long_ans)
+    assert "\n" not in spoken
+    assert "1." not in spoken and "2." not in spoken      # list markers stripped
+    assert spoken.endswith("Want the rest?")              # capped + offers continuation
+    assert len(spoken.split()) < len(long_ans.split())    # genuinely shorter
+
+    short = "Gulf Shores, Alabama."
+    assert _speakable(short) == short                     # short answers pass through

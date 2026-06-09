@@ -17,7 +17,7 @@ import subprocess
 import time
 from typing import Callable
 
-from utah import failures
+from utah import config, failures
 from utah.daemon import runtime
 
 log = logging.getLogger("utah.foundation")
@@ -155,30 +155,83 @@ def read_status(*, path=os.fspath(STATUS_PATH)) -> dict | None:
         return None
 
 
-def gate_cron(capability: str, *, status: dict | None | object = _UNSET) -> dict | None:
-    """Return a skip dict when substrate is not green; ``None`` means proceed.
+#: HEAVY crons (scrapers + the self-coder) are load-governed and serialized across
+#: processes; LIGHT senders (outreach/marketer/brief) are exempt — a revenue send must
+#: run on its hour even under moderate load. (B2: the cron fleet bypassed the daemon's
+#: in-process governor and could co-spike load — the AceOS-killer load storm.)
+_HEAVY_CRON_CAPS: frozenset = frozenset({
+    "leads", "leads_maps", "probate", "probate_enrich",
+    "consolidate", "codeindex", "research", "selfcode",
+})
 
-    Cron entrypoints call this first so a red Postgres/supervisor/daemon never
-    masquerades as ``no_fresh_lead`` or a partial ingest — the skip is explicit.
+_cron_slot_fh = None  # holds the cross-process flock for THIS process's lifetime
+
+
+def _is_daemon_process() -> bool:
+    """True iff THIS process is the long-lived daemon (so an in-daemon ``run_scheduled``
+    via the worker pool never grabs the cron mutex and starves the real crons). A cron is
+    a separate short-lived process whose pid != the daemon pidfile's."""
+    try:
+        return int(runtime.PID_PATH.read_text().strip()) == os.getpid()
+    except Exception:  # noqa: BLE001 — no pidfile / unreadable → treat as a standalone cron
+        return False
+
+
+def _acquire_cron_slot() -> bool:
+    """Non-blocking cross-process mutex so two HEAVY crons never run at once. Returns True
+    if this process holds (or now holds) the slot; False if another cron holds it. The lock
+    is a flock held for the process lifetime — auto-released when the cron exits."""
+    global _cron_slot_fh
+    if _cron_slot_fh is not None:
+        return True  # already held by this process
+    import fcntl
+
+    try:
+        fh = open(runtime.RUN_DIR / "cron.lock", "w")
+        fcntl.flock(fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        _cron_slot_fh = fh  # keep the fd alive → lock held until process exit
+        return True
+    except OSError:
+        return False  # another heavy cron holds the slot
+
+
+def gate_cron(capability: str, *, status: dict | None | object = _UNSET) -> dict | None:
+    """Return a skip dict when a cron must NOT run now; ``None`` means proceed.
+
+    Cron entrypoints call this first. It refuses on three grounds:
+    1. **substrate not green** — a red Postgres/supervisor/daemon never masquerades as
+       ``no_fresh_lead`` or a partial ingest; the skip is explicit;
+    2. **load too high** (heavy crons only) — defer instead of piling onto a load storm;
+    3. **another heavy cron is running** (heavy crons only) — a cross-process mutex so the
+       dozen+ launchd jobs can't co-spike load (B2). Light senders skip 2+3 so a revenue
+       send always runs on its hour.
     """
     st = read_status() if status is _UNSET else status
-    if st and st.get("state") == "green" and st.get("ok"):
-        return None
-    anomalies = list((st or {}).get("anomalies") or ["foundation_unknown"])
-    checks = (st or {}).get("checks")
-    detail = (
-        f"{capability} cron skipped — substrate not green "
-        f"(anomalies={anomalies}, checks={checks})"
-    )
-    log.warning(detail)
-    failures.record("foundation", "cron_gated", detail)
-    return {
-        "status": "substrate_red",
-        "capability": capability,
-        "anomalies": anomalies,
-        "checks": checks,
-        "ts": time.time(),
-    }
+    if not (st and st.get("state") == "green" and st.get("ok")):
+        anomalies = list((st or {}).get("anomalies") or ["foundation_unknown"])
+        checks = (st or {}).get("checks")
+        detail = (f"{capability} cron skipped — substrate not green "
+                  f"(anomalies={anomalies}, checks={checks})")
+        log.warning(detail)
+        failures.record("foundation", "cron_gated", detail)
+        return {"status": "substrate_red", "capability": capability,
+                "anomalies": anomalies, "checks": checks, "ts": time.time()}
+
+    # Heavy-cron governor (skipped for light senders and for in-daemon calls).
+    if capability in _HEAVY_CRON_CAPS and not _is_daemon_process():
+        ncpu = os.cpu_count() or 1
+        load1 = os.getloadavg()[0]
+        if load1 / ncpu > config.CRON_MAX_LOAD_PER_CORE:
+            detail = (f"{capability} cron deferred — load {load1:.1f} over "
+                      f"{config.CRON_MAX_LOAD_PER_CORE}×{ncpu} cores")
+            log.warning(detail)
+            return {"status": "load_high", "capability": capability,
+                    "load1": load1, "ncpu": ncpu, "ts": time.time()}
+        if not _acquire_cron_slot():
+            detail = f"{capability} cron deferred — another heavy cron holds the slot"
+            log.info(detail)
+            return {"status": "cron_busy", "capability": capability, "ts": time.time()}
+    return None
 
 
 __all__ = [

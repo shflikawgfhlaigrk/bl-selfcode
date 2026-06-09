@@ -10,6 +10,7 @@ the :class:`Segmenter` is pure and fully unit-tested.
 from __future__ import annotations
 
 import logging
+import os
 from collections import deque
 
 log = logging.getLogger("utah.voice.vad")
@@ -17,7 +18,11 @@ log = logging.getLogger("utah.voice.vad")
 SAMPLE_RATE = 16_000
 FRAME = 512                 # Silero's required window @ 16kHz = 32 ms
 FRAME_BYTES = FRAME * 2     # int16
-SPEECH_THRESHOLD = 0.5      # speech ~0.9, music/noise ~0.01 (measured) — clean margin
+#: P(speech) cutoff. Measured on Michael's built-in mic, real commands peak 0.40–0.88
+#: (mic/distance dependent) while a quiet room / broadband noise sits at ~0.01. 0.5 sat
+#: in the MIDDLE of his speech range, so capture was a coin-flip (worked at 0.88, missed
+#: at 0.40). 0.35 clears the noise floor with margin and reliably catches his commands.
+SPEECH_THRESHOLD = float(os.environ.get("UTAH_VAD_SPEECH_THRESHOLD", "0.35"))
 
 
 class VAD:

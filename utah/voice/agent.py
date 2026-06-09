@@ -9,12 +9,34 @@ tested. Speak/publish failures never crash the loop.
 from __future__ import annotations
 
 import logging
+import re
 
 from utah import core
 from utah.objects import ReplySource
 from utah.voice import tts, wake
 
 log = logging.getLogger("utah.voice.agent")
+
+#: A SPOKEN answer caps at this many sentences. A recalled/stored answer can be a
+#: chat-length, markdown-formatted list; read aloud verbatim that's a 60-90s garbled
+#: monologue (live: "Mark Douglas's 5 rules" → an 85s essay). The deck chat box still
+#: gets the FULL answer; only the spoken form is shortened.
+_VOICE_MAX_SENTENCES = 3
+_SENTENCE_SPLIT = re.compile(r"(?<=[.!?])\s+")
+
+
+def _speakable(text: str) -> str:
+    """Voice-friendly form of any answer: strip markdown/line breaks and cap to a few
+    sentences so long recalled/brain answers don't get read aloud for a minute."""
+    flat = re.sub(r"[*#`_>|]+", "", text or "").replace("\n", " ")
+    flat = re.sub(r"(?:^|\s)\d{1,2}[.)]\s+", " ", flat)  # strip "1. " / "2) " list markers
+    flat = re.sub(r"\s+", " ", flat).strip()
+    if not flat:
+        return flat
+    sentences = _SENTENCE_SPLIT.split(flat)
+    if len(sentences) <= _VOICE_MAX_SENTENCES:
+        return flat
+    return " ".join(sentences[:_VOICE_MAX_SENTENCES]).strip() + " Want the rest?"
 
 #: Voice speaks these via one-shot :func:`core.tell` — no stream generator, no recall
 #: before capability, time-to-first-audio = Piper only. Brain/learned still stream.
@@ -93,7 +115,9 @@ def handle_utterance(transcript, *, audio_wake: bool = False, tell=None, tell_st
         captured["source"] = instant.source.value
         if answer:
             try:
-                speak_stream(iter([answer]), on_start=on_speaking)
+                # Speak a SHORT form (the deck still gets the full `answer`); a recalled
+                # list read aloud verbatim is the 85s monologue Michael hit.
+                speak_stream(iter([_speakable(answer)]), on_start=on_speaking)
             except Exception as exc:  # noqa: BLE001
                 log.warning("voice speak failed: %s", exc)
     else:

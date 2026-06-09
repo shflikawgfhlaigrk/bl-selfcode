@@ -331,6 +331,24 @@ def test_learn_on_miss_fetches_grounds_and_remembers(mem, fake_brain, monkeypatc
     assert any(r.source == "turn" and "330 metres" in r.content for r in mem.store.rows.values())
 
 
+def test_voice_refuses_fast_instead_of_web_learning(mem, fake_brain, monkeypatch):
+    """VOICE must never hang on live web research. A mis-heard or genuinely-unknown
+    command that the brain refuses is spoken back fast ("I don't know") — the 13-60s
+    learn loop (the "Blun." -> 58s hang that made voice feel broken) is skipped for
+    voice. Chat (voice=False) keeps learn-on-miss."""
+    fake_brain.respond = lambda prompt: brain.I_DONT_KNOW  # always refuse
+    fake_gather, calls = _stub_gather()
+    monkeypatch.setattr("utah.product.researcher.gather", fake_gather)
+
+    voice_events = list(core.tell_stream(_EIFFEL_Q, voice=True, want_thinking=False))
+    assert calls["n"] == 0  # voice did NOT go research the web
+    answer = "".join(c for ch, c in voice_events if ch == "answer")
+    assert brain.is_refusal(answer)  # fast, honest refusal instead of a 58s hang
+
+    list(core.tell_stream(_EIFFEL_Q, voice=False))  # chat still learns
+    assert calls["n"] >= 1
+
+
 def test_learn_on_miss_grounds_on_fetched_web_text(mem, fake_brain, monkeypatch):
     # Regression for the live Burj Khalifa bug: the retry must ground on the fetched
     # source text (which carries the canonical 828m AND a 555m deck distractor), not a

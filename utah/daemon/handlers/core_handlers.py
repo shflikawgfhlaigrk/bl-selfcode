@@ -219,10 +219,41 @@ def _queue_outreach_blocking(campaign: str) -> dict:
 
 async def queue_outreach(ctx: Context, params: object) -> dict:
     """Capability (not an agent): compose + lint + suppression-queue outreach for the
-    ledger's leads. Send stays GATED (documented) until Michael's creds/address land."""
+    ledger's leads WITHOUT sending — the staging twin of ``work_leads`` (which sends).
+    Use ``work_leads`` to actually send the batch (email + iMessage text)."""
     campaign = str(_as_dict(params).get("campaign", "smb_no_website"))
     with ctx.governor.admission():
         return await ctx.pool.run(_queue_outreach_blocking, campaign)
+
+
+def _work_leads_blocking(channel: str, limit: int, campaign: str) -> dict:
+    """Drive a REAL cold-outreach send on demand (the missing last-mile, audit §1.1).
+    Unlike ``queue_outreach`` (queue-only), this calls ``outreach.run_scheduled`` which
+    pulls uncontacted prospects, lints, suppression-checks, and SENDS. The default
+    ``auto`` channel emails a lead that has an email and TEXTS (SMS→iMessage) a phone-only
+    lead, so a phone-only prospect is still reached. ``run_scheduled`` also enforces the
+    business-hours window in code, so an on-demand send still never goes out at 5am."""
+    from utah.product import outreach
+
+    return outreach.run_scheduled(campaign, limit=limit, channel=channel)
+
+
+async def work_leads(ctx: Context, params: object) -> dict:
+    """Capability (not an agent): actually WORK the lead list — send the day's batch of
+    compliant cold pitches now. Defaults to the ``auto`` channel (email-first, text
+    fallback via iMessage); ``limit``/``channel``/``campaign`` are overridable. This is the
+    on-demand twin of the ``com.utah.outreach`` cron, so the surface (deck/voice/chat) can
+    trigger a real send instead of queue-only — still bounded by the per-hour cap and the
+    business-hours guard."""
+    from utah.product.ledger import SMB_OUTREACH_CAMPAIGN
+    from utah.product.outreach import DAILY_OUTREACH
+
+    p = _as_dict(params)
+    channel = str(p.get("channel", "auto")).strip().lower() or "auto"
+    campaign = str(p.get("campaign", SMB_OUTREACH_CAMPAIGN))
+    limit = max(1, min(int(p.get("limit", DAILY_OUTREACH)), 200))
+    with ctx.governor.admission():
+        return await ctx.pool.run(_work_leads_blocking, channel, limit, campaign)
 
 
 def _research_blocking(query: str, k: int) -> dict:
@@ -314,179 +345,15 @@ async def shutdown(ctx: Context, params: object) -> dict:
     return {"stopping": True}
 
 
-
-# --- transparency drill-down: real detail behind EVERY deck panel -----------
-def _sys_detail() -> dict:
-    import os
-    import psutil
-    per = [round(x, 1) for x in psutil.cpu_percent(interval=0.15, percpu=True)]
-    procs = []
-    for pr in psutil.process_iter(["pid", "name", "cpu_percent"]):
-        procs.append(pr.info)
-    procs.sort(key=lambda x: -(x.get("cpu_percent") or 0.0))
-    l1, l5, l15 = os.getloadavg()
-    return {"per_core_pct": per, "load1": round(l1, 2), "load5": round(l5, 2),
-            "load15": round(l15, 2),
-            "top_processes": [{"pid": q["pid"], "name": q.get("name"),
-                               "cpu": round(q.get("cpu_percent") or 0.0, 1)} for q in procs[:8]]}
-
-
-def _ledger_recent(domain: str, limit: int) -> list:
-    from utah.product.ledger import get_ledger
-    return get_ledger().recent(domain, limit)
-
-
-def _audit_detail(limit: int) -> list:
-    from utah import failures
-    return [{"ts": r.ts, "source": r.source, "kind": r.kind, "detail": r.detail}
-            for r in failures.recent(limit)]
-
-
-def _memory_detail() -> dict:
-    from utah import memory
-    b = memory.get_backend()
-    return {"counts": b.live_counts(), "rows": b.list_memories(200, 0),
-            "entities": b.list_entities(300)}
-
-
 async def panel_detail(ctx: Context, params: object) -> dict:
-    """Real detail behind a deck panel (the transparency rule: every panel clickable ->
-    underlying truth). pool->16 slots, governor->18 cores+load+top procs, leads/probate/
-    outreach/engines->rows, audit->failures, memory->rows+entities, spine/voice->state."""
+    """Real detail behind a deck panel — dispatches through :data:`PANEL_REGISTRY`."""
+    from utah.daemon.handlers.panels import PANEL_REGISTRY
+
     panel = str(_as_dict(params).get("panel", "")).strip()
-    if panel == "pool":
-        return {"panel": "pool", "limit": ctx.pool.limit, "busy": ctx.pool.borrowed,
-                "idle": ctx.pool.available,
-                "slots": [{"slot": i, "state": "busy" if i < ctx.pool.borrowed else "idle"}
-                          for i in range(ctx.pool.limit)]}
-    if panel == "governor":
-        gov = ctx.governor.snapshot()
-        with ctx.governor.admission():
-            sysd = await ctx.pool.run(_sys_detail)
-        return {"panel": "governor", **gov, **sysd}
-    if panel == "spine":
-        return {"panel": "spine", "version": ctx.version, "uptime_s": round(ctx.uptime_s, 1),
-                "draining": ctx.shutdown.is_set(), "bus_subscribers": ctx.bus.subscribers,
-                "bus_published": ctx.bus.published, "bus_dropped": ctx.bus.dropped}
-    if panel in ("leads", "probate", "outreach", "engines"):
-        dom = "fires" if panel == "engines" else panel
-        with ctx.governor.admission():
-            return {"panel": panel, "rows": await ctx.pool.run(_ledger_recent, dom, 50)}
-    if panel == "audit":
-        with ctx.governor.admission():
-            return {"panel": "audit", "rows": await ctx.pool.run(_audit_detail, 50)}
-    if panel == "memory":
-        with ctx.governor.admission():
-            return {"panel": "memory", **(await ctx.pool.run(_memory_detail))}
-    if panel == "voice":
-        from utah.voice import state
-        return {"panel": "voice", **state.status()}
-    if panel == "tasks":
-        from utah.product import tasks
-        with ctx.governor.admission():
-            return {"panel": "tasks", "rows": await ctx.pool.run(lambda: tasks.list_tasks("open", 50))}
-    if panel == "trackers":
-        from utah.product import trackers
-        with ctx.governor.admission():
-            return {"panel": "trackers", "rows": await ctx.pool.run(lambda: trackers.recent("journal", 30))}
-    if panel == "watchdog":
-        from utah import watchdog
-        with ctx.governor.admission():
-            return {"panel": "watchdog", **(await ctx.pool.run(watchdog.check))}
-    if panel in ("trading", "lab"):
-        from utah.product import trading
-        from utah.product.ledger import Ledger
-        def _lab():
-            try:
-                lg = Ledger()
-                fires = lg.counts().get("fires", 0)
-                rows = lg.recent("fires", 30)
-            except Exception:
-                fires, rows = 0, []
-            return {"panel": "trading", **trading.lab_state(fires), "rows": rows}
-        with ctx.governor.admission():
-            return await ctx.pool.run(_lab)
-    if panel == "mail":
-        from utah import mail
-        rdy = mail.creds_available()
-        return {"panel": "mail", "status": "ready" if rdy else "gated",
-                "note": "ready" if rdy else "GATED: drop ~/.utah/secrets/gmail.json"}
-    if panel == "marketer":
-        from utah.product import marketer
-        from utah.product.ledger import Ledger
-        def _mk():
-            try:
-                rows = Ledger().recent("marketer", 15)
-            except Exception:  # noqa: BLE001
-                rows = []
-            return {"panel": "marketer", "rows": rows,
-                    "instagram": "ready" if marketer.creds_available("instagram") else "gated",
-                    "tiktok": "ready" if marketer.creds_available("tiktok") else "gated",
-                    "note": "email_spotlight LIVE (mail.send); IG/TikTok gated on creds"}
-        with ctx.governor.admission():
-            return await ctx.pool.run(_mk)
-    if panel == "research":
-        from utah import memory
-        with ctx.governor.admission():
-            hits = await ctx.pool.run(lambda: memory.get_backend().list_memories(20, 0))
-        return {"panel": "research", "rows": hits, "note": "facts learned (web -> memory)"}
-    if panel == "selfcode":
-        from utah import selfcode, sica
-        on = selfcode.enabled()
-        am = selfcode.automerge_enabled()
-        smoke = selfcode.kill_switch_smoke()    # live proof: refuses self-edits to safety
-        _arch = sica.Archive()
-        _best = _arch.best()
-        return {"panel": "selfcode",
-                # SICA governance: every attempt is utility-scored + archived.
-                "sica": {"archived": _arch.count(),
-                         "best_utility": (_best or {}).get("utility"),
-                         "time_limit_s": sica.TIME_LIMIT_S, "cost_limit_usd": sica.COST_LIMIT_USD},
-                "status": ("armed" if am else "propose-only") if on else "kill-switch",
-                "enabled": on,
-                "automerge": "ARMED — green merges to main + pushes origin" if am
-                             else "OFF — proposes on a branch (human merges)",
-                "mode": "auto-merge on green · suite-gated · kill-switch" if am
-                        else "propose-only · isolated branch · suite-gated · never main",
-                "kill_switch": str(selfcode.KILL_SWITCH),
-                # Doc-13 tiered policy-as-data, surfaced for the transparency rule.
-                "tiers": [{"tier": t, "label": selfcode.POLICY[t]["label"],
-                           "automerge": selfcode.POLICY[t]["automerge"]}
-                          for t in selfcode.TIER_ORDER],
-                "supervised": selfcode._read_supervised(),
-                "tier_A_needs": selfcode.POLICY["A"]["min_supervised"],
-                "safety_files": list(selfcode.SAFETY_PATHS),
-                "kill_switch_smoke": "PASS — refuses self-edits to safety" if smoke["refused"]
-                                     else "FAIL — safety not enforced",
-                "note": ("autonomy: Tier-A green proposals auto-merge after N supervised; "
-                         "B/C batch-review, D off-limits; kill-switch overrides") if am
-                        else "bounded: proposes a change on a branch, never merges"}
-    if panel == "browser":
-        from utah.integrations import browser
-        b = browser.chrome_binary()
-        return {"panel": "browser",
-                "status": "ready" if b else "gated",
-                "engine": "headless chrome · --dump-dom (JS-rendered DOM)",
-                "binary": b or "",
-                "note": "ready — JS-rendered fetch live" if b else "GATED: no Chrome found"}
-    if panel == "selfcode_cycles":
-        # SELF-CODE page · "correcting in himself" — recent self-code cycles from the
-        # selfcode_log table (task/domain/utility/passed/merged), real-or-empty.
-        from utah.product import selfcode_web
-        with ctx.governor.admission():
-            rows = await ctx.pool.run(lambda: selfcode_web.recent_cycles(30))
-            stats = await ctx.pool.run(selfcode_web.cycle_stats)
-        return {"panel": "selfcode_cycles", "rows": rows, "stats": stats,
-                "note": "self-code cycles (selfcode_log) — what he's correcting in himself"}
-    if panel == "selfcode_goals":
-        # SELF-CODE page · "percentage goals from PRs" — every % traces to a real git
-        # commit count or selfcode_log row count (never fabricated).
-        from utah.product import selfcode_web
-        with ctx.governor.admission():
-            gls = await ctx.pool.run(selfcode_web.goals)
-        return {"panel": "selfcode_goals", "goals": gls,
-                "note": "progress wired off real selfcode(auto) commits + cycle outcomes"}
-    return {"panel": panel, "rows": []}
+    handler = PANEL_REGISTRY.get(panel)
+    if handler is None:
+        return {"panel": panel, "rows": []}
+    return await handler(ctx)
 
 
 REGISTRY = {
@@ -502,6 +369,7 @@ REGISTRY = {
     "scout_frontier": scout_frontier,
     "scout_probate": scout_probate,
     "queue_outreach": queue_outreach,
+    "work_leads": work_leads,
     "research": research,
     "morning_brief": morning_brief,
     "watchdog_check": watchdog_check,

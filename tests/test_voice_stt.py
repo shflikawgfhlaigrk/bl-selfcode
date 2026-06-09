@@ -37,3 +37,75 @@ def test_offline_default_yields_to_explicit_override(monkeypatch):
 
     assert os.environ["HF_HUB_OFFLINE"] == "0"            # override preserved
     assert os.environ["TRANSFORMERS_OFFLINE"] == "1"      # unset one still defaulted
+
+
+def test_default_stt_prefers_whisper_for_accuracy(monkeypatch):
+    """Moonshine base mis-hears real mic speech ('What's going on?' -> 'Blun.'),
+    so the default engine is MLX Whisper when available. STT_ENGINE=moonshine
+    forces the portable ONNX fallback."""
+    import importlib.util
+
+    import utah.voice.stt as stt
+    from utah import config
+
+    monkeypatch.setattr(config, "STT_ENGINE", "moonshine")
+    assert isinstance(stt._build_default_stt(), stt.MoonshineSTT)
+
+    monkeypatch.setattr(config, "STT_ENGINE", "whisper")
+    if importlib.util.find_spec("mlx_whisper") is None:
+        # no MLX on this host -> graceful fallback to Moonshine, never a crash
+        assert isinstance(stt._build_default_stt(), stt.MoonshineSTT)
+    else:
+        # MLX runs in a KILLABLE worker (SubprocessSTT) so a Metal hang can't deafen
+        # the mic — not in-process MLXWhisperSTT.
+        assert isinstance(stt._build_default_stt(), stt.SubprocessSTT)
+
+
+def test_subprocess_stt_recovers_from_a_hung_worker(monkeypatch):
+    """A wedged worker (MLX/Metal deadlock) must NOT block the mic loop: transcribe
+    returns "" after the timeout and kills the worker so the next call respawns fresh.
+    This is the fix for the live 'hears once then goes deaf' bug."""
+    import utah.voice.stt as stt
+
+    s = stt.SubprocessSTT()
+    killed = {"n": 0}
+
+    class _FakeProc:
+        stdin = type("_I", (), {"write": lambda self, x: None, "flush": lambda self: None})()
+
+        def poll(self):
+            return None  # "alive"
+
+    s._proc = _FakeProc()
+    monkeypatch.setattr(s, "_readline", lambda timeout: None)  # never answers = hung
+    monkeypatch.setattr(s, "_kill", lambda: killed.__setitem__("n", killed["n"] + 1))
+
+    assert s.transcribe("/x.wav") == ""  # mic-side gets "" instead of hanging forever
+    assert killed["n"] == 1  # the wedged worker was killed (next call respawns)
+
+
+def test_whisper_drops_silence_hallucination_keeps_speech(monkeypatch):
+    """A high-no_speech segment (Whisper's 'Thank you.' on a near-silent/fragment
+    clip, measured 0.505) is dropped → "" (no phantom command); real speech
+    (no_speech 0.136) is kept."""
+    import sys
+    import types
+
+    import utah.voice.stt as stt
+    from utah import config
+
+    monkeypatch.setattr(config, "STT_MAX_NO_SPEECH", 0.4)
+
+    def faked(result):
+        monkeypatch.setitem(
+            sys.modules, "mlx_whisper",
+            types.SimpleNamespace(transcribe=lambda wav, path_or_hf_repo=None: result),
+        )
+
+    faked({"text": " Thank you.",
+           "segments": [{"text": " Thank you.", "no_speech_prob": 0.505}]})
+    assert stt.MLXWhisperSTT("m").transcribe("/x.wav") == ""  # hallucination rejected
+
+    faked({"text": " What's going on?",
+           "segments": [{"text": " What's going on?", "no_speech_prob": 0.136}]})
+    assert stt.MLXWhisperSTT("m").transcribe("/x.wav") == "What's going on?"  # speech kept

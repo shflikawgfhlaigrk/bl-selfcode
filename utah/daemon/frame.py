@@ -15,6 +15,8 @@ from __future__ import annotations
 import struct
 from typing import Protocol
 
+import anyio
+
 from utah import UtahError
 
 #: Default hard cap on a single frame (64 MiB). Rejected before allocation.
@@ -55,10 +57,11 @@ async def read_exactly(stream: ByteStream, n: int) -> bytes:
     while have < n:
         try:
             chunk = await stream.receive(n - have)
-        except (Exception,) as exc:  # anyio.EndOfStream / ClosedResourceError
-            if exc.__class__.__name__ in {"EndOfStream", "ClosedResourceError", "BrokenResourceError"}:
-                raise FrameError(f"peer closed after {have}/{n} bytes") from exc
-            raise
+        except (anyio.EndOfStream, anyio.ClosedResourceError,
+                anyio.BrokenResourceError, EOFError) as exc:
+            # Real stream-close signals, caught by type (not by class-name string,
+            # which silently breaks if anyio renames internals).
+            raise FrameError(f"peer closed after {have}/{n} bytes") from exc
         if not chunk:
             raise FrameError(f"peer closed after {have}/{n} bytes")
         chunks.append(chunk)

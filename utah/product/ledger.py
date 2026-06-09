@@ -108,6 +108,12 @@ class Ledger:
                 self._publish(channel, event)
             except Exception:  # the surface must never break a write
                 pass
+        try:
+            from utah.integrations import discord_feed
+
+            discord_feed.mirror(channel, event)
+        except Exception:  # noqa: BLE001 — Discord must never break a write
+            pass
 
     def record_lead(self, name, kind, region, source, contact=None) -> bool:
         """Insert a lead; return True if new (False = already had it). Never-twice."""

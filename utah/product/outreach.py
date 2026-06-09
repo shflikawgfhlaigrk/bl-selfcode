@@ -22,11 +22,13 @@ from utah.product.ledger import PROBATE_OUTREACH_CAMPAIGN, SMB_LEAD_SOURCES, SMB
 
 log = logging.getLogger("utah.product.outreach")
 
-#: Conservative daily cold-outreach cap (email or SMS).
-DAILY_OUTREACH = int(os.environ.get("UTAH_OUTREACH_DAILY", "8"))
+#: Per-RUN cold-outreach cap. The cron fires hourly, so this is the per-HOUR cap;
+#: 50/hour × 10 business hours = 500/day (Michael's floor). Env: ``UTAH_OUTREACH_DAILY``.
+DAILY_OUTREACH = int(os.environ.get("UTAH_OUTREACH_DAILY", "50"))
 DEFAULT_CAMPAIGN = SMB_OUTREACH_CAMPAIGN
-#: Primary channel: ``sms`` (phone) or ``email``. Default SMS — 363 leads have phone vs 21 email.
-OUTREACH_CHANNEL = os.environ.get("UTAH_OUTREACH_CHANNEL", "sms").strip().lower()
+#: Channel: ``auto`` (email-first, text-fallback — Michael's directive), ``email``, or
+#: ``sms``. Default ``auto`` so a phone-only lead is reached by text when no email exists.
+OUTREACH_CHANNEL = os.environ.get("UTAH_OUTREACH_CHANNEL", "auto").strip().lower()
 
 
 def default_footer() -> dict:
@@ -48,22 +50,84 @@ _RED_FLAGS: dict[str, int] = {
 SPAM_BLOCK_THRESHOLD = 6
 
 
+#: One short, business-type-aware relevance line, keyed by the lead's ``kind``. Keeps
+#: Michael's pitch but makes each email genuinely about THAT business — and, because the
+#: opening + subject vary per lead, breaks the identical-bulk-body pattern spam filters
+#: flag at volume. Deterministic (no per-lead brain call, no fabrication, test-stable);
+#: an optional brain rewrite can drop in later behind this same boundary.
+_KIND_HOOKS: dict[str, str] = {
+    "restaurant": "Diners almost always look a place up online before they decide where to eat",
+    "cafe": "People check online for hours and a menu before they stop in for coffee",
+    "bar": "Folks look up the vibe, hours, and events online before they pick a spot",
+    "salon": "Most people browse photos and book online before they try a new stylist",
+    "beauty": "Clients usually check reviews and photos online before they book",
+    "barber": "New clients usually look you up online before they walk in for a cut",
+    "trade": "Homeowners almost always check you out online before they let you in the door",
+    "handyman": "Homeowners almost always check you out online before they hire for a job",
+    "plumber": "When a pipe bursts, people search online and call whoever looks legit first",
+    "electrician": "Homeowners search online and hire whoever looks established first",
+    "hvac": "When the AC dies, people search online and call the first business they trust",
+    "car_repair": "Drivers search online for a mechanic they can trust before they hand over the keys",
+    "auto": "Drivers look you up online before they trust you with their car",
+    "landscaping": "Homeowners browse online for photos of past work before they hire",
+    "cleaning": "People want to see reviews online before they let a cleaner into their home",
+    "contractor": "Homeowners vet contractors online before they spend real money",
+    "retail": "Shoppers check online for hours, location, and what you carry before stopping by",
+    "fitness": "People compare classes and pricing online before they sign up",
+    "pet": "Pet owners read reviews online before they trust someone with their animal",
+}
+
+
+def _relevance_hook(kind: str | None) -> str:
+    """A type-specific one-liner for *kind* (normalized), or a solid generic fallback."""
+    k = (kind or "").strip().lower()
+    for key, line in _KIND_HOOKS.items():
+        if key in k:
+            return line
+    return ("A lot of local customers look online first and use a website as a "
+            "legitimacy check when they're finding the \"right person\"")
+
+
+def _subject_variant(name: str, has_name: bool) -> str:
+    """A stable subject chosen from a few templates by a hash of the name — so a 500/day
+    batch is NOT 500 identical subject lines (a bulk-spam signal). Deterministic per lead."""
+    import hashlib
+
+    who = name if has_name else "your business"
+    templates = (
+        f"A website for {who}",
+        f"Quick idea for {who}",
+        f"{who} — a website that pays for itself",
+    )
+    idx = int(hashlib.sha1(name.encode("utf-8", "replace")).hexdigest(), 16) % len(templates)
+    return templates[idx]
+
+
 def compose(lead: dict, campaign: str, footer: dict | None = None) -> dict:
-    """A grounded, CAN-SPAM-compliant cold pitch for a no-website SMB. Deterministic
-    template (an LLM rewrite can drop in later); always stamps the physical address +
-    opt-out so nothing non-compliant can be queued."""
+    """Michael's real CAN-SPAM-compliant cold pitch for a no-website SMB. His copy,
+    his price ($700 vs the ~$1,700 norm), his contact — personalized to the business
+    name AND type (a relevance line keyed by the lead's ``kind`` + a varied subject, so a
+    500/day batch isn't identical bodies a spam filter flags); always stamps the physical
+    address + opt-out so nothing non-compliant ships."""
     f = footer or default_footer()
     name = (lead.get("name") or "there").strip()
-    kind = (lead.get("kind") or "business").strip()
-    subject = f"A simple website for {name}"
+    has_name = bool(name) and name != "there"
+    greeting = f"Hello {name}," if has_name else "Hello,"
+    subject = _subject_variant(name, has_name)
+    hook = _relevance_hook(lead.get("kind"))
     body = (
-        f"Hi {name},\n\n"
-        f"I came across your {kind} and noticed it doesn't have a website yet. "
-        "A lot of local customers look online first, so a clean one-page site "
-        "(hours, photos, a way to call or book) usually pays for itself quickly.\n\n"
-        "I build these for local businesses and could put one together for you. "
-        "Want me to send over a quick example?\n\n"
-        "Thanks,\nMichael\n\n"
+        f"{greeting}\n\n"
+        "My name is Michael Barber — I build websites for small businesses.\n\n"
+        "An average website costs around $1,700, which is absurd. I aim for around $700. "
+        f"{hook}. It pays for itself quickly.\n\n"
+        "I'll show you what it will look like before you buy, so you know it's to your "
+        "standard. I could put a sample website together for you, and you could tell me "
+        "what customizations you'd like — calendar integrations, Google Maps, and pricing "
+        "automations are all easy, and this can be done within a day.\n\n"
+        "Let me know if you're interested.\n\n"
+        "Best regards,\n"
+        "Michael Barber\n"
+        "678-876-1170\n\n"
         f"—\n{f['address']}\n{f['unsubscribe']}"
     )
     return {"subject": subject, "body": body}
@@ -95,17 +159,21 @@ def content_score(text: str) -> dict:
 
 
 def pick_channel(contact: dict | None, prefer: str | None = None) -> str | None:
-    """Channel from contact; *prefer* (``sms`` or ``email``) wins when both exist."""
+    """Channel from contact; *prefer* (``sms``/``email``) wins when both exist.
+    On fallthrough (``auto`` or a prefer the lead can't satisfy) we go EMAIL-FIRST —
+    Michael's directive: "if you can't find an email, just send a text." Email is
+    the more compliant, free channel, so it's preferred; phone (→ SMS/iMessage)
+    is the fallback."""
     contact = contact or {}
     pref = (prefer or OUTREACH_CHANNEL).lower()
     if pref == "sms" and contact.get("phone"):
         return "sms"
     if pref == "email" and contact.get("email"):
         return "email"
-    if contact.get("phone"):
-        return "sms"
     if contact.get("email"):
         return "email"
+    if contact.get("phone"):
+        return "sms"
     return None
 
 
@@ -119,7 +187,7 @@ def _footer_is_real(footer: dict | None) -> bool:
     the prospect's one shot, so a send is refused until this is real (the module contract).
     Creds are gated in mail.send; the physical address is gated here."""
     addr = ((footer or default_footer()).get("address") or "").strip()
-    return config._canspam_is_real(addr)  # noqa: SLF001 — shared gate with config.canspam_address
+    return config._canspam_is_complete(addr)  # noqa: SLF001 — shared send gate (street+ZIP)
 
 
 def _is_smb_lead(lead: dict) -> bool:
@@ -130,7 +198,7 @@ def _is_smb_lead(lead: dict) -> bool:
 
 
 def queue(ledger, campaign: str, leads: list[dict], footer: dict | None = None,
-          can_send: bool = False, send_fn=None) -> dict:
+          can_send: bool = False, send_fn=None, prefer: str | None = None) -> dict:
     """Compose + lint + suppression-queue each lead, and (when allowed) SEND. The send
     is gated: with ``can_send=False`` nothing is sent and the gate is documented. With
     ``can_send=True`` an EMAIL lead is sent via ``mail.send`` (real SMTP if creds are
@@ -161,7 +229,7 @@ def queue(ledger, campaign: str, leads: list[dict], footer: dict | None = None,
         failures.record("outreach", "send_gated", f"{campaign}: {addr_gated}")
     queued = suppressed = needs_contact = blocked = sent = 0
     for lead in leads:
-        channel = pick_channel(lead.get("contact"))
+        channel = pick_channel(lead.get("contact"), prefer)
         if channel is None:
             needs_contact += 1
             continue
@@ -255,14 +323,28 @@ def _is_phone_prospect(lead: dict) -> bool:
 
 def run_scheduled(campaign: str = DEFAULT_CAMPAIGN, limit: int = DAILY_OUTREACH, *,
                   ledger=None, foundation_gate=None, send_fn=None,
-                  channel: str | None = None) -> dict:
+                  channel: str | None = None, now_hour: int | None = None) -> dict:
     """``com.utah.outreach`` cron — SMB small-business outreach only (OSM + Maps).
-    Probate heirs are in the ``probate`` table and never enter this path."""
+    Probate heirs are in the ``probate`` table and never enter this path.
+
+    Cadence is enforced HERE, not just in the plist: a send only happens inside the
+    local business window (``config.within_business_hours``) and is capped at *limit*
+    per run (== per hour, the cron fires hourly). A run kicked at 5am — by a manual
+    kickstart or a misconfigured cron — refuses with a documented skip and sends
+    NOTHING. ``channel='auto'`` (default) emails leads that have an email and TEXTS
+    (SMS→iMessage) phone-only leads, filling one combined *limit* — so a phone-only
+    lead is still reached (Michael's directive)."""
     from utah import foundation
 
     if campaign != SMB_OUTREACH_CAMPAIGN:
         return {"campaign": campaign, "sent": 0, "queued": 0,
                 "reason": "com.utah.outreach is SMB-only; probate uses separate pipeline"}
+    # HARD business-hours gate (rule in the machine): never text/email a prospect at 5am.
+    if not config.within_business_hours(now_hour):
+        h = now_hour if now_hour is not None else "now"
+        return {"campaign": campaign, "sent": 0, "queued": 0, "skipped": True,
+                "reason": (f"outside business hours ({config.OUTREACH_HOUR_START:02d}:00–"
+                           f"{config.OUTREACH_HOUR_END:02d}:00 local) — hour={h}, send refused")}
     gate = foundation.gate_cron if foundation_gate is None else foundation_gate
     skip = gate("outreach")
     if skip:
@@ -271,24 +353,72 @@ def run_scheduled(campaign: str = DEFAULT_CAMPAIGN, limit: int = DAILY_OUTREACH,
         from utah.product.ledger import Ledger
         ledger = Ledger()
     ch = (channel or OUTREACH_CHANNEL).lower()
+
     if ch == "sms":
         candidates = ledger.uncontacted_phone_leads(campaign, max(limit * 4, limit))
         leads = [l for l in candidates if _is_phone_prospect(l)][:limit]
         if not leads:
             return {"campaign": campaign, "channel": "sms", "sent": 0, "queued": 0,
                     "reason": "no phone SMB prospects (chains filtered)"}
-    else:
+        result = queue(ledger, campaign, leads, footer=default_footer(),
+                       can_send=True, send_fn=send_fn, prefer="sms")
+        result["channel"] = "sms"
+    elif ch == "email":
         candidates = ledger.uncontacted_email_leads(campaign, max(limit * 4, limit))
         leads = [l for l in candidates if _is_emailable_prospect(l)][:limit]
         if not leads:
             return {"campaign": campaign, "channel": "email", "sent": 0, "queued": 0,
                     "reason": "no emailable SMB prospects (chains/corporate filtered)"}
-    result = queue(ledger, campaign, leads, footer=default_footer(),
-                   can_send=True, send_fn=send_fn)
-    result["channel"] = ch
-    log.info("outreach run_scheduled: campaign=%s channel=%s pulled=%d sent=%d",
-             campaign, ch, len(leads), result.get("sent", 0))
+        result = queue(ledger, campaign, leads, footer=default_footer(),
+                       can_send=True, send_fn=send_fn, prefer="email")
+        result["channel"] = "email"
+    else:  # auto — email-first, then fill the remaining quota with text (SMS/iMessage)
+        result = _run_auto(ledger, campaign, limit, send_fn)
+
+    log.info("outreach run_scheduled: campaign=%s channel=%s sent=%d queued=%d",
+             campaign, result.get("channel", ch), result.get("sent", 0), result.get("queued", 0))
     return result
+
+
+def _run_auto(ledger, campaign: str, limit: int, send_fn) -> dict:
+    """Email-first, text-fallback: send emailable leads via email, then fill the rest
+    of *limit* with phone-only leads via text (SMS→iMessage). One combined cap so the
+    run honours the per-hour rate while reaching both email and phone prospects."""
+    footer = default_footer()
+    email_cand = ledger.uncontacted_email_leads(campaign, max(limit * 4, limit))
+    email_leads = [l for l in email_cand if _is_emailable_prospect(l)][:limit]
+    seen_ids = {l.get("id") for l in email_leads if l.get("id") is not None}
+
+    remaining = limit - len(email_leads)
+    phone_leads: list[dict] = []
+    if remaining > 0:
+        phone_cand = ledger.uncontacted_phone_leads(campaign, max(remaining * 4, remaining))
+        for l in phone_cand:
+            if l.get("id") is not None and l.get("id") in seen_ids:
+                continue   # already in the email batch — never double-contact one lead
+            if _is_phone_prospect(l):
+                phone_leads.append(l)
+            if len(phone_leads) >= remaining:
+                break
+
+    if not email_leads and not phone_leads:
+        return {"campaign": campaign, "channel": "auto", "sent": 0, "queued": 0,
+                "reason": "no emailable or textable SMB prospects (chains/corporate filtered)"}
+
+    er = queue(ledger, campaign, email_leads, footer=footer,
+               can_send=True, send_fn=send_fn, prefer="email") if email_leads else {}
+    sr = queue(ledger, campaign, phone_leads, footer=footer,
+               can_send=True, send_fn=send_fn, prefer="sms") if phone_leads else {}
+    return {
+        "campaign": campaign, "channel": "auto",
+        "sent": er.get("sent", 0) + sr.get("sent", 0),
+        "queued": er.get("queued", 0) + sr.get("queued", 0),
+        "suppressed": er.get("suppressed", 0) + sr.get("suppressed", 0),
+        "blocked": er.get("blocked", 0) + sr.get("blocked", 0),
+        "needs_contact": er.get("needs_contact", 0) + sr.get("needs_contact", 0),
+        "email": {"pulled": len(email_leads), "sent": er.get("sent", 0)},
+        "text": {"pulled": len(phone_leads), "sent": sr.get("sent", 0)},
+    }
 
 
 __all__ = ["compose", "compose_sms", "content_score", "pick_channel", "queue", "default_footer",

@@ -38,7 +38,27 @@ log = logging.getLogger("utah.supervisor")
 SUP_LOCK = runtime.RUN_DIR / "utah-sup.lock"
 SUP_PID = runtime.RUN_DIR / "utah-sup.pid"
 
+#: Cap on the in-place recovery backoff (B1′). The supervisor never exits on an
+#: all-children-down circuit-break; it retries with backoff up to this ceiling.
+MAX_RECOVERY_BACKOFF_S: float = 60.0
+
 Probe = Callable[[], bool]
+
+
+def _alert_children_down(names: Sequence[str]) -> None:
+    """Page Michael ONCE when every supervised child is circuit-broken (B1′). The
+    supervisor is still alive and recovering in place; this is the heads-up that
+    daemon/web/voice are flapping. Best-effort — alerting must never crash the loop."""
+    try:
+        from utah import alerts
+
+        alerts.critical_async(
+            "supervisor",
+            f"all supervised children down ({', '.join(names)}) — recovering in place",
+            key="supervisor/all_children_down",
+        )
+    except Exception:  # noqa: BLE001
+        log.warning("supervisor down-alert failed", exc_info=True)
 
 
 def ping_probe(timeout: float = 2.0) -> Probe:
@@ -129,6 +149,13 @@ class _ManagedChild:
 
     def circuit_broken(self) -> bool:
         return len(self._restarts) >= self._max
+
+    def reset_circuit(self) -> None:
+        """Clear the restart history so the child gets a fresh set of attempts. Used by
+        the in-place recovery loop after an all-children-down backoff (B1′) — the
+        supervisor never exits, so it must re-arm its own breakers to keep trying."""
+        self._restarts.clear()
+        self._unhealthy = 0
 
     def kill(self) -> None:
         if self.proc and self.proc.poll() is None:
@@ -246,14 +273,37 @@ class Supervisor:
         if not self.start_all():
             log.error("not all children became ready on boot")
 
+        # In-place recovery (B1′): the supervisor NEVER exits on an all-children-down
+        # circuit-break — exiting handed the core to a 1–3 min launchd-backoff blackout.
+        # Instead it stays up, alerts ONCE, and keeps retrying with escalating backoff,
+        # re-arming its own breakers each round, so there is no unsupervised gap.
+        recovery_backoff = self._probe_interval
+        sup_down_alerted = False
         while not self._stop.is_set():
             self.supervise_once()
-            if self._children and all(c.circuit_broken() for c in self._children):
+            all_broken = bool(self._children) and all(c.circuit_broken() for c in self._children)
+            if all_broken:
+                if not sup_down_alerted:
+                    _alert_children_down([c.spec.name for c in self._children])
+                    sup_down_alerted = True
                 log.error(
-                    "all children circuit-broken — supervisor exiting for launchd backoff"
+                    "all children circuit-broken — retrying IN PLACE after %.0fs "
+                    "(supervisor stays up; no unsupervised gap)", recovery_backoff,
                 )
+                if self._stop.wait(recovery_backoff):
+                    break
+                recovery_backoff = min(recovery_backoff * 2, MAX_RECOVERY_BACKOFF_S)
+                for child in self._children:        # re-arm and try to bring each back
+                    child.reset_circuit()
+                    if not child.alive():
+                        child.spawn()
+                continue
+            # at least one child is healthy → recovered: reset the alert + backoff so a
+            # future outage re-alerts and starts fast again.
+            sup_down_alerted = False
+            recovery_backoff = self._probe_interval
+            if self._stop.wait(self._probe_interval):
                 break
-            self._stop.wait(self._probe_interval)
 
         log.info("supervisor draining children and exiting")
         self.drain_all()

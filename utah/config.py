@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from pathlib import Path
 
 # --- deploy seams (env-overridable) -----------------------------------------
@@ -41,12 +42,23 @@ UTAH_HOME: Path = Path(os.environ.get("UTAH_HOME", os.path.expanduser("~/.utah")
 BUSINESS_CREDS: Path = UTAH_HOME / "secrets" / "business.json"
 
 
+#: A complete US postal address carries a 5-digit ZIP (optionally ZIP+4).
+_ZIP_RE = re.compile(r"\b\d{5}(?:-\d{4})?\b")
+
+
 def _canspam_is_real(addr: str) -> bool:
     a = (addr or "").strip()
     if not a:
         return False
     low = a.lower()
     return "[can-spam" not in low and "replace" not in low and a != CANSPAM_PLACEHOLDER
+
+
+def _canspam_is_complete(addr: str) -> bool:
+    """CAN-SPAM requires a *valid physical postal address*, not just any string. A bare
+    street ("28 Dogwood Rd") is non-compliant; a complete one carries a ZIP. We gate the
+    SEND on completeness so a volume cold-email run can never ship a non-compliant footer."""
+    return _canspam_is_real(addr) and bool(_ZIP_RE.search(addr))
 
 
 def canspam_address() -> str:
@@ -65,8 +77,31 @@ def canspam_address() -> str:
 
 
 def canspam_configured() -> bool:
-    """True when a real postal address is set (env or business.json)."""
-    return _canspam_is_real(canspam_address())
+    """True only when a COMPLETE postal address is set (env or business.json) — a bare
+    street is non-compliant and must not unlock volume sending."""
+    return _canspam_is_complete(canspam_address())
+
+
+# --- Outreach cadence doctrine (Michael, 2026-06-09) ------------------------
+#: Cold outreach SENDS only inside the local-clock business window, enforced in the
+#: SEND PATH (not just the cron schedule) so a manual kickstart or a misconfigured
+#: plist can NEVER text/email a prospect at 5am again. ``START`` inclusive, ``END``
+#: inclusive — a run kicked at exactly 17:00 (5pm close) still sends.
+OUTREACH_HOUR_START: int = int(os.environ.get("UTAH_OUTREACH_HOUR_START", "8"))
+OUTREACH_HOUR_END: int = int(os.environ.get("UTAH_OUTREACH_HOUR_END", "17"))
+#: Per-run (== per-hour, the cron fires hourly) send cap. 50/hour × 10 business
+#: hours (08:00–17:00) = 500/day, Michael's floor. Raise only with deliverability headroom.
+OUTREACH_PER_HOUR: int = int(os.environ.get("UTAH_OUTREACH_DAILY", "50"))
+
+
+def within_business_hours(hour: int | None = None) -> bool:
+    """True iff *hour* (0–23, local) is inside the outreach send window. With no arg,
+    reads the live local clock — the single gate the send path consults so off-hours
+    sends are structurally impossible."""
+    if hour is None:
+        import datetime
+        hour = datetime.datetime.now().hour
+    return OUTREACH_HOUR_START <= hour <= OUTREACH_HOUR_END
 
 #: System prompt that makes the brain a pure reasoning engine. ``--tools ""`` +
 #: ``--strict-mcp-config`` disable the TOOLS, but NOT the Claude Code agent SYSTEM
@@ -88,8 +123,19 @@ BRAIN_SYSTEM_PROMPT: str = (
 #: servers, and ``--append-system-prompt`` overrides the agent identity (see above) —
 #: together the brain runs as a pure LLM that ANSWERS, not the Claude Code agent. Used by
 #: one-shot, streaming, AND sica_autonomy's brain path (one source of truth).
+#:
+#: ``--setting-sources project`` is a LATENCY fix, not a capability cut: the CLI otherwise
+#: loads the user's 18 plugins + 65 skills + global CLAUDE.md + pyright-LSP + auto-memory
+#: on EVERY spawn — pure cold-start tax the pure-reasoning brain never uses. Measured: it
+#: ~halves time-to-first-token (chat 6.5s→2.9s, voice 3.2s→1.7s). It loads ONLY project
+#: ``.claude`` (the daemon's cwd is ProjectUtah, which has none → loads nothing) and never
+#: the ``user`` source, so it can't pick up ~/.claude. The model is UNCHANGED —
+#: ``claude-opus-4-8[1m]`` with or without it (verified); do NOT add ``--model`` (the
+#: ``opus`` alias drops the [1m] 1M-context variant). Brain is not reduced; only its
+#: startup is.
 BRAIN_NO_AGENT: tuple[str, ...] = (
     "--append-system-prompt", BRAIN_SYSTEM_PROMPT, "--tools", "", "--strict-mcp-config",
+    "--setting-sources", "project",
 )
 
 #: Arguments for one-shot print mode.
@@ -114,6 +160,23 @@ BRAIN_TIMEOUT: int = int(os.environ.get("UTAH_BRAIN_TIMEOUT", "120"))
 
 #: Seconds to wait when opening a Postgres connection.
 DB_CONNECT_TIMEOUT: int = int(os.environ.get("UTAH_DB_CONNECT_TIMEOUT", "5"))
+
+#: Connection-pool sizing for the long-lived daemon stores (memory, failures). The
+#: store was a single connection + RLock — every in-daemon memory op serialized, negating
+#: the worker pool's parallelism and the very reason Postgres was chosen (B6). A bounded
+#: pool lets concurrent recalls/writes actually run concurrently. Kept small (Postgres
+#: default max_connections is 100, and the cron processes use their own connections).
+DB_POOL_MAX: int = int(os.environ.get("UTAH_DB_POOL_MAX", "8"))
+#: Seconds to wait for a free pooled connection before degrading to MemoryUnavailable.
+DB_POOL_TIMEOUT: float = float(os.environ.get("UTAH_DB_POOL_TIMEOUT", "10"))
+
+#: Cron load governor (B2). The in-daemon governor only sheds the daemon's OWN in-flight
+#: work; the dozen+ launchd crons bypassed it and could co-spike load (the AceOS killer).
+#: A HEAVY cron (a scraper / self-coder) defers its run when 1-min load/core exceeds this,
+#: and serializes behind a cross-process file lock so two heavy crons never run at once.
+#: Light senders (outreach/marketer/brief) are exempt — a revenue send must never be
+#: skipped for moderate load. 2.5 matches the local-tier defer threshold.
+CRON_MAX_LOAD_PER_CORE: float = float(os.environ.get("UTAH_CRON_MAX_LOAD", "2.5"))
 
 # --- L1: the local lane (free, resident Ollama models in FRONT of the brain) --
 #: Ollama HTTP endpoint. The local tier is free; only the brain (Claude CLI) is paid.
@@ -181,11 +244,32 @@ EMBED_DIM: int = 384
 #: Cross-encoder rerank model (fastembed ONNX, free).
 RERANK_MODEL: str = "Xenova/ms-marco-MiniLM-L-6-v2"
 
-# --- voice (wake "ace" -> Moonshine STT -> brain -> Piper TTS) ---------------
-#: Default STT = Moonshine ONNX (very-low-latency, on-device, auto-downloads).
+# --- voice (wake "ace" -> Whisper STT -> brain -> Piper TTS) -----------------
+#: STT engine: "whisper" (MLX Whisper small.en — DEFAULT) or "moonshine".
+#: WHY whisper is default: Moonshine base mis-transcribed REAL mic speech into
+#: garbage live ("What's going on?" -> "Blun."), and a garbage transcript then
+#: tripped the slow learn-on-miss web loop (~58s) — voice felt broken. MLX
+#: Whisper small.en reads the SAME clip correctly AND faster (124ms vs 470ms
+#: warm). Moonshine stays as the portable ONNX fallback when MLX is unavailable.
+STT_ENGINE: str = os.environ.get("UTAH_STT_ENGINE", "whisper")
+#: Moonshine ONNX model (used when STT_ENGINE=moonshine or as the MLX fallback).
 STT_MODEL: str = os.environ.get("UTAH_STT", "moonshine/base")
-#: MLX Whisper model — the swappable fallback STT (set engine via stt.set_stt).
-WHISPER_MODEL: str = os.environ.get("UTAH_WHISPER", "mlx-community/whisper-base.en-mlx")
+#: MLX Whisper model — the DEFAULT STT (accurate + fast on Apple Silicon). base.en
+#: was too weak on real mic audio (gave "on"); small.en transcribes it correctly.
+WHISPER_MODEL: str = os.environ.get("UTAH_WHISPER", "mlx-community/whisper-small.en-mlx")
+#: Reject a Whisper segment whose no_speech_prob exceeds this — kills the classic
+#: silence-hallucination ("Thank you." / "Thanks for watching") on a near-silent or
+#: fragment clip (measured no_speech 0.50) while keeping real speech (0.14). A
+#: rejected clip yields "" = no command, not a phantom voice turn.
+STT_MAX_NO_SPEECH: float = float(os.environ.get("UTAH_STT_MAX_NO_SPEECH", "0.4"))
+#: Hard wall on a single transcribe in the STT worker. MLX Whisper (Metal) can
+#: DEADLOCK on the GPU under contention; isolated in a worker subprocess, a hang is
+#: recovered by KILLING the worker after this budget — the mic loop gets "" and keeps
+#: listening (never deaf), and the next call respawns a fresh worker. Healthy <1s.
+STT_HANG_TIMEOUT_S: float = float(os.environ.get("UTAH_STT_HANG_TIMEOUT", "8.0"))
+#: Seconds to wait for the STT worker to load its model on boot (MLX compiles on the
+#: first transcribe). An overrun means a wedged worker → respawn.
+STT_WORKER_BOOT_S: float = float(os.environ.get("UTAH_STT_WORKER_BOOT", "30.0"))
 #: Piper TTS voice model (the .json config sits next to it).
 PIPER_MODEL: str = os.environ.get(
     "UTAH_PIPER", os.path.expanduser("~/.utah/models/piper/en_GB-cori-high.onnx")
@@ -374,7 +458,7 @@ ALERT_PRIORITY: dict[str, int] = {
 #: ``brain/unavailable`` noise are EXCLUDED — only genuine breakage pages.
 CRITICAL_FAILURE_KINDS: frozenset[str] = frozenset(
     {"daemon_unreachable", "load_critical", "postgres_down", "process_died",
-     "engine_death", "critical"})
+     "engine_death", "critical", "supervisor_down"})  # supervisor_down pages on first sight (B1′)
 
 #: Quiet hours (local clock). Streams without bypass are suppressed in this window.
 QUIET_HOURS_START: str = os.environ.get("UTAH_QUIET_START", "22:30")

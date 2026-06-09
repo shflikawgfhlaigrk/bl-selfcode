@@ -177,6 +177,20 @@ def test_think_stream_disables_tools_so_it_cannot_go_agentic():
     assert "--strict-mcp-config" in argv
 
 
+def test_think_stream_skips_user_plugins_for_latency_without_downgrading_model():
+    """LATENCY: ``--setting-sources project`` stops the CLI loading the user's
+    18 plugins / 65 skills / global CLAUDE.md / LSP on every spawn (~halved TTFT).
+    It must NOT pin ``--model`` — the bare ``opus`` alias would drop the [1m]
+    1M-context variant, i.e. a quieter brain downgrade. Same brain, faster start."""
+    runner = ScriptedStreamRunner(_stream_lines_for("x", "y"))
+    brain.set_stream_runner(runner)
+    list(brain.think_stream("q"))
+    argv = runner.last_argv
+    assert "--setting-sources" in argv
+    assert argv[argv.index("--setting-sources") + 1] == "project"
+    assert "--model" not in argv  # never downgrade the model to chase latency
+
+
 def test_think_stream_raises_brain_unavailable_on_runner_failure():
     runner = ScriptedStreamRunner(brain.BrainUnavailable("cli gone"))
     brain.set_stream_runner(runner)

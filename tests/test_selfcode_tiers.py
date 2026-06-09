@@ -106,6 +106,33 @@ def test_kill_switch_smoke_refuses_self_edit_to_safety(monkeypatch, tmp_path):
     assert result["refused"] is True and result["tier"] == "D"
 
 
+def test_kill_switch_smoke_does_not_pollute_failure_feed(monkeypatch, tmp_path):
+    """B14: the nightly smoke deliberately triggers a refusal — its synthetic
+    off_limits outcome must go to SMOKE_LOG, never the production failures feed
+    that drives the AUDIT panel (it once buried ~824 real signals)."""
+    monkeypatch.setattr(selfcode, "KILL_SWITCH", tmp_path / "nope")
+    monkeypatch.setattr(selfcode, "SMOKE_LOG", tmp_path / "smoke.jsonl")
+    store = FakeFailureStore(); failures.set_store(store)
+    result = selfcode.kill_switch_smoke()
+    assert result["refused"] is True
+    assert store.rows == []                      # nothing in the production feed
+    assert (tmp_path / "smoke.jsonl").exists()   # but the smoke trail is durable
+    assert "off_limits" in (tmp_path / "smoke.jsonl").read_text()
+
+
+def test_real_offlimits_still_records_to_failure_feed(monkeypatch, tmp_path):
+    """The B14 fix must NOT silence a REAL autonomous attempt to edit safety —
+    only the synthetic smoke is routed away. A genuine off_limits run still
+    records to the production feed (and pages)."""
+    monkeypatch.setattr(selfcode, "KILL_SWITCH", tmp_path / "nope")
+    store = FakeFailureStore(); failures.set_store(store)
+    calls, bf, df = _vcs()
+    selfcode.propose("a genuine attempt to edit a safety file", run_claude=lambda t: None,
+                     run_tests=lambda: (True, ""), branch_fn=bf, discard_fn=df,
+                     safety_intact_fn=lambda before: False)   # real run, smoke defaults False
+    assert any(row[2] == "off_limits" for row in store.rows)
+
+
 # --- tier-gated merge -------------------------------------------------------
 
 def test_tier_A_with_enough_supervised_auto_merges(monkeypatch, tmp_path):

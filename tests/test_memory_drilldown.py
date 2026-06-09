@@ -4,7 +4,7 @@ it). list_memories pages live rows newest-first; list_entities lists entities by
 count. Both read-only."""
 from __future__ import annotations
 
-from utah import memory
+from utah import config, memory
 
 
 def test_list_memories_newest_first_and_shaped(mem):
@@ -38,7 +38,7 @@ def test_list_memories_excludes_archived(mem):
 def test_list_entities_returns_names_with_counts(mem):
     mem.store.insert(
         content="Michael lives in Newnan", source="fact", tags=(), confidence=0.8,
-        embedding=[0.0] * memory.config.EMBED_DIM,
+        embedding=[0.0] * config.EMBED_DIM,
         entity_names=["Michael", "Newnan"], supersede_ids=(),
     )
     ents = memory.list_entities(limit=50)

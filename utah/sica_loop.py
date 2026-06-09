@@ -12,8 +12,11 @@ Hard limits (paper §overseer) — the loop is NEVER unbounded:
   * loop budget: ``max_steps``, an optional wall-clock ``deadline_s``, and a
     cumulative ``cost_budget_usd`` ($10 default).
 
-Nothing here runs autonomously yet — auto-merge stays OFF until rung 3 (async
-overseer) lands. This is the mechanism the governed autonomous lane will call.
+This is the mechanism the governed autonomous lane uses. Rungs 3 (async
+overseer, ``sica_overseer``) and 4 (``sica_autonomy``) have landed and run live:
+the autonomous loop runs under ``com.utah.selfcode`` and Tier-A leaf changes
+auto-merge after ``min_supervised`` supervised greens — every higher tier stays
+a human-review proposal, and the byte-checked kill-switch is always armed.
 """
 from __future__ import annotations
 

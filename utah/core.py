@@ -232,6 +232,33 @@ def _stream_brain_buffered(
     return "".join(parts).strip()
 
 
+def _prelude(text: str) -> "tuple[str, Route | None, Reply | None]":
+    """Shared first stage for :func:`tell` and :func:`tell_stream` — the routing that
+    once lived (and could drift) in both. Normalize the input, route it, and resolve the
+    two INSTANT lanes both paths answer identically before any recall:
+
+    * empty input → a finished ``UNAVAILABLE`` "I didn't catch that." reply;
+    * a whole-message social pleasantry → a finished ``SOCIAL`` canned reply;
+    * a deterministic capability (weather/time/brief/knowledge) → a finished ``CAPABILITY``.
+
+    Returns ``(text, route, instant)``. ``instant`` is the finished :class:`Reply` when one
+    of those lanes matched (the caller emits it in its own shape — return vs yield — and
+    threads it into ``_CONVO`` unless it is the empty-input UNAVAILABLE); otherwise ``None``,
+    meaning the caller proceeds to recall + reason."""
+    text = (text or "").strip()
+    if not text:
+        return text, None, Reply(text="I didn't catch that.", source=ReplySource.UNAVAILABLE)
+    route = router.route(text)
+    if route is Route.SOCIAL:
+        canned = social.reply(text)
+        if canned:
+            return text, route, Reply(text=canned, source=ReplySource.SOCIAL)
+    cap = _capability_reply(text, route, hits=[])
+    if cap is not None:
+        return text, route, cap
+    return text, route, None
+
+
 def tell(text: str, *, persist: bool = True) -> Reply:
     """One full turn: recall -> ground -> reason -> remember.
 
@@ -240,29 +267,14 @@ def tell(text: str, *, persist: bool = True) -> Reply:
     function in oauth.py" otherwise stores a turn that near-verbatim echoes future code
     questions and out-ranks the actual code chunk. Real conversation (voice/web) keeps
     persist=True."""
-    text = (text or "").strip()
-    if not text:
-        return Reply(text="I didn't catch that.", source=ReplySource.UNAVAILABLE)
-
-    route = router.route(text)
-
-    # 0. SOCIAL fast-path — a whole-message greeting/ack/thanks is answered by a
-    #    deterministic canned reply (no model, no memory write, no fabrication) in
-    #    microseconds. Before this, "hello" cost 9.6 s and "thanks" 23 s. Threaded for
-    #    follow-up continuity but never stored (a pleasantry is not a durable fact).
-    if route is Route.SOCIAL:
-        canned = social.reply(text)
-        if canned:
-            _CONVO.append((text, canned))
-            return Reply(text=canned, source=ReplySource.SOCIAL)
-
-    # 1. CAPABILITY / KNOWLEDGE first — these are LIVE (weather, brief) or
-    #    AUTHORITATIVE (curated packs). They must NOT be shadowed by a stale or
-    #    partial memory hit (a memory turn once served day-old weather here).
-    cap = _capability_reply(text, route, hits=[])
-    if cap is not None:
-        _CONVO.append((text, cap.text))
-        return cap
+    # 0–1. INSTANT lanes (empty / social / capability) — shared with tell_stream via
+    #      _prelude so the routing can't drift between the two paths. Social + capability
+    #      are threaded for follow-up continuity but never stored (live state / pleasantry).
+    text, route, instant = _prelude(text)
+    if instant is not None:
+        if instant.source is not ReplySource.UNAVAILABLE:
+            _CONVO.append((text, instant.text))
+        return instant
 
     # 2. RECALL + GROUND: answer general factual turns from memory only if confident
     #    (no fabrication). Capabilities already returned above, so this never serves
@@ -349,37 +361,16 @@ def tell_stream(text: str, *, want_thinking: bool = True, voice: bool = False) -
     Capability/social routing matches :func:`tell` — BEFORE recall — so weather/time
     do not pay a Postgres vector round-trip on the hot path.
     """
-    text = (text or "").strip()
-    if not text:
-        yield ("source", "unavailable")
-        yield ("answer", "I didn't catch that.")
-        yield ("done", "I didn't catch that.")
-        return
-
-    route = router.route(text)
-
-    # 0. SOCIAL fast-path — a whole-message greeting/ack/thanks gets an instant canned
-    #    reply in the STREAMING path too (chat box + voice), not just tell(). Without
-    #    this, "hey" fell through to the brain — a ~15s round-trip for a pleasantry.
-    #    No model, no recall, no memory write. Threaded for follow-up continuity.
-    if route is Route.SOCIAL:
-        canned = social.reply(text)
-        if canned:
-            yield ("source", "social")
-            yield ("answer", canned)
-            _CONVO.append((text, canned))
-            yield ("done", canned)
-            return
-
-    # 1. CAPABILITY / KNOWLEDGE — LIVE deterministic answers (weather, brief, time).
-    #    MUST run before recall (same order as :func:`tell`) so voice/chat do not pay a
-    #    vector recall round-trip for a question the capability answers in milliseconds.
-    cap = _capability_reply(text, route, hits=[])
-    if cap is not None:
-        yield ("source", "capability")
-        yield ("answer", cap.text)
-        _CONVO.append((text, cap.text))
-        yield ("done", cap.text)
+    # 0–1. INSTANT lanes (empty / social / capability) — shared with tell() via _prelude
+    #      so routing never drifts between the two paths. The emit differs (yield vs
+    #      return); social + capability are threaded, the empty-input UNAVAILABLE is not.
+    text, route, instant = _prelude(text)
+    if instant is not None:
+        yield ("source", instant.source.value)
+        yield ("answer", instant.text)
+        if instant.source is not ReplySource.UNAVAILABLE:
+            _CONVO.append((text, instant.text))
+        yield ("done", instant.text)
         return
 
     # 2. RECALL — grounding for reasoning tiers only (past the instant lanes above).
@@ -421,7 +412,12 @@ def tell_stream(text: str, *, want_thinking: bool = True, voice: bool = False) -
     #     refused by the brain (no-fab, cold). Skip that certain round-trip: fetch the
     #     web and stream a grounded answer directly (the cold-learn latency win for
     #     chat/voice). Falls through to the normal brain pass if the web yields nothing.
-    if learnable and not _memory_grounds(text, hits):
+    if learnable and not voice and not _memory_grounds(text, hits):
+        # VOICE never does live web research: it's 13-60s, and on a mis-heard or
+        # genuinely-unknown command that turns a turn into a dead-air hang (the
+        # "Blun." -> 58s learn loop that made voice feel broken). Voice instead
+        # refuses fast and warmly (the brain's "I don't know." + offer is spoken in
+        # ~2s); chat keeps learn-on-miss, where a "searching the web…" wait is fine.
         web = _learn(text)
         if web:
             yield ("source", "learned")
@@ -443,7 +439,8 @@ def tell_stream(text: str, *, want_thinking: bool = True, voice: bool = False) -
     yield ("source", "brain")
     parts: list[str] = []
     try:
-        for channel, chunk in brain.think_stream(text, context, want_thinking=want_thinking):
+        for channel, chunk in brain.think_stream(
+                text, context, want_thinking=want_thinking, brief=voice):
             if channel == "answer":
                 parts.append(chunk)
                 if not learnable:
@@ -463,7 +460,7 @@ def tell_stream(text: str, *, want_thinking: bool = True, voice: bool = False) -
     # 2.5 LEARN-ON-MISS fallback — a factual question that LOOKED memory-grounded but
     #     the brain still refused (learn-first did not run). Find it on the web and
     #     reason again. (No-fab intact; learn-first already covers the cold case.)
-    if learnable and brain.is_refusal(reply_text):
+    if learnable and not voice and brain.is_refusal(reply_text):
         yield ("source", "learned")
         yield ("thinking", "I don't have that yet — searching the web and learning it…\n")
         web = _learn(text)

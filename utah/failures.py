@@ -47,40 +47,34 @@ CREATE INDEX IF NOT EXISTS failures_id_desc ON failures (id DESC);
 
 
 class PostgresFailureStore:
-    """Durable append-only failure log on Postgres (one managed connection)."""
+    """Durable append-only failure log on Postgres, over the shared bounded pool.
+
+    Writes can come from any worker thread, so a pooled connection (rather than one
+    connection behind an RLock) lets concurrent failure records run concurrently and
+    recycles a dropped connection transparently (B6/B10)."""
 
     def __init__(self, dsn: str | None = None) -> None:
         self._dsn = dsn if dsn is not None else config.DB_DSN
-        self._conn = None
-        self._lock = threading.RLock()
 
-    def _get(self):
-        import psycopg
+    def _pool(self):
+        from utah import db_pool
 
-        if self._conn is None or self._conn.closed:
-            self._conn = psycopg.connect(
-                self._dsn, autocommit=True, connect_timeout=config.DB_CONNECT_TIMEOUT
-            )
-        return self._conn
+        return db_pool.get_pool(self._dsn)   # plain connections; no pgvector needed
 
     def init_schema(self) -> None:
-        with self._lock:
-            self._get().execute(_DDL)
+        with self._pool().connection() as conn:
+            conn.execute(_DDL)
 
     def insert(self, source: str, kind: str, detail: str) -> None:
-        with self._lock:
-            try:
-                self._get().execute(
-                    "INSERT INTO failures (source, kind, detail) VALUES (%s, %s, %s)",
-                    (source, kind, detail),
-                )
-            except Exception:
-                self._conn = None  # force reconnect next time
-                raise
+        with self._pool().connection() as conn:
+            conn.execute(
+                "INSERT INTO failures (source, kind, detail) VALUES (%s, %s, %s)",
+                (source, kind, detail),
+            )
 
     def recent(self, limit: int) -> list[FailureRow]:
-        with self._lock:
-            rows = self._get().execute(
+        with self._pool().connection() as conn:
+            rows = conn.execute(
                 "SELECT source, kind, detail, to_char(ts, 'HH24:MI:SS') "
                 "FROM failures ORDER BY id DESC LIMIT %s",
                 (limit,),
@@ -88,14 +82,13 @@ class PostgresFailureStore:
         return [FailureRow(r[0], r[1], r[2], r[3]) for r in rows]
 
     def count(self) -> int:
-        with self._lock:
-            return int(self._get().execute("SELECT count(*) FROM failures").fetchone()[0])
+        with self._pool().connection() as conn:
+            return int(conn.execute("SELECT count(*) FROM failures").fetchone()[0])
 
     def close(self) -> None:
-        with self._lock:
-            if self._conn is not None and not self._conn.closed:
-                self._conn.close()
-            self._conn = None
+        from utah import db_pool
+
+        db_pool.close_pool(self._dsn)
 
 
 _store: FailureStore | None = None
@@ -137,6 +130,12 @@ def record(source: str, kind: str, detail: str = "") -> None:
             alerts.critical_async(str(source), str(detail), key=f"{source}/{kind}")
     except Exception:  # noqa: BLE001 — paging must never break recording
         log.debug("failure-page swallowed (source=%s kind=%s)", source, kind, exc_info=True)
+    try:
+        from utah.integrations import discord_feed
+
+        discord_feed.feed_audit(str(source), str(kind), str(detail))
+    except Exception:  # noqa: BLE001 — Discord must never break recording
+        log.debug("failure-discord swallowed (source=%s kind=%s)", source, kind, exc_info=True)
 
 
 def record_silent(source: str, detail: str = "") -> None:

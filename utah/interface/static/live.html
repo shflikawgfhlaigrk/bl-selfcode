@@ -324,6 +324,21 @@
   .cell-bar{height:5px;border-radius:3px;background:#1c1b24;overflow:hidden;margin-top:5px}
   .cell-bar i{display:block;height:100%;background:linear-gradient(90deg,#caa24a,#ecd08a)}
 
+  /* ---- SELF-CODE console (terminal) ---- */
+  .con-wrap{display:flex;flex-direction:column;height:62vh;min-height:420px;border:1px solid var(--line);border-radius:8px;overflow:hidden;background:#070a0e}
+  .con-out{flex:1;overflow-y:auto;padding:10px 12px;font:12px/1.55 ui-monospace,SFMono-Regular,Menlo,monospace;color:#cfe3d8}
+  .con-out .cl{white-space:pre-wrap;word-break:break-word;margin:1px 0}
+  .con-out .cmd{color:#ffd24a}
+  .con-out .sys{color:#7da3b8}
+  .con-out .job{color:#a78bfa}
+  .con-out .stream{color:#8fb0c4}
+  .con-out .ok{color:#27e08a}
+  .con-out .err{color:#ff6b6b}
+  .con-out .diff{color:#9fb0c0;background:#0b0f14;border-left:2px solid #1d2a33;padding:4px 8px;margin:4px 0}
+  .con-in-row{display:flex;align-items:center;gap:8px;border-top:1px solid var(--line);padding:8px 10px;background:#0a0e13}
+  .con-ps{color:#27e08a;font:13px ui-monospace,monospace}
+  .con-in{flex:1;background:transparent;border:0;outline:0;color:#eaf2ee;font:13px ui-monospace,SFMono-Regular,Menlo,monospace}
+  .con-in::placeholder{color:#4a5a66}
   /* ---- SELF-CODE page ---- */
   .sc-banner{padding:9px 12px;border-radius:8px;font-size:11px;letter-spacing:.4px;margin-bottom:12px;
     background:#1a1407;border:1px solid #2c2614;color:var(--gold2)}
@@ -475,6 +490,7 @@
   <div class="menu-box">
     <div class="menu-h">◆ LABS &amp; CONSOLES</div>
     <button class="menu-item" onclick="openLab()"><b>⚡ Trading Engine Lab</b><span>8 engines · paper/sim · gated on WealthCharts feed (live tmrw)</span></button>
+    <button class="menu-item" onclick="openTerminal()"><b>⌨️ Self-Code Console</b><span>genuine / commands · /code · /findings · /do · /ask · propose-only</span></button>
     <button class="menu-item" onclick="openConsole('selfcode','🤖 SELF-CODING BAY')"><b>🤖 Self-Coding Bay</b><span>propose-only · isolated branch · suite-gated · never main</span></button>
     <button class="menu-item" onclick="openConsole('browser','🌐 BROWSER')"><b>🌐 Browser</b><span>headless Chrome · JS-rendered fetch</span></button>
     <button class="menu-item dim" disabled><b>🛡 Risk / Threat Kernel</b><span>pre-exec gate · gated</span></button>
@@ -802,6 +818,61 @@ async function loadDash(tab, quiet){
     }
     body.innerHTML=h; renderTabs(); wireRows();
   }catch(e){ body.innerHTML=emptyBox("unavailable — "+String(e.message||e)); }
+}
+
+/* ===================== SELF-CODE CONSOLE — genuine / commands ===================== */
+/* A real terminal into Ace: /code writes his OWN code (propose-only on the isolated clone,
+   suite-gated), /findings lists the browser-agent ideas, /do runs one, /ask the grounded
+   brain. Output persists across the 2.5s background poll; the shell is built once. */
+let _conOut=[], _conInit=false, _conJobPoll=null, _conSeen=0; const CON_MAX=400;
+function conScroll(){ const o=$("con-out"); if(o) o.scrollTop=o.scrollHeight; }
+function conLine(kind,text){ return `<div class="cl ${kind}">${esc(text)}</div>`; }
+function conPrint(kind,text){
+  _conOut.push({kind,text}); if(_conOut.length>CON_MAX) _conOut=_conOut.slice(-CON_MAX);
+  const o=$("con-out"); if(o){ o.insertAdjacentHTML("beforeend", conLine(kind,text)); conScroll(); }
+}
+function openTerminal(){
+  closeMenu();
+  const inner='<div class="con-wrap"><div id="con-out" class="con-out"></div>'+
+    '<div class="con-in-row"><span class="con-ps">›</span>'+
+    '<input id="con-in" class="con-in" autocomplete="off" spellcheck="false" '+
+    'placeholder="/help · /findings · /code &lt;task&gt; · /do &lt;n&gt; · /ask &lt;q&gt;   (a bare line = /ask)"/></div></div>';
+  drillOpen("⌨️ SELF-CODE CONSOLE — genuine / commands", inner);
+  const inEl=$("con-in");
+  if(inEl){ inEl.addEventListener("keydown",e=>{ if(e.key==="Enter") runConsole(); }); }
+  const o=$("con-out");
+  if(_conOut.length){ o.innerHTML=_conOut.map(l=>conLine(l.kind,l.text)).join(""); conScroll(); }
+  else { conPrint("sys","UTAH SELF-CODE CONSOLE — type /help. A bare line asks the grounded brain."); runConsoleLine("/findings"); }
+  if(inEl) setTimeout(()=>inEl.focus(),60);
+}
+function runConsole(){
+  const inEl=$("con-in"); if(!inEl) return;
+  const line=inEl.value.trim(); if(!line) return;
+  inEl.value=""; runConsoleLine(line);
+}
+function runConsoleLine(line){
+  conPrint("cmd","› "+line);
+  fetch("/api/console",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({line})})
+    .then(r=>r.json()).then(j=>{
+      if(j.kind==="job"){ _conSeen=0; conPrint("job","⧗ "+(j.task||"")+"   (live · propose-only · isolated clone)"); pollConsoleJob(j.job); }
+      else { conPrint("out",(j.output||"")+(j.source?(" ["+j.source+"]"):"")); }
+    }).catch(e=>conPrint("err","[error] "+String(e.message||e)));
+}
+function pollConsoleJob(id){
+  if(!id) return;
+  fetch("/api/selfcode/job/"+id).then(r=>r.json()).then(j=>{
+    const log=j.log||[];
+    for(let i=_conSeen;i<log.length;i++) conPrint("stream", log[i]);  // live agent actions
+    _conSeen=log.length;
+    if(j.status==="queued"||j.status==="working"){ if(_conJobPoll)clearTimeout(_conJobPoll); _conJobPoll=setTimeout(()=>pollConsoleJob(id),1200); return; }
+    const r=j.result||{};
+    if(j.status==="error"||r.ran===false){ conPrint("err","✗ "+(r.error||"failed")); _conSeen=0; return; }
+    const verdict=(r.passed?"✓ suite GREEN":"✗ suite red")+" · tier "+(r.tier||"?")+" · "+(r.merged?"merged":"PROPOSED (not merged)")+(r.utility!=null?(" · U="+(+r.utility).toFixed(3)):"");
+    conPrint("ok","✓ "+verdict+(r.branch?("   ["+r.branch+"]"):""));
+    if(r.reason) conPrint("out",r.reason);
+    if(r.diff) conPrint("diff",r.diff);
+    _conSeen=0;
+  }).catch(()=>{ if(_conJobPoll)clearTimeout(_conJobPoll); _conJobPoll=setTimeout(()=>pollConsoleJob(id),2000); });
 }
 
 /* ============================ SELF-CODE PAGE (4 sections) ============================ */

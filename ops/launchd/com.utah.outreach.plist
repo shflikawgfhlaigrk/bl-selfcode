@@ -1,24 +1,36 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <!--
-  com.utah.outreach — SMB cold-outreach SENDER cron (daily, 10:00).
+  com.utah.outreach — SMB cold-outreach SENDER cron (hourly, business hours).
 
   SMB ONLY: no-website small businesses from OSM + Google Maps (handyman/trades).
   Probate heirs are in the probate table and NEVER enter this cron — separate pipeline.
 
-  Runs utah.product.outreach.run_scheduled(): pull up to DAILY_OUTREACH (default 8)
-  uncontacted SMB phone/email leads (source=osm|google_maps), drop national chains,
-  CAN-SPAM-compliant pitch via real SMTP (suppression-checked, never-twice). This is the
-  DRIVER that was missing — the send path was proven but nothing fed it the live leads.
-  Measured volume + a business-hour send protect the sending Gmail's deliverability.
-  RunAtLoad is FALSE so a reboot never fires a batch; it sends once a day on schedule.
+  Cadence (Michael's directive, 2026-06-09): SEND every hour on the hour, 08:00–17:00
+  (the 8am–5pm business window = 10 runs), UTAH_OUTREACH_DAILY=50 per run via the AUTO
+  channel — email a lead that has an email, TEXT (SMS→iMessage) a phone-only lead.
+  10 runs × 50 = 500/day, the floor. The send path ALSO enforces business hours in code
+  (config.within_business_hours), so a manual kickstart or a misconfigured cron can NEVER
+  text/email a prospect at 5am again. Email volume spreads across the account pool
+  (mail.accounts / email_accounts.json) so no single Gmail spikes its ~500/day cap.
+
+  Runs utah.product.outreach.run_scheduled(): pull uncontacted SMB leads (source=osm|
+  google_maps), drop national chains + corporate inboxes, send a CAN-SPAM/TCPA-compliant
+  pitch (email via real SMTP, text via Twilio→iMessage), suppression-checked, never-twice.
+
+  CEILING: the emailable pool is small until email skip-trace/enrichment replenishes it;
+  the iMessage text fallback makes the ~363 phone leads contactable now, and the moving
+  frontier scraper produces 500+ fresh leads/day (audit §1.1).
+
+  RunAtLoad is FALSE so a reboot never fires a batch; it sends on the schedule below.
 
   Install:
     cp ops/launchd/com.utah.outreach.plist ~/Library/LaunchAgents/
-    launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.utah.outreach.plist
+    launchctl bootout    gui/$(id -u)/com.utah.outreach 2>/dev/null
+    launchctl bootstrap  gui/$(id -u) ~/Library/LaunchAgents/com.utah.outreach.plist
   Force-run now:  launchctl kickstart gui/$(id -u)/com.utah.outreach
-  Stop:           launchctl bootout  gui/$(id -u)/com.utah.outreach
-  Cap override:   UTAH_OUTREACH_DAILY=20 (once the domain is warmed up)
+  Stop:           launchctl bootout   gui/$(id -u)/com.utah.outreach
+  Volume override: UTAH_OUTREACH_DAILY=N
 -->
 <plist version="1.0">
 <dict>
@@ -42,18 +54,26 @@
     <key>PYTHONUNBUFFERED</key>
     <string>1</string>
     <key>UTAH_OUTREACH_CHANNEL</key>
-    <string>sms</string>
+    <string>auto</string>
+    <key>UTAH_OUTREACH_DAILY</key>
+    <string>50</string>
     <key>PATH</key>
     <string>/Users/michaelbarber/.utah/venv/bin:/opt/homebrew/bin:/usr/local/bin:/Users/michaelbarber/.local/bin:/usr/bin:/bin</string>
   </dict>
 
   <key>StartCalendarInterval</key>
-  <dict>
-    <key>Hour</key>
-    <integer>10</integer>
-    <key>Minute</key>
-    <integer>0</integer>
-  </dict>
+  <array>
+    <dict><key>Hour</key><integer>8</integer><key>Minute</key><integer>0</integer></dict>
+    <dict><key>Hour</key><integer>9</integer><key>Minute</key><integer>0</integer></dict>
+    <dict><key>Hour</key><integer>10</integer><key>Minute</key><integer>0</integer></dict>
+    <dict><key>Hour</key><integer>11</integer><key>Minute</key><integer>0</integer></dict>
+    <dict><key>Hour</key><integer>12</integer><key>Minute</key><integer>0</integer></dict>
+    <dict><key>Hour</key><integer>13</integer><key>Minute</key><integer>0</integer></dict>
+    <dict><key>Hour</key><integer>14</integer><key>Minute</key><integer>0</integer></dict>
+    <dict><key>Hour</key><integer>15</integer><key>Minute</key><integer>0</integer></dict>
+    <dict><key>Hour</key><integer>16</integer><key>Minute</key><integer>0</integer></dict>
+    <dict><key>Hour</key><integer>17</integer><key>Minute</key><integer>0</integer></dict>
+  </array>
 
   <key>RunAtLoad</key>
   <false/>

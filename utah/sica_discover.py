@@ -140,6 +140,18 @@ def list_findings(*, log_path: Path | None = None) -> list[dict]:
     return out
 
 
+def pending_findings(*, log_path: Path | None = None, used_path: Path | None = None
+                     ) -> list[tuple[str, str, dict]]:
+    """ALL unused findings carrying a suggested task → [(domain, task, record), …], oldest
+    first. The SELF-CODE console lists these so Michael can action a browser-agent idea."""
+    used = _load_used(used_path)
+    out: list[tuple[str, str, dict]] = []
+    for rec in list_findings(log_path=log_path):
+        if rec.get("suggested_task") and _record_key(rec) not in used:
+            out.append((rec["domain"], rec["suggested_task"], rec))
+    return out
+
+
 def next_pending_task(*, log_path: Path | None = None, used_path: Path | None = None
                       ) -> tuple[str, str, dict] | None:
     """Oldest unused finding with a non-empty suggested task → (domain, task, record)."""
@@ -190,6 +202,7 @@ __all__ = [
     "list_findings",
     "mark_used",
     "next_pending_task",
+    "pending_findings",
     "run_discover",
     "write_finding",
 ]

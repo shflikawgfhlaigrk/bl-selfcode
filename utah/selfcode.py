@@ -46,6 +46,28 @@ CODE_TIMEOUT_S = 300
 #: Count of supervised green proposals (human-reviewed) — gates Tier-A autonomy.
 SUPERVISED_STATE = runtime.RUN_DIR / "selfcode.supervised"
 
+#: Dedicated sink for the nightly kill-switch SMOKE test. The smoke deliberately
+#: drives a refusal every night, so its synthetic ``off_limits`` outcome must NOT
+#: land in the production ``failures`` feed (it once buried ~824 real signals on
+#: the AUDIT panel). A real autonomous attempt to edit safety still records to
+#: ``failures`` + pages — only the synthetic smoke is routed here.
+SMOKE_LOG = runtime.RUN_DIR / "selfcode_smoke.jsonl"
+
+
+def _smoke_record(source: str, kind: str, detail: str = "") -> None:
+    """Record a SMOKE-test outcome to its own durable log — never the failure feed.
+    Best-effort: must never raise into the caller (same contract as failures.record)."""
+    try:
+        log.info("selfcode SMOKE: %s/%s — %s", source, kind, detail[:160])
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        SMOKE_LOG.parent.mkdir(parents=True, exist_ok=True)
+        with SMOKE_LOG.open("a") as fh:
+            fh.write(json.dumps({"source": source, "kind": kind, "detail": detail[:500]}) + "\n")
+    except Exception:  # noqa: BLE001 — a missing run dir must not break the smoke
+        pass
+
 # --- Doc-13 tiered self-coding (policy-as-data) -----------------------------
 #: Off-limits files (Tier D): the self-coder itself, auth, the singleton/hard-exit,
 #: the admission governor, doctrine config, and the no-fabrication brain. A coding
@@ -203,15 +225,21 @@ def _real_commit_proposal(task: str, *, repo: str = ".") -> str | None:
 def propose(task: str, *, run_claude=None, run_tests=None, branch_fn=None,
             discard_fn=None, merge_fn=None, auto_merge=None, tree_clean_fn=None,
             repo: str | None = None, safety_snapshot_fn=None, safety_intact_fn=None,
-            changed_files_fn=None, supervised_fn=None, bump_supervised_fn=None) -> dict:
+            changed_files_fn=None, supervised_fn=None, bump_supervised_fn=None,
+            smoke: bool = False) -> dict:
     """Propose a change for *task* on an isolated branch, gated by the suite AND the
     doc-13 tier policy. The change's tier (the strictest among the files it touches)
     sets the autonomy ceiling: Tier-D (safety) is rolled back via a byte-check; only a
     Tier-A change auto-merges, and only after ``min_supervised`` green proposals. B/C
     (and not-yet-autonomous A) stay branch proposals for review. Returns
-    ``{task, applied, tests_passed, merged, branch, tier, reason, ...}``. Never raises."""
+    ``{task, applied, tests_passed, merged, branch, tier, reason, ...}``. Never raises.
+
+    ``smoke=True`` marks the nightly kill-switch self-test: its synthetic outcomes
+    are routed to ``SMOKE_LOG`` instead of the production ``failures`` feed, so the
+    deliberately-triggered refusal never buries real signal on the AUDIT panel."""
+    rec = _smoke_record if smoke else failures.record
     if not enabled():
-        failures.record("selfcode", "disabled", f"kill switch present; skipped: {task[:80]}")
+        rec("selfcode", "disabled", f"kill switch present; skipped: {task[:80]}")
         return {"task": task, "applied": False, "disabled": True,
                 "tests_passed": False, "branch": None, "reason": "kill switch"}
 
@@ -222,7 +250,7 @@ def propose(task: str, *, run_claude=None, run_tests=None, branch_fn=None,
     if do_merge:
         is_clean = tree_clean_fn if tree_clean_fn is not None else (lambda: _tree_clean(repo or "."))
         if not is_clean():
-            failures.record("selfcode", "tree_dirty",
+            rec("selfcode", "tree_dirty",
                             f"auto-merge refused — dirty tree, would sweep uncommitted work: {task[:60]}")
             return {"task": task, "applied": False, "tests_passed": False, "merged": False,
                     "branch": None,
@@ -247,7 +275,7 @@ def propose(task: str, *, run_claude=None, run_tests=None, branch_fn=None,
     try:
         run_claude(task)
     except Exception as exc:  # noqa: BLE001 — coding run failed (timeout/nonzero/etc.)
-        failures.record("selfcode", "run_failed", f"{task[:80]}: {exc}")
+        rec("selfcode", "run_failed", f"{task[:80]}: {exc}")
         _safe(discard_fn)
         return {"task": task, "applied": False, "tests_passed": False,
                 "branch": branch, "reason": str(exc)}
@@ -257,7 +285,7 @@ def propose(task: str, *, run_claude=None, run_tests=None, branch_fn=None,
     intact = (safety_intact_fn(before) if safety_intact_fn is not None
               else safety_intact(repo or ".", before))
     if not intact:
-        failures.record("selfcode", "off_limits",
+        rec("selfcode", "off_limits",
                         f"{task[:80]}: edited a Tier-D safety file — rolled back")
         _safe(discard_fn)
         log.info("selfcode: %s — touched off-limits safety code, rolled back", task[:60])
@@ -268,14 +296,14 @@ def propose(task: str, *, run_claude=None, run_tests=None, branch_fn=None,
     try:
         passed, output = run_tests()
     except Exception as exc:  # noqa: BLE001
-        failures.record("selfcode", "test_run_failed", f"{task[:80]}: {exc}")
+        rec("selfcode", "test_run_failed", f"{task[:80]}: {exc}")
         _safe(discard_fn)
         return {"task": task, "applied": False, "tests_passed": False,
                 "branch": branch, "reason": str(exc)}
 
     if not passed:
         tail = output.strip()[-400:]
-        failures.record("selfcode", "tests_failed", f"{task[:80]}: {tail}")
+        rec("selfcode", "tests_failed", f"{task[:80]}: {tail}")
         _safe(discard_fn)
         log.info("selfcode: %s — suite RED, rolled back", task[:60])
         return {"task": task, "applied": False, "tests_passed": False,
@@ -286,7 +314,7 @@ def propose(task: str, *, run_claude=None, run_tests=None, branch_fn=None,
         changed = (changed_files_fn or (lambda: _real_changed_files(repo or ".")))()
         tier = classify(changed)
         if tier == "D":   # belt-and-suspenders with the byte-check above
-            failures.record("selfcode", "off_limits",
+            rec("selfcode", "off_limits",
                             f"{task[:80]}: change set includes a Tier-D safety file — rolled back")
             _safe(discard_fn)
             return {"task": task, "applied": False, "tests_passed": False, "merged": False,
@@ -298,11 +326,17 @@ def propose(task: str, *, run_claude=None, run_tests=None, branch_fn=None,
             try:
                 sha, pushed = merge(branch, task)
             except Exception as exc:  # noqa: BLE001 — merge/push failed; the branch survives
-                failures.record("selfcode", "merge_failed", f"{task[:80]}: {exc}")
+                rec("selfcode", "merge_failed", f"{task[:80]}: {exc}")
                 return {"task": task, "applied": True, "tests_passed": True, "merged": False,
                         "branch": branch, "tier": tier, "reason": f"suite green; merge failed: {exc}"}
             log.info("selfcode: %s — Tier-%s GREEN, merged to main %s (pushed=%s)",
                      task[:60], tier, sha, pushed)
+            try:
+                from utah.integrations import discord_feed
+
+                discord_feed.feed_merge(branch, tier=tier)
+            except Exception:  # noqa: BLE001 — Discord must never break merge
+                pass
             return {"task": task, "applied": True, "tests_passed": True, "merged": True,
                     "commit": sha, "pushed": pushed, "branch": branch, "tier": tier,
                     "reason": f"suite green, Tier-{tier} merged to main"
@@ -445,6 +479,7 @@ def kill_switch_smoke() -> dict:
         safety_intact_fn=lambda before: False,            # pretend a safety file changed
         auto_merge=True, tree_clean_fn=lambda: True,
         merge_fn=lambda b, t: seen.update(merged=True) or ("SHOULD-NOT-HAPPEN", True),
+        smoke=True,   # synthetic refusal → SMOKE_LOG, never the production failure feed
     )
     refused = (r.get("applied") is False and r.get("merged") in (False, None)
                and r.get("tier") == "D" and seen["discarded"] and not seen["merged"])

@@ -22,7 +22,7 @@ class _MemStream:
 
     async def receive(self, max_bytes: int = 65536) -> bytes:
         if self._pos >= len(self._data):
-            raise EndOfStream
+            raise anyio.EndOfStream  # the real signal a closed anyio stream raises
         n = min(self._chunk, max_bytes, len(self._data) - self._pos)
         out = self._data[self._pos : self._pos + n]
         self._pos += n
@@ -30,10 +30,6 @@ class _MemStream:
 
     async def send(self, item: bytes) -> None:  # pragma: no cover
         self._data += item
-
-
-class EndOfStream(Exception):
-    pass
 
 
 # -- framing -----------------------------------------------------------------

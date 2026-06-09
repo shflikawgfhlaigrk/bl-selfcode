@@ -197,6 +197,42 @@ def _run_edit_job(job_id: str, text: str) -> None:
         job["finished"] = time.time()
 
 
+def _run_console_job(job_id: str, text: str) -> None:
+    """Console /code: the governed propose-only edit, but STREAM the agent's live actions
+    into ``job['log']`` (assistant text + every bash/edit/read) so the deck console shows
+    Ace working in real time. Propose-only — never merges main."""
+    from utah.product import console as con
+    from utah.product import selfcode_web
+
+    job = _EDIT_JOBS.get(job_id)
+    if job is None:
+        return
+    job["status"] = "working"
+    job.setdefault("log", [])
+
+    def _sink(line: str) -> None:
+        log = job.get("log")
+        if log is not None:
+            log.append(line)
+            if len(log) > 800:
+                del log[:-800]
+
+    try:
+        result = selfcode_web.run_edit(
+            text,
+            run_claude=lambda t: con.run_claude_streamed(
+                t, cwd=str(selfcode_web.REPO_DIR), on_line=_sink),
+        )
+        job["result"] = result
+        job["status"] = "error" if result.get("ran") is False else "done"
+    except Exception as exc:  # noqa: BLE001 — never crash the worker thread
+        failures.record("selfcode", "console_code_failed", f"{text[:60]}: {exc}")
+        job["result"] = {"ran": False, "error": str(exc)[:300], "task": text}
+        job["status"] = "error"
+    finally:
+        job["finished"] = time.time()
+
+
 async def api_selfcode_edit(request):
     """Enqueue a web-typed edit as a REAL governed (propose-only) self-code attempt.
     Returns a job id at once; the page polls ``/api/selfcode/job/<id>`` for the result.
@@ -227,6 +263,70 @@ async def api_selfcode_job(request):
         return JSONResponse({"error": "unknown job"}, status_code=404)
     elapsed = round(time.time() - job.get("started", time.time()), 1)
     return JSONResponse({**job, "elapsed_s": elapsed})
+
+
+async def api_console(request):
+    """The SELF-CODE CONSOLE — one slash-command line in, terminal output out.
+
+    FAST commands (``/help`` ``/status`` ``/findings`` ``/cycles`` ``/goals`` ``/diff``)
+    answer inline; the SLOW coding commands (``/code`` ``/do``) enqueue a REAL governed
+    PROPOSE-ONLY self-code job (poll ``/api/selfcode/job/<id>``) on the isolated clone — a
+    console edit never merges to main. A bare line or ``/ask`` relays to the grounded brain.
+    Nothing fabricated; honest on any failure.
+    """
+    try:
+        body = await request.json()
+    except Exception:  # noqa: BLE001
+        body = {}
+    line = str(body.get("line", body.get("text", ""))).strip()
+    from utah.product import console as con
+
+    cmd, arg = con.parse(line)
+    if not cmd:
+        return JSONResponse({"kind": "instant", "output": ""})
+
+    # /ask (and a bare line) → the grounded brain, inline (no-fab; persist=False so a
+    # console probe never pollutes recall).
+    if cmd == "ask":
+        if not arg:
+            return JSONResponse({"kind": "instant",
+                                 "output": "usage: /ask <question>  (or just type a line)"})
+        try:
+            reply = await ctl.call("tell", {"text": arg, "persist": False}, timeout=180.0)
+            txt = reply.get("text", "") if isinstance(reply, dict) else str(reply)
+            src = reply.get("source", "") if isinstance(reply, dict) else ""
+            return JSONResponse({"kind": "instant", "output": txt, "source": src})
+        except Exception as exc:  # noqa: BLE001 — honest, never fabricate
+            return JSONResponse({"kind": "instant", "output": f"[brain unreachable: {exc}]"})
+
+    # /code, /do → a real propose-only governed coding cycle (minutes) on the job runner.
+    if con.is_slow(cmd):
+        task, rec = con.resolve_slow_task(cmd, arg)
+        if not task:
+            hint = "usage: /code <task>" if cmd == "code" else "usage: /do <n>   (see /findings)"
+            return JSONResponse({"kind": "instant", "output": hint})
+        if rec is not None:  # consume the finding so it doesn't re-list
+            try:
+                from utah import sica_discover
+
+                sica_discover.mark_used(rec)
+            except Exception:  # noqa: BLE001
+                pass
+        if len(_EDIT_JOBS) >= _EDIT_JOBS_MAX:
+            for k in sorted(_EDIT_JOBS, key=lambda j: _EDIT_JOBS[j].get("finished", 0))[:10]:
+                _EDIT_JOBS.pop(k, None)
+        job_id = uuid.uuid4().hex[:12]
+        _EDIT_JOBS[job_id] = {"id": job_id, "task": task, "status": "queued",
+                              "started": time.time(), "result": None, "log": []}
+        threading.Thread(target=_run_console_job, args=(job_id, task), daemon=True).start()
+        return JSONResponse({"kind": "job", "job": job_id, "status": "queued", "task": task})
+
+    # FAST commands → inline terminal text.
+    try:
+        out = con.run_fast(cmd, arg)
+    except Exception as exc:  # noqa: BLE001
+        out = {"output": f"[console error: {exc}]"}
+    return JSONResponse({"kind": "instant", **out})
 
 
 async def api_tell_stream(request):
@@ -367,6 +467,7 @@ def build_app() -> Starlette:
         Route("/api/speak", api_speak, methods=["POST"]),
         Route("/api/selfcode/edit", api_selfcode_edit, methods=["POST"]),
         Route("/api/selfcode/job/{job}", api_selfcode_job),
+        Route("/api/console", api_console, methods=["POST"]),
         Route("/events", events),
         Mount("/assets", StaticFiles(directory=str(DASH / "assets"))),
         Route("/{route:path}", deck_data),  # catch-all data routes (last)

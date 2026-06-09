@@ -31,6 +31,38 @@ def test_think_prompt_contains_no_fab_contract_and_context(fake_brain):
     assert "where does Michael live?" in prompt
 
 
+def test_context_truncation_cuts_on_a_fact_boundary(monkeypatch):
+    """Over-budget CONTEXT is trimmed at a newline, never mid-fact (so a number/name
+    is never severed). Fixes the hard char-cut the audit flagged."""
+    monkeypatch.setattr(config, "BRAIN_CONTEXT_MAX_CHARS", 40)
+    ctx = "- fact one is short\n- fact two is much longer and would be cut mid-word\n- three"
+    out = brain._truncate_context(ctx)
+    assert len(out) <= 40
+    assert out == "- fact one is short"          # whole facts only, cut at the newline
+    assert not out.endswith(("muc", "longe"))     # never a torn word
+
+
+def test_build_prompt_is_shared_shape_for_think_and_stream():
+    """_build_prompt is the single prompt assembler — PERSONA + NO_FAB + CONTEXT + Q,
+    with optional voice-brief and thinking blocks."""
+    base = brain._build_prompt("Q?", "- a fact")
+    assert base.startswith(brain.PERSONA) and brain.NO_FAB in base and "QUESTION: Q?" in base
+    assert brain.THINK_INSTRUCTION not in base and brain.VOICE_BRIEF not in base
+    full = brain._build_prompt("Q?", "- a fact", brief=True, want_thinking=True)
+    assert brain.THINK_INSTRUCTION in full and brain.VOICE_BRIEF in full
+
+
+def test_decode_stream_warns_on_schema_drift(caplog):
+    """JSON lines with no stream_event frame → a loud schema-drift warning, not a
+    silent empty answer."""
+    import logging
+    drifted = [json.dumps({"type": "message_delta", "text": "hi"})]   # new/unknown shape
+    with caplog.at_level(logging.WARNING, logger="utah.brain"):
+        out = list(brain.decode_stream(drifted))
+    assert out == []                                  # nothing routed (shape unknown)
+    assert any("schema may have changed" in r.getMessage() for r in caplog.records)
+
+
 def test_no_fab_forbids_basic_knowledge_and_guessing():
     """The contract must answer ONLY from context — no outside/'basic' knowledge,
     no guessing. A loophole here let the brain fabricate trivia (swallow airspeed,

@@ -77,3 +77,64 @@ class ConsolidationReport(msgspec.Struct, frozen=True):
     facts_skipped: int
     brain_failures: int
     archived: int
+
+
+# --------------------------------------------------------------------------
+# Product/revenue row contracts (B4). The brain/memory path was fully typed;
+# product rows moved as loose dict/JSON, so a wrong key was a silent runtime
+# bug instead of a type error. These Structs are the ONE canonical shape each
+# row has — leads.py produces it, outreach.py consumes it, ledger.py persists
+# it — with tolerant ``from_mapping`` (ignore extras) + ``as_dict`` adapters so
+# the still-dict storage layer (jsonb / psycopg rows) interoperates cleanly.
+# --------------------------------------------------------------------------
+
+
+class _RowStruct(msgspec.Struct, frozen=True):
+    """Shared adapters for the product-row contracts."""
+
+    @classmethod
+    def from_mapping(cls, m) -> "_RowStruct":
+        """Build from a dict, keeping only known fields (extras ignored, never crash)."""
+        fields = set(cls.__struct_fields__)
+        return cls(**{k: v for k, v in dict(m or {}).items() if k in fields})
+
+    def as_dict(self) -> dict:
+        """Plain dict (for jsonb storage / the dict-shaped consumers that remain)."""
+        return msgspec.structs.asdict(self)
+
+
+class Lead(_RowStruct, frozen=True):
+    """A scraped no-website SMB lead — the leads.py → outreach.py contract.
+
+    ``contact`` is the jsonb bag ``{phone?, email?, address?}`` (kept a dict to match
+    the column); everything else is a typed top-level field."""
+
+    name: str
+    kind: str = ""
+    contact: dict = {}
+    source: str = "osm"
+    region: str = ""
+    id: int | None = None
+
+
+class Fire(_RowStruct, frozen=True):
+    """One trading-engine fire row — never fabricated (``synthetic`` flags board demos),
+    ``pnl``/``outcome`` stay ``None`` until a real broker closes it."""
+
+    engine: str
+    direction: str
+    entry: float | None = None
+    synthetic: bool = False
+    symbol: str = ""
+    pnl: float | None = None
+    outcome: str | None = None
+    id: int | None = None
+
+
+class OutreachRow(_RowStruct, frozen=True):
+    """One suppression-ledger row — UNIQUE(recipient, campaign) = never contact twice."""
+
+    recipient: str
+    campaign: str
+    channel: str = "email"
+    id: int | None = None

@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  com.utah.enrich — email ENRICHMENT cron (audit §1.1 revenue ceiling).
+
+  Turns phone-only / website-only SMB leads into EMAILABLE ones so the outreach cron never
+  starves at ~22. Runs utah.product.enrich.run_scheduled(limit=30): for each lead with no
+  email, discover its site/listing, scrape a contact email, junk-filter + entity-match
+  (a business-name token must appear in the address, so it can't grab a stranger's email)
+  + verify the domain resolves, and write it back via ledger.update_lead. Read-only scraping,
+  never sends, never fabricates an address.
+
+  Runs at :30 each hour 07:00–16:00 (10 runs), 15 min AHEAD of the :00 outreach send so
+  freshly-enriched leads are sendable the same hour. limit=30/run × 10 = 300 lookups/day,
+  deliberately under the free-DuckDuckGo soft-block threshold (a SERP API key lifts this).
+
+  CEILING (honest): the free search path yields ~5-8 clean emails/run and the backlog is
+  finite (~600-950 findable across 3,900 leads); for sustained 500/day, capture business
+  WEBSITES at scout time (precise own-site scrape) + a SERP key + wider geography.
+
+  Install:
+    cp ops/launchd/com.utah.enrich.plist ~/Library/LaunchAgents/
+    launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.utah.enrich.plist
+  Force-run now:  launchctl kickstart gui/$(id -u)/com.utah.enrich
+  Volume:         UTAH_ENRICH_LIMIT=N
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.utah.enrich</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/michaelbarber/.utah/venv/bin/python</string>
+    <string>-c</string>
+    <string>import os, logging; logging.basicConfig(level=logging.INFO); from utah.product.enrich import run_scheduled; print(run_scheduled(limit=int(os.environ.get('UTAH_ENRICH_LIMIT','30'))))</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>/Users/michaelbarber/Desktop/ProjectUtah</string>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PYTHONPATH</key>
+    <string>/Users/michaelbarber/Desktop/ProjectUtah</string>
+    <key>PYTHONUNBUFFERED</key>
+    <string>1</string>
+    <key>UTAH_ENRICH_LIMIT</key>
+    <string>30</string>
+    <key>PATH</key>
+    <string>/Users/michaelbarber/.utah/venv/bin:/opt/homebrew/bin:/usr/local/bin:/Users/michaelbarber/.local/bin:/usr/bin:/bin</string>
+  </dict>
+
+  <key>StartCalendarInterval</key>
+  <array>
+    <dict><key>Hour</key><integer>7</integer><key>Minute</key><integer>30</integer></dict>
+    <dict><key>Hour</key><integer>8</integer><key>Minute</key><integer>30</integer></dict>
+    <dict><key>Hour</key><integer>9</integer><key>Minute</key><integer>30</integer></dict>
+    <dict><key>Hour</key><integer>10</integer><key>Minute</key><integer>30</integer></dict>
+    <dict><key>Hour</key><integer>11</integer><key>Minute</key><integer>30</integer></dict>
+    <dict><key>Hour</key><integer>12</integer><key>Minute</key><integer>30</integer></dict>
+    <dict><key>Hour</key><integer>13</integer><key>Minute</key><integer>30</integer></dict>
+    <dict><key>Hour</key><integer>14</integer><key>Minute</key><integer>30</integer></dict>
+    <dict><key>Hour</key><integer>15</integer><key>Minute</key><integer>30</integer></dict>
+    <dict><key>Hour</key><integer>16</integer><key>Minute</key><integer>30</integer></dict>
+  </array>
+
+  <key>RunAtLoad</key>
+  <false/>
+
+  <key>StandardOutPath</key>
+  <string>/Users/michaelbarber/.utah/logs/enrich.log</string>
+
+  <key>StandardErrorPath</key>
+  <string>/Users/michaelbarber/.utah/logs/enrich.err</string>
+</dict>
+</plist>

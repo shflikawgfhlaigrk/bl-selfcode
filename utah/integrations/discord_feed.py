@@ -117,3 +117,32 @@ def announce(text: str, *, http_post=None) -> bool:
 
 def alert(text: str, *, http_post=None) -> bool:
     return publish("critical", title="🚨 Critical", content=text, http_post=http_post)
+
+
+def mirror(channel: str, event: dict, *, http_post=None) -> bool:
+    """Route a deck bus event to the matching Discord feed. Returns False when gated."""
+    if channel == "leads":
+        return feed_lead(event, http_post=http_post)
+    if channel == "probate":
+        return feed_probate(
+            {
+                "case": event.get("case_name"),
+                "county": event.get("county"),
+                **event,
+            },
+            http_post=http_post,
+        )
+    if channel == "outreach":
+        recipient = event.get("recipient", "outreach")
+        return publish(
+            "outreach",
+            title=f"📨 {recipient}",
+            fields={k: event[k] for k in ("recipient", "campaign") if event.get(k)},
+            http_post=http_post,
+        )
+    if channel == "trading":
+        return feed_fire(
+            {"engine": event.get("engine"), "side": event.get("direction"), **event},
+            http_post=http_post,
+        )
+    return False
