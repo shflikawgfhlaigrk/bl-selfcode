@@ -214,13 +214,15 @@ def test_run_cycle_verifies_frontend_in_browser_after_merge(monkeypatch, tmp_pat
     assert r["frontend_verify"] == obs            # browser re-looked at the live deck after the change
 
 
-def test_cycle_uses_pending_finding_before_rotation(monkeypatch, tmp_path):
+def test_filed_revenue_task_preempts_rotation(monkeypatch, tmp_path):
+    """A FILED repair (revenue_heal etc. — domain not frontend/research) jumps the queue
+    ahead of the domain rotation, so a producer-outage fix gets coded immediately."""
     from utah import sica_discover
 
     monkeypatch.setattr(selfcode, "KILL_SWITCH", tmp_path / "nope")
     log = tmp_path / "discoveries.jsonl"
     used = tmp_path / "used.json"
-    rec = {"ts": 1.0, "domain": "research", "suggested_task": "Harden browser timeout",
+    rec = {"ts": 1.0, "domain": "revenue", "suggested_task": "fix utah/product/leads.py outage",
            "brief_path": str(tmp_path / "f.md")}
     log.write_text(json.dumps(rec) + "\n")
     monkeypatch.setattr(sica_discover, "DISCOVERIES_LOG", log)
@@ -229,13 +231,34 @@ def test_cycle_uses_pending_finding_before_rotation(monkeypatch, tmp_path):
 
     r = sica_autonomy.run_cycle(
         repo=tmp_path, sync_fn=lambda repo: True, discover_fn=_SKIP_DISCOVER,
+        load_fn=lambda: 0.0, foundation_gate=lambda c: None,
         propose_fn=lambda t: seen.update(task=t) or {"utility": 0.5, "tests_passed": False,
                                                      "merged": False, "cost_usd": 0},
     )
-    assert r["task"] == "Harden browser timeout"
-    assert r["domain"] == "research"
-    assert seen["task"] == "Harden browser timeout"
-    assert sica_discover.next_pending_task(log_path=log, used_path=used) is None
+    assert r["task"] == "fix utah/product/leads.py outage"
+    assert r["domain"] == "revenue"
+    assert seen["task"] == "fix utah/product/leads.py outage"
+
+
+def test_browser_finding_does_not_preempt_revenue_rotation(monkeypatch, tmp_path):
+    """A routine frontend/research finding must NOT pre-empt the revenue rotation (the audit
+    bug: the loop spent every cycle on live.html cosmetics). It is used only on its own turn."""
+    from utah import sica_discover, sica_goals
+
+    monkeypatch.setattr(selfcode, "KILL_SWITCH", tmp_path / "nope")
+    monkeypatch.setattr(sica_discover, "next_pending_task",
+                        lambda **k: ("frontend", "polish live.html", {"brief_path": "x"}))
+    monkeypatch.setattr(sica_goals, "next_cycle_index", lambda: 0)   # DOMAINS[0] == 'leads'
+    captured = {}
+    monkeypatch.setattr(sica_goals, "next_task",
+                        lambda domain, **kw: captured.update(domain=domain) or "improve leads.py")
+
+    r = sica_autonomy.run_cycle(
+        repo=tmp_path, sync_fn=lambda repo: True, discover_fn=_SKIP_DISCOVER,
+        load_fn=lambda: 0.0, foundation_gate=lambda c: None,
+        propose_fn=lambda t: {"utility": 0.5, "tests_passed": False, "merged": False, "cost_usd": 0})
+    assert r["domain"] == "leads" and captured["domain"] == "leads"   # revenue, NOT the frontend polish
+    assert sica_goals.DOMAINS[0] in ("leads", "probate", "outreach")  # wheel is revenue-weighted
 
 
 def test_run_cycle_no_frontend_verify_on_nonfrontend_merge(monkeypatch, tmp_path):

@@ -5,10 +5,23 @@ from __future__ import annotations
 from utah import sica, sica_goals
 
 
-def test_domain_rotation_covers_all():
-    got = [sica_goals.pick_domain(n) for n in range(10)]
-    assert got == ["baseline", "leads", "autonomy", "frontend", "research",
-                   "baseline", "leads", "autonomy", "frontend", "research"]
+def test_domain_rotation_is_revenue_weighted():
+    """The wheel favors revenue (leads/probate/outreach) over cosmetics — the autonomous loop
+    was compounding only on live.html polish (audit 2026-06-08). All domains still appear."""
+    import collections
+    counts = collections.Counter(sica_goals.pick_domain(n) for n in range(len(sica_goals.DOMAINS)))
+    revenue = counts["leads"] + counts["probate"] + counts["outreach"]
+    assert revenue >= 6                                   # majority of the wheel is revenue
+    assert counts["frontend"] >= 1 and counts["research"] >= 1   # still covered
+    assert {"baseline", "autonomy"} <= set(counts)        # health + self-improvement still rotate
+
+
+def test_probate_and_outreach_signals_are_grounded():
+    fake = lambda sql: [[42]]
+    ps = sica_goals.gather_signals("probate", db_query=fake)
+    assert "probate" in ps and "property.py" in ps and "fabricate" in ps.lower()
+    os_ = sica_goals.gather_signals("outreach", db_query=fake)
+    assert "outreach.py" in os_ and "email" in os_.lower()
 
 
 def test_leads_signal_uses_live_ledger():

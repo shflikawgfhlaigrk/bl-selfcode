@@ -202,16 +202,24 @@ def run_cycle(*, repo=None, brain_fn=None, propose_fn=None, sync_fn=None, task_f
 
     discover_out = (discover_fn or (lambda: sica_discover.run_discover(brain_fn=brain)))()
     pending_rec: dict | None = None
+    from utah import sica_goals
     if task_fn is not None:
         domain, task = "injected", task_fn()
     else:
         pending = sica_discover.next_pending_task()
-        if pending:
+        # PRIORITY: a FILED repair (revenue_heal etc. — anything not the routine browser
+        # polish) jumps the queue. But a frontend/research finding must NOT pre-empt the
+        # revenue-weighted rotation, or the loop spends every cycle on live.html cosmetics
+        # (audit 2026-06-08: 4/4 auto-commits were frontend, 0 revenue). It is consumed only
+        # when the rotation itself lands on that domain.
+        if pending and pending[0] not in ("frontend", "research"):
             domain, task, pending_rec = pending
         else:
-            from utah import sica_goals
             domain = sica_goals.pick_domain(sica_goals.next_cycle_index())
-            task = sica_goals.next_task(domain, brain_fn=brain)
+            if pending is not None and pending[0] == domain:
+                domain, task, pending_rec = pending     # browser finding on its own turn
+            else:
+                task = sica_goals.next_task(domain, brain_fn=brain)
     task = (task or "").strip() or DEFAULT_TASK   # empty/whitespace → safe default
     default_propose = (lambda t: selfcode.propose_governed(
         t, repo=str(repo), auto_merge=True,

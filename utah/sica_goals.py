@@ -41,7 +41,13 @@ from utah.daemon import runtime
 
 log = logging.getLogger("utah.sica_goals")
 
-DOMAINS = ("baseline", "leads", "autonomy", "frontend", "research")
+#: Revenue-WEIGHTED rotation. The autonomous loop kept compounding on live.html cosmetics
+#: (audit 2026-06-08: 4/4 auto-commits were frontend polish, 0 touched revenue) because every
+#: cycle a frontend/research finding pre-empted the rotation. Revenue domains (leads/probate/
+#: outreach) now dominate the wheel; frontend/research get one slot each. Paired with the
+#: run_cycle priority change so a routine browser finding no longer jumps the queue.
+DOMAINS = ("leads", "probate", "outreach", "baseline", "leads", "probate",
+           "outreach", "autonomy", "frontend", "research")
 CYCLE_N = runtime.RUN_DIR / "selfcode-cycle.n"
 VERIFY_JSON = runtime.RUN_DIR / "verify.json"
 #: Ace's own live deck — what the browser renders during frontend discovery.
@@ -125,6 +131,41 @@ def _autonomy_signal(archive=None) -> str:
                 f"safety core (selfcode.py/config.py/brain.py).")
     except Exception as exc:  # noqa: BLE001
         return f"(autonomy signal unavailable: {type(exc).__name__})"
+
+
+def _probate_signal(db_query=None) -> str:
+    q = db_query or _db_query
+    try:
+        total = q("SELECT count(*) FROM probate")[0][0]
+        resolved = q("SELECT count(*) FROM probate WHERE heir_contact ? 'address'")[0][0]
+        with_arv = q("SELECT count(*) FROM probate WHERE arv IS NOT NULL")[0][0]
+        return (f"probate total={total}, resolved-to-property={resolved}, with-ARV={with_arv}. "
+                f"REAL gaps to close (money on the table): 4 counties (bulloch/effingham/bryan/"
+                f"forsyth) expose NO value field so resolved rows there carry no ARV; heir phone/"
+                f"email is not captured at all. Capability: utah/product/property.py (county "
+                f"ArcGIS owner→parcel→address→value_field, COUNTY_ARCGIS map). Improve: add a "
+                f"value_field for a county that exposes one (raises ARV coverage), or a better "
+                f"owner-name match (raises resolve rate). NEVER fabricate ARV/contact — gate honestly.")
+    except Exception as exc:  # noqa: BLE001
+        return f"(probate signal unavailable: {type(exc).__name__}); capability: utah/product/property.py"
+
+
+def _outreach_signal(db_query=None) -> str:
+    q = db_query or _db_query
+    try:
+        leads = q("SELECT count(*) FROM leads")[0][0]
+        with_email = q("SELECT count(*) FROM leads WHERE contact->>'email' IS NOT NULL AND contact->>'email' <> ''")[0][0]
+        with_phone = q("SELECT count(*) FROM leads WHERE contact->>'phone' IS NOT NULL AND contact->>'phone' <> ''")[0][0]
+        sent = q("SELECT count(*) FROM outreach_ledger WHERE channel='email'")[0][0]
+        return (f"outreach: leads={leads}, with_email={with_email}, with_phone={with_phone}, "
+                f"emails_sent={sent}. The bottleneck is REACH: only {with_email} leads have an "
+                f"email so cold-email volume is tiny; {with_phone} have a phone but SMS has no "
+                f"provider wired. Capability: utah/product/outreach.py + utah/product/leads.py. "
+                f"Improve: enrich more leads with a REAL email (e.g. parse it from the business's "
+                f"own listing during scout), or harden the send/suppression path. CAN-SPAM "
+                f"compliant only; never spam; never fabricate a contact.")
+    except Exception as exc:  # noqa: BLE001
+        return f"(outreach signal unavailable: {type(exc).__name__}); capability: utah/product/outreach.py"
 
 
 #: Telltale markers the deck renders for dormant / broken / empty / loading states —
@@ -297,6 +338,10 @@ def _research_signal(render_fn=None, search_fn=None, failures_fn=None) -> str:
 def gather_signals(domain: str, **inject) -> str:
     if domain == "leads":
         return _leads_signal(db_query=inject.get("db_query"))
+    if domain == "probate":
+        return _probate_signal(db_query=inject.get("db_query"))
+    if domain == "outreach":
+        return _outreach_signal(db_query=inject.get("db_query"))
     if domain == "autonomy":
         return _autonomy_signal(archive=inject.get("archive"))
     if domain == "frontend":
