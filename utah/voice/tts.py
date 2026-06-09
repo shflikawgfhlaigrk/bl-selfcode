@@ -116,10 +116,23 @@ def _drain_sentences(buf: str) -> tuple[list[str], str]:
     return sentences, buf[start:]
 
 
+#: Hard cap on a single clip's playback. A hung afplay must NEVER hold the exclusive
+#: play-lock indefinitely: while it does, is_anything_playing() is True and the always-on
+#: voice loop drops EVERY mic frame → the loop goes DEAF until a restart. That was the real
+#: root cause of the chronic mic_silent (a stuck afplay held the lock for HOURS). No real
+#: per-sentence TTS clip runs anywhere near this long.
+AFPLAY_TIMEOUT_S = float(os.environ.get("UTAH_AFPLAY_TIMEOUT", "30"))
+
+
 def _afplay(path: str) -> None:
-    """Play a WAV via the macOS reference player — honours the system default output
-    device and handles the sample rate itself (no dtype/rate fragility)."""
-    subprocess.run(["afplay", path], check=True)
+    """Play a WAV via the macOS reference player — honours the system default output device
+    and handles the sample rate itself. BOUNDED by a timeout: on a hang, afplay is killed so
+    the play-lock releases and the always-on mic recovers instead of going deaf."""
+    try:
+        subprocess.run(["afplay", path], check=True, timeout=AFPLAY_TIMEOUT_S)
+    except subprocess.TimeoutExpired:
+        log.warning("tts: afplay hung >%ss on %s — killed to free the play-lock (mic recovers)",
+                    AFPLAY_TIMEOUT_S, path)
 
 
 class TTS:

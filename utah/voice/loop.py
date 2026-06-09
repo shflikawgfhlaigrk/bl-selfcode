@@ -102,7 +102,11 @@ def run() -> None:
         while True:
             time.sleep(MONITOR_S)
             state.write(**vstate)
-            if processing.is_set():
+            # The callback drops mic frames while WE process OR while ANY process is speaking
+            # (echo guard). The monitor must skip those windows too, or it counts a correctly-
+            # muted mic as "deaf" → false mic_silent. (The real deaf cause — a hung afplay
+            # holding the play-lock — is now bounded by AFPLAY_TIMEOUT_S in tts._afplay.)
+            if processing.is_set() or tts.is_anything_playing():
                 level["last_loud"] = time.monotonic()
                 continue
             mx = level["max"]; level["max"] = 0.0

@@ -11,7 +11,28 @@ from __future__ import annotations
 import os
 import wave
 
+import subprocess
+
+from utah.voice import tts as tts_mod
 from utah.voice.tts import PiperTTS, _drain_sentences
+
+
+def test_afplay_is_time_bounded_so_a_hung_player_cannot_deafen_the_mic(monkeypatch):
+    """ROOT CAUSE of chronic mic_silent: a hung afplay held the exclusive play-lock, and the
+    always-on voice loop drops every mic frame while is_anything_playing() is True → deaf until
+    restart. _afplay must pass a positive timeout to subprocess.run AND swallow TimeoutExpired
+    (afplay is killed → the lock releases via the play loop → the mic recovers)."""
+    seen = {}
+
+    def fake_run(cmd, **kw):
+        seen["cmd"] = cmd
+        seen["timeout"] = kw.get("timeout")
+        raise subprocess.TimeoutExpired(cmd, kw.get("timeout"))
+
+    monkeypatch.setattr(tts_mod.subprocess, "run", fake_run)
+    tts_mod._afplay("/tmp/whatever.wav")                  # MUST NOT raise (else the lock leaks)
+    assert seen["cmd"][0] == "afplay"
+    assert isinstance(seen["timeout"], (int, float)) and seen["timeout"] > 0
 
 
 def _assert_clean_wav(path: str) -> None:

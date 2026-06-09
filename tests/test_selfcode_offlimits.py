@@ -207,6 +207,12 @@ def test_off_limits_rejected_task_is_not_requeued(monkeypatch, tmp_path, rel):
     log.write_text(json.dumps(rec) + "\n")
     monkeypatch.setattr(sica_discover, "DISCOVERIES_LOG", log)
     monkeypatch.setattr(sica_discover, "USED_PATH", used)
+    # The off-limits task is a 'research' finding. With the revenue-weighted rotation a routine
+    # browser (frontend/research) finding is consumed only on its OWN rotation turn — so pin the
+    # rotation to 'research' here, exercising the off-limits guard deterministically (the cycle
+    # counter is otherwise persistent/stateful, which made this order-dependent).
+    from utah import sica_goals
+    monkeypatch.setattr(sica_goals, "next_cycle_index", lambda: sica_goals.DOMAINS.index("research"))
     # Precondition: the queue WOULD serve this task.
     assert sica_discover.next_pending_task(log_path=log, used_path=used) is not None
 
