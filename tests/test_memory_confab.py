@@ -55,6 +55,25 @@ def test_refusal_is_not_remembered(monkeypatch):
     assert spy.calls == []
 
 
+@pytest.mark.parametrize(
+    "exc", [core.MemoryUnavailable, core.EmbedError, core.AdmissionDenied]
+)
+def test_store_failure_is_swallowed_reply_already_sent(monkeypatch, exc):
+    """The error-handling branch of the remember write path: ``memory.store`` may
+    fail (backend down, embedder error, admission gate rejection) AFTER the reply
+    has already gone out. Storage is best-effort, so the failure must be caught and
+    logged — never re-raised — or a recall-write hiccup would crash a turn whose
+    answer the user already received."""
+    def boom(*_a, **_k):
+        raise exc("backend exploded")
+
+    monkeypatch.setattr(core.memory, "store", boom)
+    monkeypatch.setattr(core.local, "is_refusal", lambda _t: False)
+
+    # Must return cleanly (None) — the exception is swallowed, not propagated.
+    assert core._remember_turn("who invented penicillin", "Alexander Fleming.") is None
+
+
 def test_is_substantive_predicate():
     assert core._is_substantive_turn("define entropy")
     assert core._is_substantive_turn("who is michael barber")
