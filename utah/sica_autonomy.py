@@ -35,6 +35,20 @@ REPO_DIR = Path(os.environ.get("UTAH_SELFCODE_REPO", str(Path.home() / ".utah" /
 #: The real Utah repo autonomous improvements propagate INTO (the ProjectUtah root).
 LIVE_REPO = Path(os.environ.get("UTAH_LIVE_REPO", str(Path(__file__).resolve().parents[1])))
 CYCLE_LOG = runtime.RUN_DIR / "selfcode-cycle.log"
+#: Cap every git call so a hung NETWORK op (fetch/push) can't freeze the autonomous loop
+#: forever — the same failure class as the unbounded afplay (a blocking call with no timeout
+#: in a critical loop). On timeout the wrapper returns a FAILED CompletedProcess so callers
+#: degrade (skip this cycle) instead of crashing. 120s is generous for this small repo.
+GIT_TIMEOUT_S = float(os.environ.get("UTAH_GIT_TIMEOUT", "120"))
+
+
+def _git_timed(args: list[str], **kw):
+    """subprocess.run for git, bounded: returns a failed CompletedProcess on timeout."""
+    try:
+        return subprocess.run(args, timeout=GIT_TIMEOUT_S, **kw)
+    except subprocess.TimeoutExpired:
+        log.warning("git timed out after %ss: %s", GIT_TIMEOUT_S, " ".join(args[:4]))
+        return subprocess.CompletedProcess(args, 124, "", f"git timed out after {GIT_TIMEOUT_S}s")
 
 #: git subprocesses MUST start in a readable, non-TCC dir. Under launchd the process
 #: cwd was the TCC-protected Desktop, so git's startup getcwd() returned EPERM and EVERY
@@ -73,8 +87,8 @@ def propagate(live=None, clone=None) -> dict:
     clone = Path(clone) if clone else REPO_DIR
 
     def g(repo, *a):
-        return subprocess.run(["git", "-C", str(repo), *a], capture_output=True,
-                              text=True, cwd=_SAFE_CWD)
+        return _git_timed(["git", "-C", str(repo), *a], capture_output=True,
+                          text=True, cwd=_SAFE_CWD)
 
     if not (live / ".git").exists() or not (clone / ".git").exists():
         return {"propagated": False, "reason": "live or clone repo missing"}
@@ -133,8 +147,8 @@ def sync_repo(repo: Path) -> bool:
         return False
 
     def git(*a):
-        return subprocess.run(["git", "-C", str(repo), *a], capture_output=True,
-                              text=True, cwd=_SAFE_CWD)
+        return _git_timed(["git", "-C", str(repo), *a], capture_output=True,
+                          text=True, cwd=_SAFE_CWD)
 
     git("fetch", "origin", "main")
     git("checkout", "-f", "main")          # force back to main, drop in-progress attempt
