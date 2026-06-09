@@ -18,6 +18,12 @@ from utah import UtahError, config
 
 Publisher = Callable[[str, dict], object]  # e.g. bus.publish or the daemon RPC
 
+#: SMB no-website pipeline — OSM + Google Maps trade scout only. Probate heirs live in
+#: the ``probate`` table and use :data:`PROBATE_OUTREACH_CAMPAIGN`; they never enter here.
+SMB_LEAD_SOURCES: frozenset[str] = frozenset({"osm", "google_maps"})
+SMB_OUTREACH_CAMPAIGN = "smb_no_website"
+PROBATE_OUTREACH_CAMPAIGN = "probate_motivated"   # separate track — not ``com.utah.outreach``
+
 
 class LedgerError(UtahError):
     """The ledger store could not be reached or a statement failed."""
@@ -115,6 +121,40 @@ class Ledger:
             self._emit("leads", {"name": name, "kind": kind, "region": region, "id": row[0]})
         return bool(row)
 
+    def update_lead(self, name, region, *, contact=None) -> bool:
+        """Merge *contact* fields onto an existing lead (enrichment). Returns True if updated."""
+        if not contact:
+            return False
+        with self._conn() as c:
+            row = c.execute(
+                "UPDATE leads SET contact = contact || %s::jsonb "
+                "WHERE name=%s AND region=%s RETURNING id",
+                (json.dumps(contact), name, region),
+            ).fetchone()
+        if row:
+            self._emit("leads", {"name": name, "region": region, "id": row[0], "enriched": True})
+        return bool(row)
+
+    def has_phone_lead(self, phone: str, source: str = "google_maps") -> bool:
+        """True if this phone is already on a lead row for *source* (cross-city dedup)."""
+        if not phone:
+            return False
+        with self._conn() as c:
+            return c.execute(
+                "SELECT 1 FROM leads WHERE source=%s AND contact->>'phone'=%s LIMIT 1",
+                (source, phone),
+            ).fetchone() is not None
+
+    def count_maps_phone_leads(self) -> int:
+        """Distinct phone numbers on google_maps leads — bulk-ingest progress metric."""
+        with self._conn() as c:
+            row = c.execute(
+                "SELECT count(DISTINCT contact->>'phone') FROM leads "
+                "WHERE source='google_maps' AND contact->>'phone' IS NOT NULL "
+                "AND contact->>'phone' <> ''",
+            ).fetchone()
+        return int(row[0] if row else 0)
+
     def record_probate(self, case_name, county, filed=None, heir_contact=None, arv=None) -> bool:
         with self._conn() as c:
             row = c.execute(
@@ -175,19 +215,67 @@ class Ledger:
                 (recipient, campaign)).fetchone() is not None
 
     def uncontacted_email_leads(self, campaign, limit=8) -> list[dict]:
-        """Leads that have a REAL email and have NOT been contacted for *campaign* — the
-        suppression-aware queue cold outreach pulls from (newest first). This is what was
-        missing: the send path was proven but nothing fed it the live leads."""
+        """SMB ``leads`` rows with email, not yet contacted — **never** probate heirs."""
+        if campaign != SMB_OUTREACH_CAMPAIGN:
+            return []
+        sources = tuple(SMB_LEAD_SOURCES)
         with self._conn() as c:
             rows = c.execute(
-                "SELECT name, kind, region, contact FROM leads "
-                "WHERE contact->>'email' IS NOT NULL AND contact->>'email' <> '' "
+                "SELECT name, kind, region, contact, source FROM leads "
+                "WHERE source = ANY(%s) "
+                "AND contact->>'email' IS NOT NULL AND contact->>'email' <> '' "
                 "AND NOT EXISTS (SELECT 1 FROM outreach_ledger o "
                 "  WHERE o.recipient = leads.contact->>'email' AND o.campaign = %s) "
                 "ORDER BY ts DESC LIMIT %s",
+                (list(sources), campaign, limit),
+            ).fetchall()
+        return [{"name": r[0], "kind": r[1], "region": r[2], "contact": r[3],
+                 "source": r[4]} for r in rows]
+
+    def uncontacted_phone_leads(self, campaign, limit=8) -> list[dict]:
+        """SMB ``leads`` rows with phone, not yet contacted — **never** probate heirs."""
+        if campaign != SMB_OUTREACH_CAMPAIGN:
+            return []
+        sources = tuple(SMB_LEAD_SOURCES)
+        with self._conn() as c:
+            rows = c.execute(
+                "SELECT name, kind, region, contact, source FROM leads "
+                "WHERE source = ANY(%s) "
+                "AND contact->>'phone' IS NOT NULL AND contact->>'phone' <> '' "
+                "AND NOT EXISTS (SELECT 1 FROM outreach_ledger o "
+                "  WHERE o.recipient = leads.contact->>'phone' AND o.campaign = %s) "
+                "ORDER BY ts DESC LIMIT %s",
+                (list(sources), campaign, limit),
+            ).fetchall()
+        return [{"name": r[0], "kind": r[1], "region": r[2], "contact": r[3],
+                 "source": r[4]} for r in rows]
+
+    def uncontacted_probate_heirs(self, campaign, limit=8) -> list[dict]:
+        """Probate heirs with contact info — **separate** from SMB outreach. Reads the
+        ``probate`` table only; ``com.utah.outreach`` must never call this."""
+        if campaign != PROBATE_OUTREACH_CAMPAIGN:
+            return []
+        with self._conn() as c:
+            rows = c.execute(
+                "SELECT case_name, county, heir_contact FROM probate "
+                "WHERE (heir_contact->>'phone' IS NOT NULL AND heir_contact->>'phone' <> '' "
+                "    OR heir_contact->>'email' IS NOT NULL AND heir_contact->>'email' <> '') "
+                "AND NOT EXISTS (SELECT 1 FROM outreach_ledger o "
+                "  WHERE o.recipient = COALESCE(probate.heir_contact->>'email', "
+                "                                  probate.heir_contact->>'phone') "
+                "  AND o.campaign = %s) "
+                "ORDER BY ts DESC LIMIT %s",
                 (campaign, limit),
             ).fetchall()
-        return [{"name": r[0], "kind": r[1], "region": r[2], "contact": r[3]} for r in rows]
+        out: list[dict] = []
+        for case_name, county, heir in rows:
+            hc = heir or {}
+            contact = {k: hc[k] for k in ("phone", "email", "address") if hc.get(k)}
+            if not contact:
+                continue
+            out.append({"name": case_name, "kind": "probate", "region": county,
+                        "contact": contact, "source": "probate"})
+        return out
 
     def record_fire(self, engine, direction, entry=None, synthetic=False) -> int:
         """Record an engine fire (real only on the board; synthetic flagged)."""

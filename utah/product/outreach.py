@@ -17,14 +17,16 @@ import logging
 import os
 import re
 
-from utah import config, failures, mail
+from utah import config, failures, mail, sms
+from utah.product.ledger import PROBATE_OUTREACH_CAMPAIGN, SMB_LEAD_SOURCES, SMB_OUTREACH_CAMPAIGN
 
 log = logging.getLogger("utah.product.outreach")
 
-#: Conservative daily cold-email cap — protects the sending domain's deliverability and
-#: reputation (sends go through a personal Gmail). Raise via UTAH_OUTREACH_DAILY once warm.
+#: Conservative daily cold-outreach cap (email or SMS).
 DAILY_OUTREACH = int(os.environ.get("UTAH_OUTREACH_DAILY", "8"))
-DEFAULT_CAMPAIGN = "smb_no_website"
+DEFAULT_CAMPAIGN = SMB_OUTREACH_CAMPAIGN
+#: Primary channel: ``sms`` (phone) or ``email``. Default SMS — 363 leads have phone vs 21 email.
+OUTREACH_CHANNEL = os.environ.get("UTAH_OUTREACH_CHANNEL", "sms").strip().lower()
 
 
 def default_footer() -> dict:
@@ -67,6 +69,19 @@ def compose(lead: dict, campaign: str, footer: dict | None = None) -> dict:
     return {"subject": subject, "body": body}
 
 
+def compose_sms(lead: dict, campaign: str, footer: dict | None = None) -> dict:
+    """Short SMS pitch — TCPA opt-out included; no subject."""
+    f = footer or default_footer()
+    name = (lead.get("name") or "there").strip()
+    body = (
+        f"Hi {name} — I noticed your local business doesn't have a website yet. "
+        "I build simple sites for trades/handymen (hours, photos, call/book). "
+        "Want a quick example? — Michael. "
+        f"{f['unsubscribe']}"
+    )
+    return {"subject": "", "body": body}
+
+
 def content_score(text: str) -> dict:
     """Spam-weight a message; ``block`` once the weight crosses the threshold."""
     score = 0
@@ -79,13 +94,18 @@ def content_score(text: str) -> dict:
     return {"score": score, "block": score >= SPAM_BLOCK_THRESHOLD, "reasons": reasons}
 
 
-def pick_channel(contact: dict | None) -> str | None:
-    """Channel from the lead's contact: email > sms(phone) > none (needs contact)."""
+def pick_channel(contact: dict | None, prefer: str | None = None) -> str | None:
+    """Channel from contact; *prefer* (``sms`` or ``email``) wins when both exist."""
     contact = contact or {}
-    if contact.get("email"):
+    pref = (prefer or OUTREACH_CHANNEL).lower()
+    if pref == "sms" and contact.get("phone"):
+        return "sms"
+    if pref == "email" and contact.get("email"):
         return "email"
     if contact.get("phone"):
         return "sms"
+    if contact.get("email"):
+        return "email"
     return None
 
 
@@ -102,6 +122,13 @@ def _footer_is_real(footer: dict | None) -> bool:
     return config._canspam_is_real(addr)  # noqa: SLF001 — shared gate with config.canspam_address
 
 
+def _is_smb_lead(lead: dict) -> bool:
+    """Only OSM / Google Maps small-business rows — never probate or other sources."""
+    if (lead.get("kind") or "").lower() == "probate":
+        return False
+    return (lead.get("source") or "osm") in SMB_LEAD_SOURCES
+
+
 def queue(ledger, campaign: str, leads: list[dict], footer: dict | None = None,
           can_send: bool = False, send_fn=None) -> dict:
     """Compose + lint + suppression-queue each lead, and (when allowed) SEND. The send
@@ -109,7 +136,19 @@ def queue(ledger, campaign: str, leads: list[dict], footer: dict | None = None,
     ``can_send=True`` an EMAIL lead is sent via ``mail.send`` (real SMTP if creds are
     present, else it records its own gate and stays queued — never faked). SMS has no
     provider yet, so it always stays queued. ``send_fn`` is injectable for tests.
-    ``recipient`` for suppression is the email or phone."""
+    ``recipient`` for suppression is the email or phone.
+
+    **SMB only:** when *campaign* is :data:`SMB_OUTREACH_CAMPAIGN`, non-SMB rows
+    (wrong ``source``, probate-shaped rows) are skipped. Probate heirs use a separate
+    campaign/table — see :meth:`Ledger.uncontacted_probate_heirs`."""
+    if campaign == PROBATE_OUTREACH_CAMPAIGN:
+        failures.record("outreach", "wrong_pipeline",
+                        "probate outreach must not use SMB queue — separate track")
+        return {"campaign": campaign, "queued": 0, "suppressed": 0, "needs_contact": 0,
+                "blocked": 0, "sent": 0,
+                "gated": "probate leads use probate_motivated pipeline, not SMB outreach"}
+    if campaign == SMB_OUTREACH_CAMPAIGN:
+        leads = [l for l in leads if _is_smb_lead(l)]
     sender = send_fn or mail.send
     # Address gate: never SEND with a placeholder CAN-SPAM physical address — that is a
     # non-compliant email that burns the prospect. Refuse, document it, and fall through to
@@ -126,8 +165,8 @@ def queue(ledger, campaign: str, leads: list[dict], footer: dict | None = None,
         if channel is None:
             needs_contact += 1
             continue
-        msg = compose(lead, campaign, footer)
-        if content_score(msg["subject"] + " " + msg["body"])["block"]:
+        msg = compose_sms(lead, campaign, footer) if channel == "sms" else compose(lead, campaign, footer)
+        if content_score(msg.get("subject", "") + " " + msg["body"])["block"]:
             blocked += 1
             failures.record("outreach", "content_blocked",
                             f"{lead.get('name')}: pitch tripped the spam-content gate")
@@ -152,6 +191,19 @@ def queue(ledger, campaign: str, leads: list[dict], footer: dict | None = None,
             else:
                 failures.record("outreach", "send_failed",
                                 f"{recipient}: {res.get('error') or 'gated'}")
+        elif do_send and channel == "sms":
+            if getattr(ledger, "is_contacted", lambda r, c: False)(recipient, campaign):
+                suppressed += 1
+                continue
+            res = sms.send(recipient, msg["body"])
+            if res.get("sent"):
+                ledger.log_outreach(recipient, campaign, channel)
+                queued += 1
+                sent += 1
+            else:
+                failures.record("outreach", "send_failed",
+                                f"{recipient}: {res.get('error') or res.get('reason') or 'gated'}")
+                # do NOT log_outreach — Twilio may land later; prospect keeps their one shot
         elif ledger.log_outreach(recipient, campaign, channel):
             queued += 1             # queue-only (no creds / SMS): queuing IS the action
         else:
@@ -191,14 +243,26 @@ def _is_emailable_prospect(lead: dict) -> bool:
     return bool(domain) and domain not in _CORP_EMAIL_DOMAINS
 
 
+def _is_phone_prospect(lead: dict) -> bool:
+    """Genuine local SMB worth cold-texting — not a national chain."""
+    from utah.product import leads as leads_mod
+
+    if leads_mod.is_national_chain(lead.get("name") or ""):
+        return False
+    phone = ((lead.get("contact") or {}).get("phone") or "").strip()
+    return bool(phone) and len(re.sub(r"\D", "", phone)) >= 10
+
+
 def run_scheduled(campaign: str = DEFAULT_CAMPAIGN, limit: int = DAILY_OUTREACH, *,
-                  ledger=None, foundation_gate=None, send_fn=None) -> dict:
-    """``com.utah.outreach`` cron — the missing DRIVER. Pull uncontacted email-leads, drop
-    chains/corporate inboxes, and actually SEND up to *limit* a CAN-SPAM-compliant pitch
-    (suppression-checked, never-twice). Measured volume protects deliverability. Gated on a
-    green substrate so a red Postgres never masquerades as 'no leads'. Never raises."""
+                  ledger=None, foundation_gate=None, send_fn=None,
+                  channel: str | None = None) -> dict:
+    """``com.utah.outreach`` cron — SMB small-business outreach only (OSM + Maps).
+    Probate heirs are in the ``probate`` table and never enter this path."""
     from utah import foundation
 
+    if campaign != SMB_OUTREACH_CAMPAIGN:
+        return {"campaign": campaign, "sent": 0, "queued": 0,
+                "reason": "com.utah.outreach is SMB-only; probate uses separate pipeline"}
     gate = foundation.gate_cron if foundation_gate is None else foundation_gate
     skip = gate("outreach")
     if skip:
@@ -206,19 +270,28 @@ def run_scheduled(campaign: str = DEFAULT_CAMPAIGN, limit: int = DAILY_OUTREACH,
     if ledger is None:
         from utah.product.ledger import Ledger
         ledger = Ledger()
-    # pull a buffer and filter to real SMB prospects so corporate leads don't starve real ones
-    candidates = ledger.uncontacted_email_leads(campaign, max(limit * 4, limit))
-    leads = [l for l in candidates if _is_emailable_prospect(l)][:limit]
-    if not leads:
-        return {"campaign": campaign, "sent": 0, "queued": 0,
-                "reason": "no emailable SMB prospects (chains/corporate filtered)"}
+    ch = (channel or OUTREACH_CHANNEL).lower()
+    if ch == "sms":
+        candidates = ledger.uncontacted_phone_leads(campaign, max(limit * 4, limit))
+        leads = [l for l in candidates if _is_phone_prospect(l)][:limit]
+        if not leads:
+            return {"campaign": campaign, "channel": "sms", "sent": 0, "queued": 0,
+                    "reason": "no phone SMB prospects (chains filtered)"}
+    else:
+        candidates = ledger.uncontacted_email_leads(campaign, max(limit * 4, limit))
+        leads = [l for l in candidates if _is_emailable_prospect(l)][:limit]
+        if not leads:
+            return {"campaign": campaign, "channel": "email", "sent": 0, "queued": 0,
+                    "reason": "no emailable SMB prospects (chains/corporate filtered)"}
     result = queue(ledger, campaign, leads, footer=default_footer(),
                    can_send=True, send_fn=send_fn)
-    log.info("outreach run_scheduled: campaign=%s pulled=%d sent=%d",
-             campaign, len(leads), result.get("sent", 0))
+    result["channel"] = ch
+    log.info("outreach run_scheduled: campaign=%s channel=%s pulled=%d sent=%d",
+             campaign, ch, len(leads), result.get("sent", 0))
     return result
 
 
-__all__ = ["compose", "content_score", "pick_channel", "queue", "default_footer",
-           "run_scheduled", "DAILY_OUTREACH", "DEFAULT_CAMPAIGN",
-           "DEFAULT_FOOTER", "SPAM_BLOCK_THRESHOLD"]
+__all__ = ["compose", "compose_sms", "content_score", "pick_channel", "queue", "default_footer",
+           "run_scheduled", "DAILY_OUTREACH", "DEFAULT_CAMPAIGN", "OUTREACH_CHANNEL",
+           "DEFAULT_FOOTER", "SPAM_BLOCK_THRESHOLD", "SMB_OUTREACH_CAMPAIGN",
+           "PROBATE_OUTREACH_CAMPAIGN"]

@@ -1,10 +1,13 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <!--
-  com.utah.outreach — cold-outreach SENDER cron (daily, 10:00).
+  com.utah.outreach — SMB cold-outreach SENDER cron (daily, 10:00).
+
+  SMB ONLY: no-website small businesses from OSM + Google Maps (handyman/trades).
+  Probate heirs are in the probate table and NEVER enter this cron — separate pipeline.
 
   Runs utah.product.outreach.run_scheduled(): pull up to DAILY_OUTREACH (default 8)
-  uncontacted email-leads, drop national chains + corporate inboxes, and SEND each a
+  uncontacted SMB phone/email leads (source=osm|google_maps), drop national chains,
   CAN-SPAM-compliant pitch via real SMTP (suppression-checked, never-twice). This is the
   DRIVER that was missing — the send path was proven but nothing fed it the live leads.
   Measured volume + a business-hour send protect the sending Gmail's deliverability.
@@ -38,6 +41,8 @@
     <string>/Users/michaelbarber/Desktop/ProjectUtah</string>
     <key>PYTHONUNBUFFERED</key>
     <string>1</string>
+    <key>UTAH_OUTREACH_CHANNEL</key>
+    <string>sms</string>
     <key>PATH</key>
     <string>/Users/michaelbarber/.utah/venv/bin:/opt/homebrew/bin:/usr/local/bin:/Users/michaelbarber/.local/bin:/usr/bin:/bin</string>
   </dict>

@@ -98,3 +98,15 @@ def test_counts_includes_all_tables(ledger):
     c = ledger.counts()
     assert {"leads", "probate", "outreach_ledger", "fires",
             "mail_ledger", "marketer_posts", "sync_log"} <= set(c)
+
+
+def test_uncontacted_smb_leads_exclude_wrong_source(ledger):
+    from utah.product.ledger import SMB_OUTREACH_CAMPAIGN
+
+    assert ledger.record_lead("SMB Co", "trade", MARK, "google_maps",
+                              contact={"phone": "+15551112222"}) is True
+    assert ledger.record_lead("Import Co", "trade", MARK, "manual_import",
+                              contact={"phone": "+15553334444"}) is True
+    phones = ledger.uncontacted_phone_leads(SMB_OUTREACH_CAMPAIGN, 10)
+    names = {p["name"] for p in phones}
+    assert "SMB Co" in names and "Import Co" not in names

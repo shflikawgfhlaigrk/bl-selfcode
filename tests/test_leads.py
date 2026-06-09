@@ -25,7 +25,8 @@ def test_build_query_targets_no_website_in_bbox():
 
 
 _SAMPLE = json.dumps({"elements": [
-    {"type": "node", "tags": {"name": "Joe's Diner", "amenity": "restaurant", "phone": "555-1"}},
+    {"type": "node", "tags": {"name": "Joe's Diner", "amenity": "restaurant",
+                               "phone": "770-555-1234"}},
     {"type": "node", "tags": {"name": "Newnan Hardware", "shop": "hardware"}},
     {"type": "node", "tags": {"name": "Subway", "amenity": "fast_food"}},     # chain -> drop
     {"type": "node", "tags": {"amenity": "cafe"}},                            # no name -> skip
@@ -37,15 +38,15 @@ def test_find_parses_filters_and_shapes():
     names = {s["name"] for s in found}
     assert names == {"Joe's Diner", "Newnan Hardware"}           # chain + no-name removed
     joe = next(s for s in found if s["name"] == "Joe's Diner")
-    assert joe["kind"] == "restaurant" and joe["contact"]["phone"] == "555-1"
+    assert joe["kind"] == "restaurant" and joe["contact"]["phone"] == "+17705551234"
 
 
 def test_extract_contact_pulls_phone_email_address():
-    tags = {"contact:phone": "770-555-9", "email": "hi@shop.com",
+    tags = {"contact:phone": "770-555-1234", "email": "hi@shop.com",
             "addr:housenumber": "12", "addr:street": "Main St", "addr:city": "Newnan",
             "addr:state": "GA", "addr:postcode": "30263"}
     c = leads._extract_contact(tags)
-    assert c["phone"] == "770-555-9" and c["email"] == "hi@shop.com"
+    assert c["phone"] == "+17705551234" and c["email"] == "hi@shop.com"
     assert c["address"] == "12 Main St, Newnan, GA, 30263"
     assert leads._extract_contact({}) == {}      # nothing tagged → empty (no fabrication)
 

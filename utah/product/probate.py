@@ -1,5 +1,8 @@
 """Probate capability — local estate/probate filings (motivated-seller signal).
 
+**Separate from SMB outreach:** heirs live in the ``probate`` table and use campaign
+``probate_motivated`` when outreach is wired — never ``com.utah.outreach`` / ``smb_no_website``.
+
 Ace's realestate/GPN producer transitions HERE as a capability behind the brain, not an
 agent. Source = Georgia Public Notice (georgiapublicnotice.com), the free public estate/
 probate aggregator covering Coweta + the metro-Atlanta ring (O.C.G.A. § 9-13-140). It is

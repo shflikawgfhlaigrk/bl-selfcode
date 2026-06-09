@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  com.utah.leads-maps — Google Maps trade scout (daily, 09:15).
+
+  Runs utah.product.leads.run_maps_scheduled(): Text Search for handyman/plumber/etc
+  near Southeast metros; keeps businesses WITH phone and WITHOUT websiteUri; writes to
+  the product ledger (source=google_maps). Feeds the SMS outreach queue.
+
+  Install:
+    cp ops/launchd/com.utah.leads-maps.plist ~/Library/LaunchAgents/
+    launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.utah.leads-maps.plist
+  Force-run: launchctl kickstart gui/$(id -u)/com.utah.leads-maps
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.utah.leads-maps</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/michaelbarber/.utah/venv/bin/python</string>
+    <string>-c</string>
+    <string>import logging; logging.basicConfig(level=logging.INFO); from utah.product.leads import run_maps_scheduled; from utah import alerts; r=run_maps_scheduled(); alerts.leads_probate(r, kind='leads'); print(r)</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>/Users/michaelbarber/Desktop/ProjectUtah</string>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PYTHONPATH</key>
+    <string>/Users/michaelbarber/Desktop/ProjectUtah</string>
+    <key>PYTHONUNBUFFERED</key>
+    <string>1</string>
+    <key>PATH</key>
+    <string>/Users/michaelbarber/.utah/venv/bin:/opt/homebrew/bin:/usr/local/bin:/Users/michaelbarber/.local/bin:/usr/bin:/bin</string>
+  </dict>
+
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Hour</key>
+    <integer>9</integer>
+    <key>Minute</key>
+    <integer>15</integer>
+  </dict>
+
+  <key>RunAtLoad</key>
+  <false/>
+
+  <key>StandardOutPath</key>
+  <string>/Users/michaelbarber/.utah/logs/leads-maps.log</string>
+
+  <key>StandardErrorPath</key>
+  <string>/Users/michaelbarber/.utah/logs/leads-maps.err</string>
+</dict>
+</plist>

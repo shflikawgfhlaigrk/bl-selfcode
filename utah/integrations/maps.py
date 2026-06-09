@@ -20,6 +20,7 @@ log = logging.getLogger("utah.integrations.maps")
 MAPS_CREDS = runtime.UTAH_HOME / "secrets" / "maps.json"
 _GEOCODE_URL = "https://maps.googleapis.com/maps/api/geocode/json"
 _NEARBY_URL = "https://places.googleapis.com/v1/places:searchNearby"
+_TEXT_URL = "https://places.googleapis.com/v1/places:searchText"
 #: 3 miles in metres — the probate "3-mile radius check".
 THREE_MILES_M = 4828
 
@@ -99,4 +100,46 @@ def nearby(lat, lng, radius_m: int = THREE_MILES_M, included_types=None, *,
         return {"available": False, "gated": False, "error": str(exc)}
 
 
-__all__ = ["geocode", "nearby", "source_available", "MAPS_CREDS", "THREE_MILES_M"]
+def text_search(text_query: str, *, lat: float | None = None, lng: float | None = None,
+                radius_m: int = 50000, region_code: str = "US", max_results: int = 20,
+                fetch=None) -> dict:
+    """Google Places Text Search → ``{available, places:[{name,address,phone,website,types}]}``.
+    Used to scout local trades (handyman, plumber, …) with phone numbers; ``website`` is
+    included so callers can filter no-website SMBs. Enterprise field mask (phone + website)."""
+    if fetch is None and not source_available():
+        return _gate(f"text_search {text_query[:40]}")
+    try:
+        if fetch is not None:
+            d = fetch(text_query, lat, lng, radius_m)
+        else:
+            body: dict = {"textQuery": text_query, "regionCode": region_code,
+                          "pageSize": max_results}
+            if lat is not None and lng is not None:
+                body["locationBias"] = {"circle": {
+                    "center": {"latitude": lat, "longitude": lng},
+                    "radius": float(radius_m)}}
+            d = _http_json(_TEXT_URL, data=json.dumps(body).encode(), headers={
+                "Content-Type": "application/json",
+                "X-Goog-Api-Key": _key(),
+                "X-Goog-FieldMask": (
+                    "places.displayName,places.formattedAddress,places.nationalPhoneNumber,"
+                    "places.websiteUri,places.types,places.location"),
+            })
+        places = []
+        for p in (d.get("places") or []):
+            loc = p.get("location") or {}
+            places.append({
+                "name": (p.get("displayName") or {}).get("text", ""),
+                "address": p.get("formattedAddress", ""),
+                "phone": (p.get("nationalPhoneNumber") or "").strip(),
+                "website": (p.get("websiteUri") or "").strip(),
+                "types": p.get("types") or [],
+                "lat": loc.get("latitude"), "lng": loc.get("longitude"),
+            })
+        return {"available": True, "gated": False, "places": places, "query": text_query}
+    except Exception as exc:  # noqa: BLE001
+        failures.record("maps", "text_search_failed", f"{text_query[:40]}: {exc}")
+        return {"available": False, "gated": False, "error": str(exc)}
+
+
+__all__ = ["geocode", "nearby", "text_search", "source_available", "MAPS_CREDS", "THREE_MILES_M"]

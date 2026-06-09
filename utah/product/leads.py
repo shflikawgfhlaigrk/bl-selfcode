@@ -1,5 +1,8 @@
 """Leads capability — local SMBs with no website (the pitch: "I'll build your site").
 
+**SMB pipeline only** — sources ``osm`` and ``google_maps``. Probate heirs are in
+``probate`` table / ``probate_motivated`` campaign; they never enter this module.
+
 Ace's lead_scout transitions HERE as a capability behind the brain — not an agent.
 It queries OpenStreetMap (Overpass) for shop/craft/amenity businesses tagged WITHOUT a
 website, drops national chains, enriches each with name + contact (phone/email/address),
@@ -15,6 +18,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 import urllib.request
 from pathlib import Path
@@ -68,6 +72,68 @@ DAILY_TARGET = 500
 MAX_TILES_PER_RUN = 80
 #: Persistent frontier cursor — which tile index to resume from next run.
 FRONTIER_STATE = runtime.RUN_DIR / "leads-frontier.json"
+#: Maps trade-scout cursor (rotates query × metro center each run).
+MAPS_SCOUT_STATE = runtime.RUN_DIR / "leads-maps-scout.json"
+
+#: Google Maps text queries for local trades — handyman / home-repair buyers.
+MAPS_TRADE_QUERIES: list[str] = [
+    "handyman", "general contractor", "home repair", "plumber", "electrician",
+    "hvac contractor", "roofing contractor", "landscaping service",
+]
+#: Handyman-focused queries for the phone pipeline (no website + phone).
+MAPS_HANDYMAN_QUERIES: list[str] = [
+    "handyman", "handyman services", "home repair", "general contractor",
+    "local handyman", "handyman company",
+]
+#: Metro centers for Maps location bias (name, lat, lng) — Southeast sweep.
+MAPS_SCOUT_CENTERS: list[tuple[str, float, float]] = [
+    ("Atlanta GA", 33.749, -84.388),
+    ("Savannah GA", 32.080, -81.091),
+    ("Macon GA", 32.841, -83.632),
+    ("Augusta GA", 33.474, -82.010),
+    ("Columbus GA", 32.461, -84.988),
+    ("Athens GA", 33.951, -83.357),
+    ("Newnan GA", 33.380, -84.800),
+    ("Marietta GA", 33.953, -84.550),
+    ("Alpharetta GA", 34.075, -84.294),
+    ("Roswell GA", 34.023, -84.362),
+    ("Lawrenceville GA", 33.956, -83.988),
+    ("Gainesville GA", 34.298, -83.825),
+    ("Valdosta GA", 30.833, -83.279),
+    ("Albany GA", 31.579, -84.156),
+    ("Rome GA", 34.257, -85.165),
+    ("Warner Robins GA", 32.596, -83.652),
+    ("Birmingham AL", 33.521, -86.802),
+    ("Montgomery AL", 32.379, -86.307),
+    ("Mobile AL", 30.695, -88.040),
+    ("Huntsville AL", 34.730, -86.586),
+    ("Tuscaloosa AL", 33.210, -87.569),
+    ("Charlotte NC", 35.227, -80.843),
+    ("Raleigh NC", 35.780, -78.639),
+    ("Greensboro NC", 36.073, -79.792),
+    ("Winston-Salem NC", 36.100, -80.244),
+    ("Durham NC", 35.994, -78.898),
+    ("Fayetteville NC", 35.053, -78.879),
+    ("Wilmington NC", 34.226, -77.945),
+    ("Charleston SC", 32.777, -79.931),
+    ("Columbia SC", 34.000, -81.035),
+    ("Greenville SC", 34.852, -82.394),
+    ("Myrtle Beach SC", 33.689, -78.887),
+    ("Spartanburg SC", 34.950, -81.932),
+    ("Nashville TN", 36.163, -86.781),
+    ("Memphis TN", 35.150, -90.049),
+    ("Knoxville TN", 35.961, -83.921),
+    ("Chattanooga TN", 35.046, -85.309),
+    ("Jacksonville FL", 30.332, -81.656),
+    ("Tallahassee FL", 30.438, -84.281),
+    ("Pensacola FL", 30.421, -87.217),
+    ("Louisville KY", 38.253, -85.759),
+    ("Lexington KY", 38.040, -84.503),
+]
+MAPS_SCOUT_RADIUS_M = 45000   # ~28 miles around each center
+MAPS_SCOUT_MAX_RESULTS = 20
+MAPS_DAILY_TARGET = 40        # cron cap per day (bulk runs pass a higher target)
+MAPS_BULK_TARGET = int(os.environ.get("UTAH_MAPS_BULK_TARGET", "3000"))
 
 #: High-signal "local business that probably can't build its own site" categories.
 _CATEGORIES: list[tuple[str, str]] = [
@@ -234,9 +300,21 @@ def _http_fetch(query: str) -> str:
     raise RuntimeError(f"all Overpass mirrors failed: {last}")
 
 
+def normalize_phone(raw: str) -> str:
+    """US phone → E.164 ``+1XXXXXXXXXX``; empty string if unusable."""
+    digits = re.sub(r"\D", "", raw or "")
+    if len(digits) == 10:
+        return f"+1{digits}"
+    if len(digits) == 11 and digits.startswith("1"):
+        return f"+{digits}"
+    if len(digits) >= 10:
+        return f"+{digits}"
+    return ""
+
+
 def _extract_contact(tags: dict) -> dict:
     """Pull phone + email + address from OSM tags into a contact dict (empties dropped)."""
-    phone = (tags.get("phone") or tags.get("contact:phone") or "").strip()
+    phone = normalize_phone(tags.get("phone") or tags.get("contact:phone") or "")
     email = (tags.get("email") or tags.get("contact:email") or "").strip()
     street = " ".join(x for x in (tags.get("addr:housenumber"), tags.get("addr:street")) if x)
     address = ", ".join(x for x in (
@@ -426,7 +504,194 @@ def run_scheduled(region: str = "Georgia Frontier", target: int = DAILY_TARGET,
     return out
 
 
+def _maps_kind(types: list[str]) -> str:
+    for t in types:
+        if t in ("general_contractor", "plumber", "electrician", "roofing_contractor",
+                 "hvac_contractor", "landscaper", "home_goods_store"):
+            return t
+    return "trade"
+
+
+def parse_maps_place(place: dict) -> dict | None:
+    """Maps place → lead dict if no website + has phone + pitchable SMB; else None."""
+    name = (place.get("name") or "").strip()
+    if not name or is_national_chain(name):
+        return None
+    if (place.get("website") or "").strip():
+        return None   # has a site — not our pitch
+    phone = normalize_phone(place.get("phone") or "")
+    if not phone:
+        return None
+    kind = _maps_kind(place.get("types") or [])
+    if not _is_pitchable_smb(name, kind):
+        return None
+    contact: dict[str, str] = {"phone": phone}
+    if place.get("address"):
+        contact["address"] = place["address"]
+    return {"name": name, "kind": kind, "contact": contact}
+
+
+def find_maps_no_website_trades(text_query: str, lat: float, lng: float, *,
+                                radius_m: int = MAPS_SCOUT_RADIUS_M,
+                                max_results: int = MAPS_SCOUT_MAX_RESULTS,
+                                search_fn=None) -> list[dict]:
+    """Google Maps Text Search for *text_query* near (lat,lng); keep no-website + phone."""
+    from utah.integrations import maps
+
+    res = maps.text_search(
+        f"{text_query} near {lat},{lng}", lat=lat, lng=lng,
+        radius_m=radius_m, max_results=max_results, fetch=search_fn,
+    )
+    if not res.get("available"):
+        return []
+    out: list[dict] = []
+    seen: set[str] = set()
+    for place in res.get("places") or []:
+        lead = parse_maps_place(place)
+        if not lead:
+            continue
+        key = lead["name"].lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(lead)
+    return out
+
+
+def _load_maps_cursor() -> int:
+    try:
+        return int(json.loads(MAPS_SCOUT_STATE.read_text()).get("i", 0))
+    except Exception:  # noqa: BLE001
+        return 0
+
+
+def _save_maps_cursor(i: int) -> None:
+    try:
+        MAPS_SCOUT_STATE.parent.mkdir(parents=True, exist_ok=True)
+        MAPS_SCOUT_STATE.write_text(json.dumps({"i": i}))
+    except Exception as exc:  # noqa: BLE001
+        log.warning("maps scout cursor write failed: %s", exc)
+
+
+def scout_maps_trades(ledger, text_query: str, center_name: str, lat: float, lng: float,
+                      *, search_fn=None) -> dict:
+    """Maps trade scout for one query × center → ledger (source=google_maps)."""
+    found = find_maps_no_website_trades(text_query, lat, lng, search_fn=search_fn)
+    new = enriched = 0
+    region = f"Maps {center_name} [{text_query}]"
+    for s in found:
+        contact = s.get("contact") or {}
+        phone = contact.get("phone") or ""
+        if phone and ledger.has_phone_lead(phone, "google_maps"):
+            continue
+        if ledger.record_lead(s["name"], s["kind"], region, "google_maps", contact=contact):
+            new += 1
+        elif ledger.update_lead(s["name"], region, contact=contact):
+            enriched += 1
+    log.info("maps scout %s/%s: found=%d new=%d enriched=%d", text_query, center_name,
+             len(found), new, enriched)
+    return {"found": len(found), "new": new, "enriched": enriched, "region": region,
+            "query": text_query}
+
+
+def run_maps_scheduled(*, ledger=None, foundation_gate=None, target: int = MAPS_DAILY_TARGET,
+                       search_fn=None) -> dict:
+    """``com.utah.leads-maps`` cron — rotate trade query × metro, ingest phone leads."""
+    from utah import foundation
+
+    gate = foundation.gate_cron if foundation_gate is None else foundation_gate
+    skip = gate("leads_maps")
+    if skip:
+        return skip
+    if ledger is None:
+        from utah.product.ledger import Ledger
+        ledger = Ledger()
+    combos = [(q, c) for q in MAPS_TRADE_QUERIES for c in MAPS_SCOUT_CENTERS]
+    if not combos:
+        return {"found": 0, "new": 0, "target": target, "met": False}
+    start = _load_maps_cursor() % len(combos)
+    i = start
+    found = new = enriched = scanned = 0
+    hit: set[str] = set()
+    while new < target and scanned < len(combos):
+        query, (cname, lat, lng) = combos[i % len(combos)]
+        try:
+            res = scout_maps_trades(ledger, query, cname, lat, lng, search_fn=search_fn)
+            found += res["found"]
+            new += res["new"]
+            enriched += res.get("enriched", 0)
+            hit.add(cname)
+        except Exception as exc:  # noqa: BLE001
+            log.warning("maps scout %s/%s failed: %s", query, cname, exc)
+        scanned += 1
+        i = (i + 1) % len(combos)
+        if new >= target:
+            break
+    _save_maps_cursor(i)
+    out = {"found": found, "new": new, "enriched": enriched, "target": target,
+           "met": new >= target, "region": "+".join(sorted(hit)) or "maps",
+           "cursor": i, "source": "google_maps"}
+    try:
+        getattr(ledger, "record_sync", lambda **k: None)(
+            source="google_maps", kind="ingest", rows_in=new, cursor=str(i),
+            status="ok" if out["met"] else "partial",
+            detail=f"{scanned} queries, {found} found, {new} new phone leads")
+    except Exception as exc:  # noqa: BLE001
+        log.debug("maps sync_log skipped: %s", exc)
+    log.info("leads maps cron: %s", out)
+    return out
+
+
+def run_maps_bulk(*, target: int = MAPS_BULK_TARGET, queries: list[str] | None = None,
+                  ledger=None, foundation_gate=None, search_fn=None,
+                  sleep_s: float = 0.15) -> dict:
+    """Sweep all query × metro combos until *target* distinct Maps phones land (or exhausted).
+    Handyman pipeline bulk fill — run manually or via ``UTAH_MAPS_BULK_TARGET=3000``."""
+    import time
+
+    from utah import foundation
+
+    gate = foundation.gate_cron if foundation_gate is None else foundation_gate
+    skip = gate("leads_maps")
+    if skip:
+        return skip
+    if ledger is None:
+        from utah.product.ledger import Ledger
+        ledger = Ledger()
+    qlist = queries or MAPS_HANDYMAN_QUERIES
+    combos = [(q, c) for q in qlist for c in MAPS_SCOUT_CENTERS]
+    start_phones = ledger.count_maps_phone_leads()
+    found = new = enriched = scanned = 0
+    hit: set[str] = set()
+    for query, (cname, lat, lng) in combos:
+        if ledger.count_maps_phone_leads() - start_phones >= target:
+            break
+        try:
+            res = scout_maps_trades(ledger, query, cname, lat, lng, search_fn=search_fn)
+            found += res["found"]
+            new += res["new"]
+            enriched += res.get("enriched", 0)
+            hit.add(cname)
+        except Exception as exc:  # noqa: BLE001
+            log.warning("maps bulk %s/%s failed: %s", query, cname, exc)
+        scanned += 1
+        if sleep_s and search_fn is None:
+            time.sleep(sleep_s)
+    total_phones = ledger.count_maps_phone_leads()
+    gained = total_phones - start_phones
+    out = {"found": found, "new": new, "enriched": enriched, "target": target,
+           "met": gained >= target, "phones_total": total_phones, "phones_gained": gained,
+           "scanned": scanned, "combos": len(combos), "region": "+".join(sorted(hit)) or "maps",
+           "source": "google_maps", "queries": qlist}
+    log.info("leads maps BULK: %s", out)
+    return out
+
+
 __all__ = ["is_national_chain", "build_query", "find_no_website_smbs", "scout",
            "scout_frontier", "frontier_tiles", "run_scheduled", "_extract_contact",
+           "normalize_phone", "parse_maps_place", "find_maps_no_website_trades",
+           "scout_maps_trades", "run_maps_scheduled", "run_maps_bulk",
            "COWETA_BBOX", "METRO_BBOX", "FRONTIER_BBOX", "TILE_STEP", "DAILY_TARGET",
-           "MAX_TILES_PER_RUN", "FRONTIER_STATE", "NATIONAL_CHAINS"]
+           "MAX_TILES_PER_RUN", "FRONTIER_STATE", "MAPS_SCOUT_STATE", "NATIONAL_CHAINS",
+           "MAPS_TRADE_QUERIES", "MAPS_HANDYMAN_QUERIES", "MAPS_SCOUT_CENTERS",
+           "MAPS_DAILY_TARGET", "MAPS_BULK_TARGET"]

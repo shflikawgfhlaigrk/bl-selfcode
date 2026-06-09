@@ -30,6 +30,8 @@ def test_pick_channel_from_contact():
     assert outreach.pick_channel({"email": "a@b.com"}) == "email"
     assert outreach.pick_channel({"phone": "555-1"}) == "sms"
     assert outreach.pick_channel({}) is None
+    assert outreach.pick_channel({"phone": "555-1", "email": "a@b.com"}, prefer="sms") == "sms"
+    assert outreach.pick_channel({"phone": "555-1", "email": "a@b.com"}, prefer="email") == "email"
 
 
 class _RecLedger:
@@ -125,8 +127,29 @@ def test_run_scheduled_drives_real_sends_to_uncontacted_email_leads(monkeypatch)
                         lambda: {"address": "28 Dogwood Rd, Newnan GA", "unsubscribe": "Reply STOP"})
     r = outreach.run_scheduled(limit=1, ledger=FakeLedger(),
                                foundation_gate=lambda cap: None,        # substrate green
+                               channel="email",
                                send_fn=lambda to, s, b: sent.append(to) or {"sent": True})
     assert r["sent"] == 1 and sent == ["joe@example.com"]               # capped + actually sent
+
+
+def test_run_scheduled_drives_sms_to_uncontacted_phone_leads(monkeypatch):
+    sent: list[str] = []
+
+    class FakeLedger:
+        def uncontacted_phone_leads(self, campaign, limit):
+            return [{"name": "Joe Handyman", "kind": "trade",
+                     "contact": {"phone": "+15551234567", "address": "1 Main St"}}]
+        def is_contacted(self, r, c):
+            return False
+        def log_outreach(self, r, c, channel="sms"):
+            return True
+
+    monkeypatch.setattr(outreach, "default_footer",
+                        lambda: {"address": "28 Dogwood Rd", "unsubscribe": "Reply STOP"})
+    monkeypatch.setattr("utah.sms.send", lambda to, body: sent.append(to) or {"sent": True})
+    r = outreach.run_scheduled(limit=1, ledger=FakeLedger(),
+                               foundation_gate=lambda cap: None, channel="sms")
+    assert r["sent"] == 1 and sent == ["+15551234567"]
 
 
 def test_run_scheduled_skips_chains_and_corporate_inboxes(monkeypatch):
@@ -150,6 +173,7 @@ def test_run_scheduled_skips_chains_and_corporate_inboxes(monkeypatch):
     monkeypatch.setattr(outreach, "default_footer",
                         lambda: {"address": "28 Dogwood Rd, Newnan GA", "unsubscribe": "Reply STOP"})
     r = outreach.run_scheduled(limit=5, ledger=FakeLedger(), foundation_gate=lambda cap: None,
+                               channel="email",
                                send_fn=lambda to, s, b: sent.append(to) or {"sent": True})
     assert sent == ["lamonarca@gmail.com"]               # Tesla filtered, real SMB sent
     assert r["sent"] == 1
@@ -160,6 +184,26 @@ def test_run_scheduled_gates_on_red_substrate(monkeypatch):
     r = outreach.run_scheduled(foundation_gate=lambda cap: {"status": "substrate_red"},
                                ledger=object())
     assert r.get("status") == "substrate_red"
+
+
+def test_queue_refuses_probate_campaign():
+    failures.set_store(FakeFailureStore())
+    lg = _RecLedger()
+    r = outreach.queue(lg, outreach.PROBATE_OUTREACH_CAMPAIGN,
+                       [{"name": "Estate of Smith", "kind": "probate",
+                         "contact": {"phone": "+15551234567"}, "source": "probate"}])
+    assert r["sent"] == 0 and r["queued"] == 0 and "probate" in r["gated"].lower()
+
+
+def test_queue_skips_non_smb_source_on_smb_campaign():
+    failures.set_store(FakeFailureStore())
+    lg = _RecLedger()
+    leads = [
+        {"name": "Bad Source Co", "contact": {"phone": "555-1"}, "source": "manual_import"},
+        {"name": "Good Co", "contact": {"phone": "+15551234567"}, "source": "google_maps"},
+    ]
+    r = outreach.queue(lg, "smb_no_website", leads)
+    assert r["queued"] == 1 and len(lg.calls) == 1
 
 
 def test_send_proceeds_with_real_canspam_address():

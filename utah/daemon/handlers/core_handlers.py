@@ -198,11 +198,18 @@ def _queue_outreach_blocking(campaign: str) -> dict:
 
     from utah import config
     from utah.product import outreach
-    from utah.product.ledger import get_ledger
+    from utah.product.ledger import SMB_LEAD_SOURCES, SMB_OUTREACH_CAMPAIGN, get_ledger
 
+    if campaign != SMB_OUTREACH_CAMPAIGN:
+        return {"campaign": campaign, "queued": 0, "sent": 0,
+                "gated": "RPC outreach is SMB-only (osm/google_maps); probate is separate"}
+    sources = tuple(SMB_LEAD_SOURCES)
     with psycopg.connect(config.DB_DSN, autocommit=True) as c:
-        rows = c.execute("SELECT name, kind, contact FROM leads").fetchall()
-    leads = [{"name": r[0], "kind": r[1], "contact": r[2] or {}} for r in rows]
+        rows = c.execute(
+            "SELECT name, kind, contact, source FROM leads WHERE source = ANY(%s)",
+            (list(sources),),
+        ).fetchall()
+    leads = [{"name": r[0], "kind": r[1], "contact": r[2] or {}, "source": r[3]} for r in rows]
     return outreach.queue(get_ledger(), campaign, leads)
 
 
