@@ -85,3 +85,15 @@ def test_gate_cron_missing_status_is_red():
     skip = foundation.gate_cron("leads", status=None)
     assert skip is not None and skip["status"] == "substrate_red"
     assert "foundation_unknown" in skip["anomalies"]
+
+
+def test_read_status_missing_file_returns_none(tmp_path):
+    # OSError arm of read_status's except: the snapshot was never written.
+    assert foundation.read_status(path=str(tmp_path / "foundation.json")) is None
+
+
+def test_read_status_malformed_json_returns_none(tmp_path):
+    # json.JSONDecodeError arm: a truncated/garbage snapshot must not crash callers.
+    bad = tmp_path / "foundation.json"
+    bad.write_text("{not: valid json", encoding="utf-8")
+    assert foundation.read_status(path=str(bad)) is None
