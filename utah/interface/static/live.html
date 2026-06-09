@@ -141,8 +141,24 @@
     text-transform:uppercase;padding:4px 11px;border-radius:12px;border:1px solid var(--line);
     color:var(--mut);background:#0f0e13;line-height:1.5;text-align:left;max-width:min(100%,460px)}
   .spill::before{content:"";width:6px;height:6px;border-radius:50%;background:currentColor;flex:none;opacity:.85}
-  .spill.idle{color:var(--mut);background:#0f0e13;border-color:#22212a}
-  .spill.error{color:#e8a59d;background:#1a0b09;border-color:#3a1714}
+  /* ---- two-tier separation, DEEPENED ------------------------------------------------
+     idle = honestly empty or still in-flight (dormant · gated · offline · awaiting ·
+     unavailable · no-producer): recede into calm background noise, never an alarm — so
+     they're dimmed and their leading dot stops pulling the eye.
+     error = the ONE real-failure tier (the ~26 error pills): pushed FORWARD with brighter
+     ink, a lit border-glow and a slow breathing dot, so a genuine fault catches the eye
+     and can never masquerade as one of the intentionally-dormant ones. Mirrors role=
+     "alert" vs role="status" from normalizeState(), so screen-reader users hear the same
+     separation the eye sees. ---- */
+  .spill.idle{color:var(--mut);background:#0f0e13;border-color:#22212a;opacity:.7}
+  .spill.idle::before{opacity:.4;box-shadow:none}            /* dormant dot: no draw */
+  .empty:has(.spill.idle){opacity:.85}                       /* the whole placeholder calms down */
+  .spill.error{color:#f4b8b0;font-weight:600;background:#1a0b09;border-color:#5a201b;
+    box-shadow:0 0 0 1px rgba(226,85,75,.22),0 0 16px rgba(226,85,75,.16)}
+  .spill.error::before{background:var(--err);opacity:1;box-shadow:0 0 9px rgba(226,85,75,.85);
+    animation:err-breathe 2.4s ease-in-out infinite}
+  @keyframes err-breathe{0%,100%{box-shadow:0 0 6px rgba(226,85,75,.5)}50%{box-shadow:0 0 13px rgba(226,85,75,.95)}}
+  @media(prefers-reduced-motion:reduce){.spill.error::before{animation:none}}
   .ents{display:flex;flex-wrap:wrap;gap:6px} .ent{background:var(--panel2);border:1px solid var(--line);border-radius:5px;padding:3px 8px;font-size:10.5px;color:#cdc6ad}.ent b{color:var(--gold)}
   .cores{display:flex;flex-wrap:wrap;gap:5px}.core-cell{background:var(--panel2);border:1px solid var(--line);border-radius:5px;padding:3px 7px;font-size:10px;color:#cdc6ad}.core-cell b{color:var(--gold)}
 
@@ -530,14 +546,17 @@ function markerAttrs(text){ const k=markerKey(text); if(!k) return "";
    (dormant / gated / offline / loading / unavailable / awaiting / no producer — honestly
    empty or still in-flight, never a fault — reads calm dim). The plain-language sentence
    comes from STATE_LABELS (one source of truth), so each pill carries a human tooltip, a
-   screen-reader sentence and role="status". The error tier stays visually apart from all
-   idle states, so a glance never confuses "nothing wired yet" with "something broke". ---- */
+   screen-reader sentence and a role that matches its tier — role="status" (polite) for every
+   idle state, role="alert" (assertive) for the error tier. The error tier stays visually AND
+   aurally apart from all idle states, so neither a glance nor a screen reader ever confuses
+   "nothing wired yet" with "something broke". ---- */
 const ERROR_STATES=new Set(["error"]);   // the ONE failure tier; every other marker is idle
 function stateTier(text){ const k=markerKey(text); return (k&&ERROR_STATES.has(k))?"error":"idle"; }
 function normalizeState(text){
-  const k=markerKey(text);
+  const k=markerKey(text), tier=stateTier(text);
   const aria=k?` title="${esc(STATE_LABELS[k])}" aria-label="${esc(text+" — "+STATE_LABELS[k])}"`:"";
-  return `<span class="spill ${stateTier(text)}" role="status"${aria}>${esc(text)}</span>`;
+  // error tier is announced assertively (role=alert); every idle state stays polite (role=status)
+  return `<span class="spill ${tier}" role="${tier==="error"?"alert":"status"}"${aria}>${esc(text)}</span>`;
 }
 /* one honest, self-explaining placeholder: an .empty box wrapping the normalizeState()
    pill, so every panel's empty/idle/error state reads as the same ARIA-labelled chip. */
