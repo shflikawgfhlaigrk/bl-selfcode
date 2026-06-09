@@ -75,6 +75,9 @@ class ChildSpec:
     argv: Sequence[str]
     probe: Probe = lambda: True
     drain: Callable[[], None] | None = None
+    #: Extra env merged over ``os.environ`` for this child (e.g. the voice child
+    #: runs from a signed .app bundle and needs PYTHONHOME/PYTHONPATH set).
+    env: dict[str, str] | None = None
 
 
 class _ManagedChild:
@@ -94,7 +97,8 @@ class _ManagedChild:
         self._spawned_at = 0.0
 
     def spawn(self) -> None:
-        self.proc = subprocess.Popen(list(self.spec.argv), env={**os.environ})
+        env = {**os.environ, **(self.spec.env or {})}
+        self.proc = subprocess.Popen(list(self.spec.argv), env=env)
         self._spawned_at = time.monotonic()
         log.info("spawned %s pid=%d", self.spec.name, self.proc.pid)
 
@@ -256,6 +260,33 @@ class Supervisor:
         return 0
 
 
+def _voice_spec() -> ChildSpec:
+    """Voice child, launched from the signed ``com.utah.voice`` bundle when on mac.
+
+    The bundle gives the launchd-spawned loop a TCC identity that can hold a
+    microphone grant; without it the framework-python child is deaf under
+    launchd. Falls back to ``sys.executable`` on non-mac or build failure.
+    """
+    argv: list[str] = [sys.executable, "-m", "utah.voice.loop"]
+    env: dict[str, str] | None = None
+    try:
+        from utah.voice import macapp
+
+        info = macapp.ensure()
+        if info is not None:
+            argv = [info.exec_path, "-m", "utah.voice.loop"]
+            env = info.env
+            log.info("voice: launching via signed bundle %s", info.exec_path)
+        else:
+            log.warning(
+                "voice: app bundle unavailable — using %s (mic likely deaf under launchd)",
+                sys.executable,
+            )
+    except Exception:  # noqa: BLE001
+        log.warning("voice: bundle setup failed — using sys.executable", exc_info=True)
+    return ChildSpec("voice", argv, env=env)
+
+
 def main() -> int:
     logging.basicConfig(
         level=logging.INFO,
@@ -279,13 +310,12 @@ def main() -> int:
             [sys.executable, "-m", "utah.interface.web"],
             probe=http_probe("http://127.0.0.1:8766/", 5.0),
         ),
-        # Always-on voice: wake "ace" -> MLX Whisper -> brain -> Piper -> chat box.
+        # Always-on voice: wake "ace" -> Moonshine STT -> brain -> Piper -> chat box.
         # No health endpoint — supervised by liveness (the loop is resilient and
         # never fast-exits, so it's only restarted if the process actually dies).
-        ChildSpec(
-            "voice",
-            [sys.executable, "-m", "utah.voice.loop"],
-        ),
+        # Launched from a signed com.utah.voice .app so macOS grants it the mic
+        # under launchd (a bare framework-python child is deaf — see voice/macapp).
+        _voice_spec(),
     ]
     # Tolerant of a busy/cold-booting Mac: 8s post-spawn grace, 5s probe timeout,
     # and only wedge after 3 consecutive failed probes (~15s) — never kill a

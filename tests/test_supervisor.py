@@ -127,3 +127,33 @@ def test_http_probe_false_when_port_closed():
     """The web child's HTTP health probe returns False on a closed port."""
     from utah.daemon.supervisor import http_probe
     assert http_probe("http://127.0.0.1:9", timeout=0.5)() is False
+
+
+def test_child_spec_env_is_merged_into_subprocess(tmp_path):
+    """Per-child env (the voice child's PYTHONHOME/PYTHONPATH) reaches the process.
+
+    Without this, the signed-bundle interpreter can't find its stdlib/deps and
+    the mic fix is moot.
+    """
+    out = tmp_path / "env.txt"
+    argv = [sys.executable, "-c",
+            "import os,sys; open(sys.argv[1],'w').write(os.environ.get('UTAH_TEST_ENV','MISSING'))",
+            str(out)]
+    sup = Supervisor(
+        children=[ChildSpec("e", argv, probe=HEALTHY, env={"UTAH_TEST_ENV": "from-childspec"})],
+        ready_timeout=3.0,
+    )
+    try:
+        sup.start_all()
+        sup._children[0].proc.wait(timeout=5)
+    finally:
+        sup.drain_all()
+    assert out.read_text() == "from-childspec"
+
+
+def test_voice_spec_is_constructible():
+    """``_voice_spec`` builds a ChildSpec (bundle on mac, sys.executable fallback)."""
+    from utah.daemon.supervisor import _voice_spec
+    spec = _voice_spec()
+    assert spec.name == "voice"
+    assert spec.argv[-2:] == ["-m", "utah.voice.loop"]
