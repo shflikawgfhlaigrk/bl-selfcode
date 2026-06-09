@@ -158,7 +158,31 @@
   .spill.error::before{background:var(--err);opacity:1;box-shadow:0 0 9px rgba(226,85,75,.85);
     animation:err-breathe 2.4s ease-in-out infinite}
   @keyframes err-breathe{0%,100%{box-shadow:0 0 6px rgba(226,85,75,.5)}50%{box-shadow:0 0 13px rgba(226,85,75,.95)}}
-  @media(prefers-reduced-motion:reduce){.spill.error::before{animation:none}}
+  @media(prefers-reduced-motion:reduce){.spill.error::before,.state-badge.error::before{animation:none}}
+  /* ---- state-badge: the compact, color-coded badge wrapping every INLINE panel state
+       marker on the deck (system-spine rows, function rows, and the spine header). Same
+       two-tier honesty as .spill — the lone .error tier (a real failure: brighter ink, a
+       lit border-glow and a slow breathing dot) stays visually AND aurally apart from the
+       calm IDLE states (.idle = dormant · gated · offline: dimmed, with a receding dot that
+       stops pulling the eye) — plus live .ok / .warn tiers for healthy / under-load
+       producers. Tier + plain-language reason both come from STATE_EXPLAIN (one source of
+       truth via stateBadge/setStateBadge), so a glance never mistakes "nothing wired yet"
+       for "broke", and a screen reader hears role="alert" for error vs role="status" for
+       every idle/live state. ---- */
+  .state-badge{display:inline-flex;align-items:center;gap:5px;font-size:8.5px;letter-spacing:1.4px;
+    text-transform:uppercase;padding:2px 8px;border-radius:11px;border:1px solid var(--line);
+    color:var(--mut);background:#0f0e13;line-height:1.5;white-space:nowrap;vertical-align:middle}
+  .state-badge::before{content:"";width:5px;height:5px;border-radius:50%;background:currentColor;flex:none;opacity:.85}
+  .state-badge.ok{color:var(--ok);border-color:#163528;background:#0b160f}
+  .state-badge.ok::before{box-shadow:0 0 7px var(--okglow)}
+  .state-badge.warn{color:var(--warn);border-color:#2c2614;background:#1a1407}
+  .state-badge.warn::before{box-shadow:0 0 7px rgba(231,169,59,.5)}
+  .state-badge.idle{color:var(--mut);border-color:#22212a;background:#0f0e13;opacity:.72}
+  .state-badge.idle::before{opacity:.4;box-shadow:none}            /* dormant/gated/offline dot: no draw */
+  .state-badge.error{color:#f4b8b0;font-weight:600;border-color:#5a201b;background:#1a0b09;
+    box-shadow:0 0 0 1px rgba(226,85,75,.22),0 0 14px rgba(226,85,75,.16)}
+  .state-badge.error::before{background:var(--err);opacity:1;box-shadow:0 0 9px rgba(226,85,75,.85);
+    animation:err-breathe 2.4s ease-in-out infinite}
   .ents{display:flex;flex-wrap:wrap;gap:6px} .ent{background:var(--panel2);border:1px solid var(--line);border-radius:5px;padding:3px 8px;font-size:10.5px;color:#cdc6ad}.ent b{color:var(--gold)}
   .cores{display:flex;flex-wrap:wrap;gap:5px}.core-cell{background:var(--panel2);border:1px solid var(--line);border-radius:5px;padding:3px 7px;font-size:10px;color:#cdc6ad}.core-cell b{color:var(--gold)}
 
@@ -375,7 +399,7 @@
   <div class="deck">
     <!-- LEFT RAIL — SYSTEM SPINE -->
     <aside class="rail">
-      <div class="rail-title"><span>◆ SYSTEM SPINE</span><span id="spine-state">—</span></div>
+      <div class="rail-title"><span>◆ SYSTEM SPINE</span><span id="spine-state" class="state-badge idle">—</span></div>
       <div class="card"><div id="spine"></div></div>
       <div class="card"><h2>TRANSPORT</h2>
         <div class="row"><span class="k">control plane</span><span class="v">binary · len-prefix</span></div>
@@ -489,12 +513,19 @@ const STATE_EXPLAIN={
   gated:  {label:"Gated",   tip:"Gated — no live data source wired yet. Utah shows nothing rather than fake a number; it turns on by itself the moment a producer starts publishing."},
   dormant:{label:"Dormant", tip:"Dormant — real but empty: the producer exists but has published 0 rows so far. Never simulated."},
 };
-/* attributes that make any status badge explain itself: a human tooltip (title),
-   a screen-reader sentence (aria-label = "<what it is> — <State>: <meaning>") and
-   role="status" so assistive tech treats it as a live status region. */
-function badgeAttrs(state, label){
-  const e=STATE_EXPLAIN[state]||STATE_EXPLAIN.off;
-  return ` role="status" title="${esc(e.tip)}" aria-label="${esc(label+" — "+e.label+": "+e.tip)}"`;
+/* state → which of the two visual tiers it reads as. The lone "error" tier is a real
+   failure (red, pushed forward); every IDLE state — gated / dormant / offline — recedes
+   into calm dim; ok / warn are the live tiers. Mirrors the .spill error-vs-idle split so
+   there's ONE source of truth for "nothing wired yet" vs "something broke". */
+const BADGE_TIER={ok:"ok",warn:"warn",off:"idle",error:"error",gated:"idle",dormant:"idle"};
+/* wrap an inline panel state marker in a color-coded, self-explaining state-badge span:
+   a human tooltip (title), a screen-reader sentence (aria-label = "<what it is> — <State>:
+   <meaning>") and a role matching its tier — role="alert" (assertive) for the error tier,
+   role="status" (polite) for every idle/live state. Tier + reason come from STATE_EXPLAIN. */
+function stateBadge(text, state, label){
+  const e=STATE_EXPLAIN[state]||STATE_EXPLAIN.off, tier=BADGE_TIER[state]||"idle";
+  return `<span class="state-badge ${tier}" role="${tier==="error"?"alert":"status"}"`+
+    ` title="${esc(e.tip)}" aria-label="${esc(label+" — "+e.label+": "+e.tip)}">${esc(text)}</span>`;
 }
 /* render the one collapsible legend straight from the map (stays in sync forever) */
 function renderLegend(){
@@ -561,12 +592,15 @@ function normalizeState(text){
 /* one honest, self-explaining placeholder: an .empty box wrapping the normalizeState()
    pill, so every panel's empty/idle/error state reads as the same ARIA-labelled chip. */
 function emptyBox(text){ return `<div class="empty">${normalizeState(text)}</div>`; }
-/* set a node's text and, when that text is a marker, its self-explaining
-   title/aria-label — cleared otherwise so a node that flips back to a live value
-   (e.g. OFFLINE→ONLINE) doesn't keep a stale tooltip. */
-function setMarker(el,text){ if(!el) return; el.textContent=text; const k=markerKey(text);
-  if(k){ el.setAttribute("role","status"); el.title=STATE_LABELS[k]; el.setAttribute("aria-label",text+" — "+STATE_LABELS[k]); }
-  else { el.removeAttribute("role"); el.removeAttribute("title"); el.removeAttribute("aria-label"); } }
+/* drive a live DOM node as a color-coded state-badge: set its text, tier class and
+   self-explaining title/aria-label + matching role, all from STATE_EXPLAIN (one source of
+   truth). Used for the spine header marker, so an OFFLINE→ONLINE flip swaps tier cleanly
+   and never leaves a stale tooltip behind. */
+function setStateBadge(el,text,state){ if(!el) return;
+  const e=STATE_EXPLAIN[state]||STATE_EXPLAIN.off, tier=BADGE_TIER[state]||"idle";
+  el.className="state-badge "+tier; el.textContent=text;
+  el.setAttribute("role", tier==="error"?"alert":"status");
+  el.title=e.tip; el.setAttribute("aria-label", text+" — "+e.label+": "+e.tip); }
 
 /* ============================ LIVE STATE POLL ============================ */
 /* Every value below comes from a real control-plane fetch. Nothing is hardcoded
@@ -587,13 +621,13 @@ async function poll(){
 
   if(!up){
     $("spine").innerHTML=emptyBox("CORE OFFLINE");
-    setMarker($("spine-state"),"OFFLINE");
+    setStateBadge($("spine-state"),"OFFLINE","off");
     $("h-load").textContent="—";$("h-bus").textContent="—";
     renderFns(null,null,null);
     LAST={};return;
   }
   LAST={s,m,st};
-  setMarker($("spine-state"),"ONLINE");
+  setStateBadge($("spine-state"),"ONLINE","ok");
   // header metrics
   $("h-load").textContent=s.governor.load_per_core;
   $("h-bus").textContent=s.bus.published;
@@ -616,7 +650,7 @@ async function poll(){
     const state=r.gated?'gated':r.led;
     return `<div class="sysrow drillable${r.gated?' gated':''}" onclick="drill('${r.drill}')"><span class="led ${r.led}"></span>`+
     `<div><div class="nm">${esc(r.nm)}<span class="hint">TAP</span></div><div class="sub">${esc(r.sub)}</div></div>`+
-    `<div><div class="big">${esc(r.big)}</div><div class="st"${badgeAttrs(state, r.nm+": "+r.big+" ("+r.st+")")}>${esc(r.st)}</div></div></div>`;
+    `<div><div class="big">${esc(r.big)}</div><div class="st">${stateBadge(r.st, state, r.nm+": "+r.big+" ("+r.st+")")}</div></div></div>`;
   }).join("");
   // core orb reflects voice
   const orb=document.querySelector(".orb"); if(orb) orb.classList.toggle("listen", vlive && !orb.classList.contains("heard"));
@@ -646,7 +680,7 @@ function renderFns(s,m,st,voice){
     const state=f.gated?'gated':(f.cls==='warn'?'warn':(f.cls==='off'?'off':'ok'));
     return `<div class="fn drillable${f.gated?' gated':''}"${f.click?` onclick="${f.click}"`:""}><span class="led ${f.cls==='off'?'off':(f.cls==='warn'?'warn':(f.cls==='dim'?'':'ok'))}"></span>`+
     `<div><div class="nm">${esc(f.nm)}${f.click?'<span class="hint">TAP</span>':""}</div><div class="sub">${esc(f.sub)}</div></div>`+
-    `<div class="st ${f.cls}"${badgeAttrs(state, f.nm+": "+f.st)}>${esc(f.st)}</div></div>`;
+    `<div class="st">${stateBadge(f.st, state, f.nm+": "+f.st)}</div></div>`;
   }).join("");
   $("fn-count").textContent=fns.filter(f=>!f.gated).length+" LIVE";
   $("h-gates").textContent=fns.filter(f=>f.gated).length;
