@@ -201,3 +201,51 @@ def test_next_cycle_index_increments(tmp_path, monkeypatch):
     a = sica_goals.next_cycle_index()
     b = sica_goals.next_cycle_index()
     assert a == 0 and b == 1
+
+
+# ── failure-rate weighting: deprioritize task categories that keep failing ────────
+def _cycle(domain, *passed):
+    """A fake selfcode_log cycle record: one attempt per pass/fail flag."""
+    return {"domain": domain, "attempts": [{"passed": p} for p in passed]}
+
+
+def test_select_domain_falls_back_to_round_robin_without_signal():
+    """No telemetry → plain round-robin (identical to pick_domain); never stalls."""
+    none = lambda: []
+    for n in range(len(sica_goals.DOMAINS) * 2):
+        assert sica_goals.select_domain(n, cycles_fn=none) == sica_goals.pick_domain(n)
+
+
+def test_select_domain_skips_a_category_whose_last_n_attempts_all_failed():
+    """A category whose last COLD_STREAK_N attempts ALL failed is skipped — the rotation
+    steps forward along the wheel to the next category that isn't cold."""
+    base = sica_goals.pick_domain(0)                       # DOMAINS[0] (revenue-weighted: 'leads')
+    cold = [_cycle(base, False) for _ in range(sica_goals.COLD_STREAK_N)]   # newest-first, all failed
+    chosen = sica_goals.select_domain(0, cycles_fn=lambda: cold)
+    assert chosen != base                                  # steered away from the failing category
+    assert chosen == sica_goals.pick_domain(1)             # next slot on the wheel (not cold)
+
+
+def test_a_single_recent_pass_keeps_a_category_warm():
+    """One pass inside the last N attempts → NOT cold → the category is still eligible.
+    A lone failure must not deprioritize a category."""
+    base = sica_goals.pick_domain(0)
+    # newest-first: most recent attempt PASSED, then two failures
+    warm = [_cycle(base, True), _cycle(base, False), _cycle(base, False)]
+    assert sica_goals.select_domain(0, cycles_fn=lambda: warm) == base
+
+
+def test_select_domain_does_not_stall_when_every_category_is_cold():
+    """If EVERY distinct category's last N attempts failed, fall back to the round-robin
+    pick rather than skipping forever — the loop keeps moving."""
+    cold = []
+    for d in set(sica_goals.DOMAINS):
+        cold += [_cycle(d, False) for _ in range(sica_goals.COLD_STREAK_N)]
+    assert sica_goals.select_domain(0, cycles_fn=lambda: cold) == sica_goals.pick_domain(0)
+
+
+def test_select_domain_is_defensive_when_telemetry_read_raises():
+    """A dead telemetry log must never break task selection → plain round-robin."""
+    def boom():
+        raise RuntimeError("selfcode_log unreadable")
+    assert sica_goals.select_domain(3, cycles_fn=boom) == sica_goals.pick_domain(3)

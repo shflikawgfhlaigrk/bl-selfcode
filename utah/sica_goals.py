@@ -66,6 +66,66 @@ def pick_domain(n: int) -> str:
     return DOMAINS[n % len(DOMAINS)]
 
 
+#: A task category is "cold" when its last COLD_STREAK_N self-coding attempts ALL failed. The
+#: rotation then steps over it to the next non-cold category, so the loop stops burning cycle
+#: after cycle on a task type that keeps failing — the lever that pulls the ~39% archive failure
+#: rate down. One pass inside the window keeps a category warm (a lone failure never deprioritizes
+#: it). Env-tunable; small so a genuinely-stuck category is steered away from quickly.
+COLD_STREAK_N = max(1, int(os.environ.get("UTAH_SELFCODE_COLD_STREAK_N", "3")))
+#: How many recent cycle records to scan for the failure signal — enough to cover several attempts
+#: per category across the full wheel, so even a slow domain has history to judge.
+_CYCLE_LOOKBACK = max(COLD_STREAK_N * len(DOMAINS),
+                      int(os.environ.get("UTAH_SELFCODE_CYCLE_LOOKBACK", "80")))
+
+
+def _domain_attempt_history(cycles_fn=None) -> dict[str, list[bool]]:
+    """``{category: [pass/fail bools, MOST-RECENT FIRST]}`` for recent self-coding attempts.
+
+    The scored archive itself carries no category, so this reads the per-cycle telemetry
+    (``sica.recent_cycles`` → the ``selfcode_log`` ledger) that ties each attempt's domain to its
+    pass/fail. Defensive + injectable (tests pass ``cycles_fn``): any error / empty signal → ``{}``
+    (→ plain round-robin). Never raises — a dead telemetry log must not break task selection."""
+    try:
+        cycles = (cycles_fn or (lambda: sica.recent_cycles(_CYCLE_LOOKBACK)))()
+    except Exception:  # noqa: BLE001 — a dead telemetry log must never break task selection
+        return {}
+    hist: dict[str, list[bool]] = {}
+    for c in cycles or ():                                    # newest cycle first
+        if not isinstance(c, dict):
+            continue
+        domain = c.get("domain")
+        if not domain:
+            continue                                          # ran:false cycles carry no category
+        for attempt in reversed(c.get("attempts") or ()):     # newest attempt within a cycle first
+            if isinstance(attempt, dict):
+                hist.setdefault(domain, []).append(bool(attempt.get("passed")))
+    return hist
+
+
+def _is_cold(history, n: int) -> bool:
+    """A category is cold when its last ``n`` attempts exist and ALL failed."""
+    return len(history) >= n and not any(history[:n])
+
+
+def select_domain(n: int, *, cycles_fn=None) -> str:
+    """Round-robin domain pick, lightly weighted by recent failure rate.
+
+    If the wheel lands on a *cold* category — one whose last :data:`COLD_STREAK_N` self-coding
+    attempts ALL failed — rotate FORWARD along the (revenue-weighted) wheel to the next category
+    that isn't cold. This deprioritizes task types that keep failing and steers the loop toward
+    ones that land, pulling the ~39% archive failure rate down while still honoring the wheel's
+    ordering. Falls back to the plain round-robin pick when the failure signal is unavailable or
+    EVERY category is cold, so the rotation never stalls."""
+    hist = _domain_attempt_history(cycles_fn)
+    if not hist:
+        return pick_domain(n)
+    for i in range(len(DOMAINS)):
+        cand = pick_domain(n + i)
+        if not _is_cold(hist.get(cand, ()), COLD_STREAK_N):
+            return cand
+    return pick_domain(n)   # every distinct category is cold → keep rotating, don't stall
+
+
 def next_cycle_index() -> int:
     """Read + increment a persistent cycle counter (drives the domain rotation)."""
     try:
@@ -373,5 +433,5 @@ def next_task(domain: str, *, brain_fn, **inject) -> str:
     return (brain_fn(build_prompt(domain, signals)) or "").strip()
 
 
-__all__ = ["DOMAINS", "pick_domain", "next_cycle_index", "gather_signals",
-           "build_prompt", "next_task", "observe_deck", "CYCLE_N", "DASHBOARD_URL"]
+__all__ = ["DOMAINS", "pick_domain", "select_domain", "COLD_STREAK_N", "next_cycle_index",
+           "gather_signals", "build_prompt", "next_task", "observe_deck", "CYCLE_N", "DASHBOARD_URL"]

@@ -229,7 +229,10 @@ def run_cycle(*, repo=None, brain_fn=None, propose_fn=None, sync_fn=None, task_f
         if pending and pending[0] not in ("frontend", "research"):
             domain, task, pending_rec = pending
         else:
-            domain = sica_goals.pick_domain(sica_goals.next_cycle_index())
+            # Failure-rate weighted: steer the rotation away from categories whose last N
+            # self-coding attempts all failed (sica_goals.select_domain), to pull the ~39%
+            # archive failure rate down. Degrades to plain round-robin when no signal.
+            domain = sica_goals.select_domain(sica_goals.next_cycle_index())
             if pending is not None and pending[0] == domain:
                 domain, task, pending_rec = pending     # browser finding on its own turn
             else:
