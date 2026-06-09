@@ -232,8 +232,14 @@ def _stream_brain_buffered(
     return "".join(parts).strip()
 
 
-def tell(text: str) -> Reply:
-    """One full turn: recall -> ground -> reason -> remember."""
+def tell(text: str, *, persist: bool = True) -> Reply:
+    """One full turn: recall -> ground -> reason -> remember.
+
+    ``persist=False`` skips the durable turn write — for the diagnostic CLI (``utah tell``),
+    so probing the brain from a terminal never pollutes recall. A probe like "name the
+    function in oauth.py" otherwise stores a turn that near-verbatim echoes future code
+    questions and out-ranks the actual code chunk. Real conversation (voice/web) keeps
+    persist=True."""
     text = (text or "").strip()
     if not text:
         return Reply(text="I didn't catch that.", source=ReplySource.UNAVAILABLE)
@@ -301,7 +307,8 @@ def tell(text: str) -> Reply:
                 grounded = ""
             if grounded and not brain.is_refusal(grounded):
                 _CONVO.append((text, grounded))
-                _remember_turn(text, grounded)
+                if persist:
+                    _remember_turn(text, grounded)
                 return Reply(text=grounded, source=ReplySource.LEARNED, hits=hits)
 
     # 4. REASON: Claude CLI brain, grounded in the conversation thread + recall.
@@ -320,7 +327,8 @@ def tell(text: str) -> Reply:
     #    Refusals ("I don't know…", verbose or not) carry nothing durable → skip.
     if reply_text:
         _CONVO.append((text, reply_text))
-    _remember_turn(text, reply_text)
+    if persist:
+        _remember_turn(text, reply_text)
 
     return Reply(text=reply_text, source=ReplySource.BRAIN, hits=hits)
 

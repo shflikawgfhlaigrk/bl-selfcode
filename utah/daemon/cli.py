@@ -117,7 +117,10 @@ def cmd_tell(args) -> int:
         print("utah: nothing to tell", file=sys.stderr)
         return 2
     try:
-        r = ctl.call_sync("tell", {"text": text}, timeout=180.0)
+        # persist=False: a terminal probe of the brain must never write a turn
+        # into recall (those diagnostic Q-strings echo future code questions and
+        # out-rank real code chunks). Web/voice turns still persist.
+        r = ctl.call_sync("tell", {"text": text, "persist": False}, timeout=180.0)
     except Exception as exc:
         print(f"utah: {exc}", file=sys.stderr)
         return 1

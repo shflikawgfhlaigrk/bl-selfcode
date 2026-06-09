@@ -43,6 +43,22 @@ def test_brain_path_grounded_in_recalled_context(mem, fake_brain):
     assert "Get tea" in turns[0].content
 
 
+def test_persist_false_answers_but_writes_no_turn(mem, fake_brain):
+    """A diagnostic CLI probe (`utah tell`) must answer normally but NEVER write a
+    durable turn — those probe Q-strings near-verbatim echo future code questions and
+    out-rank the real code chunk in recall. persist=False is the gate."""
+    mem.embedder.register("Michael prefers tea", basis(0))
+    mem.embedder.register("should I get coffee or tea for Michael?", blend(basis(0), basis(1), 0.40))
+    memory.store("Michael prefers tea", source="fact")
+    fake_brain.respond = "Get tea — Michael prefers it."
+
+    reply = core.tell("should I get coffee or tea for Michael?", persist=False)
+
+    assert reply.source is ReplySource.BRAIN
+    assert reply.text == "Get tea — Michael prefers it."          # still answers
+    assert [r for r in mem.store.rows.values() if r.source == "turn"] == []  # but stored nothing
+
+
 def test_code_hits_form_their_own_authoritative_source_code_block(mem, fake_brain):
     """source='code' hits reach the brain in a labelled, AUTHORITATIVE 'SOURCE CODE' block —
     not buried in generic RECALLED MEMORY bullets next to chatty turns. Without this the brain

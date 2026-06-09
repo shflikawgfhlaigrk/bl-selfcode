@@ -62,19 +62,23 @@ async def publish(ctx: Context, params: object) -> dict:
     return {"delivered": ctx.bus.publish(channel, event)}
 
 
-def _tell_blocking(text: str):
+def _tell_blocking(text: str, persist: bool = True):
     # imported lazily so the daemon module graph stays light; LIVE brain + pg.
     from utah import core
 
-    return core.tell(text)
+    return core.tell(text, persist=persist)
 
 
 async def tell(ctx: Context, params: object) -> dict:
-    text = str(_as_dict(params).get("text", "")).strip()
+    p = _as_dict(params)
+    text = str(p.get("text", "")).strip()
     if not text:
         raise RpcError(INVALID_PARAMS, "tell requires a non-empty 'text'")
+    # persist defaults True (web/voice turns are durable). The diagnostic CLI
+    # passes persist=False so terminal probes never pollute recall.
+    persist = bool(p.get("persist", True))
     with ctx.governor.admission():
-        reply = await ctx.pool.run(_tell_blocking, text)
+        reply = await ctx.pool.run(_tell_blocking, text, persist)
     return {
         "text": reply.text,
         "source": reply.source.value,
