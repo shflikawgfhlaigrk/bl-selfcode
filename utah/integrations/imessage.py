@@ -35,33 +35,42 @@ def enabled() -> bool:
     return not DISABLED_FLAG.exists()
 
 
-def _osascript_send(to: str, body: str) -> None:  # pragma: no cover — drives Messages.app
+#: The script takes recipient + body as ``argv`` — message text NEVER appears in
+#: AppleScript source. (Live incident 2026-06-09: the old f-string used Python
+#: ``!r`` repr — single-quoted strings, which AppleScript does not accept — so
+#: every real send died with "syntax error: Expected expression" before reaching
+#: Messages. argv-passing makes quoting structurally impossible to get wrong.)
+_SEND_SCRIPT = '''
+on run argv
+    set theTo to item 1 of argv
+    set theBody to item 2 of argv
+    tell application "Messages"
+        try
+            set svc to 1st service whose service type = iMessage
+            set theBuddy to participant theTo of svc
+            send theBody to theBuddy
+            return "sent:imessage"
+        on error
+            set smsSvc to 1st service whose service type = SMS
+            set smsBuddy to participant theTo of smsSvc
+            send theBody to smsBuddy
+            return "sent:sms"
+        end try
+    end tell
+end run
+'''
+
+
+def _osascript_send(to: str, body: str) -> None:
     """Send *body* to *to* via Messages.app over iMessage, with an SMS relay fallback.
 
-    Tries the iMessage service first; if the buddy isn't reachable on iMessage,
-    falls back to the SMS service (requires Text Message Forwarding from the iPhone).
-    Raises on any AppleScript error so the caller can document the gate."""
-    script = f'''
-    on run
-        set theBody to {body!r}
-        set theTo to {to!r}
-        tell application "Messages"
-            try
-                set svc to 1st service whose service type = iMessage
-                set buddy to participant theTo of svc
-                send theBody to buddy
-                return "sent:imessage"
-            on error
-                set smsSvc to 1st service whose service type = SMS
-                set smsBuddy to participant theTo of smsSvc
-                send theBody to smsBuddy
-                return "sent:sms"
-            end try
-        end tell
-    end run
-    '''
+    Tries the iMessage service first; if the participant isn't reachable on
+    iMessage, falls back to the SMS service (requires Text Message Forwarding
+    from the iPhone). Raises on any AppleScript error so the caller can
+    document the gate."""
     proc = subprocess.run(
-        ["osascript", "-e", script],
+        ["osascript", "-", to, body],
+        input=_SEND_SCRIPT,
         capture_output=True, text=True, timeout=_SEND_TIMEOUT_S,
     )
     if proc.returncode != 0:

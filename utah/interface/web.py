@@ -417,9 +417,15 @@ async def _ledger_snapshot() -> dict:
 
 async def deck_data(request):
     """Every deck data route, served from the single live ``_deck_state`` feed.
-    Always 200 (the SPA throws on non-200); ``/state`` returns the whole feed,
-    other routes return that domain's slice."""
-    route = request.path_params["route"].strip("/").split("/")[0] or "state"
+    Known routes are always 200 (the SPA throws on non-200); ``/state`` returns
+    the whole feed, other routes return that domain's slice. UNKNOWN routes are
+    404 — the old 200+``{}`` made external monitors (and one whole audit)
+    conclude the deck was data-dead when it was healthy."""
+    parts = request.path_params["route"].strip("/").split("/")
+    # Alias /api/<x> → /<x>: both spellings serve the same feed.
+    if parts and parts[0] == "api":
+        parts = parts[1:]
+    route = parts[0] if parts and parts[0] else "state"
     st = await _daemon_status()
     log.info("deck GET /%s (daemon=%s)", route, "up" if st is not None else "down")
     state = _deck_state(st)
@@ -447,7 +453,9 @@ async def deck_data(request):
         return JSONResponse({"status": state["health"], "ok": st is not None})
     if route in state:
         return JSONResponse(state[route])
-    return JSONResponse({})
+    return JSONResponse(
+        {"error": f"unknown route /{route}", "known": sorted(state.keys())}, status_code=404
+    )
 
 
 def build_app() -> Starlette:

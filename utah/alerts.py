@@ -122,6 +122,17 @@ def critical_async(source: str, detail: str = "", *, key: str | None = None) -> 
         pass
 
 
+def prospect_reply(sender_email: str, subject: str = "", *, sender=None) -> dict:
+    """Page the phone the moment a PITCHED PROSPECT writes back — the conversion
+    moment the entire outreach funnel exists for. Rides the critical stream
+    (bypasses quiet hours; a willing buyer should never wait until morning)."""
+    msg = f"{sender_email} replied"
+    if subject:
+        msg += f": {subject[:140]}"
+    return _send("critical", msg, title="💰 PROSPECT REPLIED",
+                 dedup_key=f"reply:{sender_email}", sender=sender)
+
+
 def trade_fire(engine: str, direction: str, entry, *, fire_id=None,
                target: float | None = None, stop: float | None = None, sender=None) -> dict:
     """Page an engine fire (entry / direction / optional target & stop)."""

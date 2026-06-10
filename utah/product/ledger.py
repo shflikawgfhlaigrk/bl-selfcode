@@ -84,6 +84,16 @@ CREATE TABLE IF NOT EXISTS sync_log (
   detail text,
   ts timestamptz NOT NULL DEFAULT now()
 );                                             -- append-only run log (no UNIQUE; every run is a row)
+CREATE TABLE IF NOT EXISTS mail_replies (
+  id bigserial PRIMARY KEY,
+  sender text NOT NULL,                        -- the human (or mailer-daemon) who wrote back
+  subject text NOT NULL DEFAULT '',
+  kind text NOT NULL,                          -- reply | bounce
+  message_id text NOT NULL,                    -- RFC 5322 Message-ID (idempotency across polls)
+  snippet text NOT NULL DEFAULT '',
+  ts timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (message_id)                          -- a message is recorded once, ever
+);
 """
 
 
@@ -141,6 +151,22 @@ class Ledger:
             self._emit("leads", {"name": name, "region": region, "id": row[0], "enriched": True})
         return bool(row)
 
+    def leads_missing_email(self, limit: int = 25) -> list[dict]:
+        """SMB leads with a phone but NO email — the email-enrichment candidates. Newest
+        first (freshest frontier leads enriched soonest). Never probate."""
+        sources = tuple(SMB_LEAD_SOURCES)
+        with self._conn() as c:
+            rows = c.execute(
+                "SELECT name, kind, region, contact, source FROM leads "
+                "WHERE source = ANY(%s) "
+                "AND contact->>'phone' IS NOT NULL AND contact->>'phone' <> '' "
+                "AND (contact->>'email' IS NULL OR contact->>'email' = '') "
+                "ORDER BY ts DESC LIMIT %s",
+                (list(sources), limit),
+            ).fetchall()
+        return [{"name": r[0], "kind": r[1], "region": r[2], "contact": r[3],
+                 "source": r[4]} for r in rows]
+
     def has_phone_lead(self, phone: str, source: str = "google_maps") -> bool:
         """True if this phone is already on a lead row for *source* (cross-city dedup)."""
         if not phone:
@@ -174,7 +200,7 @@ class Ledger:
 
     def update_probate(self, case_name, county, *, heir_contact=None, arv=None,
                        filed=None) -> bool:
-        """Write enrichment (resolved property address/parcel/lat/lng/comps in the
+        """Write enrichment (resolved property address/parcel/lat/lng/nearby-business survey in the
         heir_contact jsonb, plus optional arv/filed) onto an EXISTING probate row.
         Returns True if a row was updated. Pushes the probate deck channel so the panel
         refreshes. Never inserts — enrichment only augments what the scout found."""
@@ -256,6 +282,23 @@ class Ledger:
         return [{"name": r[0], "kind": r[1], "region": r[2], "contact": r[3],
                  "source": r[4]} for r in rows]
 
+    def probate_uncontacted_with_mail(self, limit: int = 20) -> list[dict]:
+        """Probate rows whose enrichment resolved an owner MAILING address, not yet sent a
+        direct-mail letter (suppressed by case_name in the probate campaign). The probate
+        direct-mail last-mile draws from this. Reads the ``probate`` table only."""
+        with self._conn() as c:
+            rows = c.execute(
+                "SELECT case_name, county, heir_contact, arv FROM probate "
+                "WHERE heir_contact->'owner_mail'->>'street' IS NOT NULL "
+                "AND heir_contact->'owner_mail'->>'street' <> '' "
+                "AND NOT EXISTS (SELECT 1 FROM outreach_ledger o "
+                "  WHERE o.recipient = probate.case_name AND o.campaign = %s) "
+                "ORDER BY ts DESC LIMIT %s",
+                (PROBATE_OUTREACH_CAMPAIGN, limit),
+            ).fetchall()
+        return [{"case_name": r[0], "county": r[1], "heir_contact": r[2] or {}, "arv": r[3]}
+                for r in rows]
+
     def uncontacted_probate_heirs(self, campaign, limit=8) -> list[dict]:
         """Probate heirs with contact info — **separate** from SMB outreach. Reads the
         ``probate`` table only; ``com.utah.outreach`` must never call this."""
@@ -307,6 +350,42 @@ class Ledger:
         if row:
             self._emit("mail", {"recipient": recipient, "subject": subject, "id": row[0]})
         return bool(row)
+
+    def pitched_recipients(self) -> set[str]:
+        """Every address we have ever pitched (outreach + mail ledgers), lowercased.
+        The reply poller matches inbound senders against this set — a hit is the
+        conversion moment the whole funnel exists for."""
+        with self._conn() as c:
+            rows = c.execute(
+                "SELECT recipient FROM outreach_ledger "
+                "UNION SELECT recipient FROM mail_ledger"
+            ).fetchall()
+        return {str(r[0]).strip().lower() for r in rows if r[0] and "@" in str(r[0])}
+
+    def record_reply(self, sender, subject, kind, message_id, snippet="") -> bool:
+        """Record an inbound reply/bounce; True if NEW (False = already seen this
+        Message-ID on a prior poll). Idempotent across the 15-min cron."""
+        with self._conn() as c:
+            row = c.execute(
+                "INSERT INTO mail_replies (sender, subject, kind, message_id, snippet) "
+                "VALUES (%s,%s,%s,%s,%s) ON CONFLICT (message_id) DO NOTHING RETURNING id",
+                (sender, subject, kind, message_id, snippet),
+            ).fetchone()
+        if row:
+            self._emit("reply", {"sender": sender, "kind": kind, "subject": subject,
+                                 "id": row[0]})
+        return bool(row)
+
+    def mark_bounced(self, recipient) -> int:
+        """Flip a recipient's mail_ledger rows to 'bounced' so follow-ups and audits
+        stop treating a dead address as contacted-and-alive. Returns rows updated."""
+        with self._conn() as c:
+            cur = c.execute(
+                "UPDATE mail_ledger SET status='bounced' "
+                "WHERE lower(recipient)=lower(%s) AND status='sent'",
+                (recipient,),
+            )
+            return cur.rowcount or 0
 
     def record_post(self, channel, caption, media_ref, subject="", status="posted",
                     post_id=None) -> bool:

@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  com.utah.replies — inbound reply/bounce detection (every 15 min).
+
+  Runs utah.mail_replies.run_scheduled(): IMAP-polls the sending inbox(es), records
+  prospect replies + bounces to the mail_replies ledger, pages the phone (💰 critical
+  stream) the moment a PITCHED prospect writes back, and flips bounced recipients'
+  mail_ledger rows to 'bounced'. This is the funnel's conversion eye — without it the
+  outreach machine is write-only and a "yes, build my site" sits unseen for hours.
+
+  Install:
+    cp ops/launchd/com.utah.replies.plist ~/Library/LaunchAgents/
+    launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.utah.replies.plist
+  Force-run now:  launchctl kickstart gui/$(id -u)/com.utah.replies
+  Stop:           launchctl bootout  gui/$(id -u)/com.utah.replies
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.utah.replies</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/michaelbarber/.utah/venv/bin/python</string>
+    <string>-c</string>
+    <string>from utah import mail_replies; print(mail_replies.run_scheduled())</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>/Users/michaelbarber/Desktop/ProjectUtah</string>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PYTHONPATH</key>
+    <string>/Users/michaelbarber/Desktop/ProjectUtah</string>
+    <key>PYTHONUNBUFFERED</key>
+    <string>1</string>
+    <key>PATH</key>
+    <string>/Users/michaelbarber/.utah/venv/bin:/opt/homebrew/bin:/usr/local/bin:/Users/michaelbarber/.local/bin:/usr/bin:/bin</string>
+  </dict>
+
+  <key>StartInterval</key>
+  <integer>900</integer>
+
+  <key>RunAtLoad</key>
+  <true/>
+
+  <key>StandardOutPath</key>
+  <string>/Users/michaelbarber/.utah/logs/replies.log</string>
+
+  <key>StandardErrorPath</key>
+  <string>/Users/michaelbarber/.utah/logs/replies.err</string>
+</dict>
+</plist>

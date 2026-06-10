@@ -4,6 +4,7 @@ A separate real-Silero test proves it actually scores speech >> music/noise."""
 from __future__ import annotations
 
 import numpy as np
+import pytest
 
 from utah.voice import vad
 
@@ -122,6 +123,7 @@ def test_armed_bare_wake_emits_nothing():
 def test_silero_scores_speech_far_above_noise():
     """Real Silero ONNX: synthesized speech must score >> white noise (the property the
     energy VAD lacked). Loads the model — the genuine proof, not a fake."""
+    pytest.importorskip("torch", reason="Silero VAD needs torch (live ~/.utah/venv only)")
     import wave
     from utah.voice import tts
 
