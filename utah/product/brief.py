@@ -48,8 +48,10 @@ def compose_brief(*, ledger_counts: dict, memory_live: int,
         # The property intel Michael never received (2026-06-10): top resolved estates.
         lines.append("Real estate — top resolved probate properties (county ARV):")
         for p in probate_top[:5]:
+            # 3-mile average assessed value, when the county layer resolved one
+            area = f" · 3mi avg ${int(p['area_avg']):,}" if p.get("area_avg") else ""
             lines.append(f"  • {p.get('case_name')} ({(p.get('county') or '?').title()}) — "
-                         f"${int(p.get('arv') or 0):,} — {p.get('address')}")
+                         f"${int(p.get('arv') or 0):,} — {p.get('address')}{area}")
     if leads_recent:
         names = ", ".join((l.get("name") or "?") for l in leads_recent[:3])
         lines.append(f"Newest leads: {names}.")
@@ -84,11 +86,13 @@ def _probate_top(limit: int = 5) -> list[dict]:
         from utah import config
         with psycopg.connect(config.DB_DSN, autocommit=True) as conn:
             rows = conn.execute(
-                "SELECT case_name, county, arv, heir_contact->>'address' FROM probate "
+                "SELECT case_name, county, arv, heir_contact->>'address', "
+                "       (heir_contact#>>'{area_avg_3mi,avg_value}')::numeric FROM probate "
                 "WHERE arv IS NOT NULL AND heir_contact ? 'address' "
                 "ORDER BY arv DESC LIMIT %s", (limit,)).fetchall()
-        return [{"case_name": c, "county": co, "arv": int(a), "address": ad}
-                for c, co, a, ad in rows]
+        return [{"case_name": c, "county": co, "arv": int(a), "address": ad,
+                 "area_avg": int(avg) if avg is not None else None}
+                for c, co, a, ad, avg in rows]
     except Exception:  # noqa: BLE001 — store down: brief still ships without the section
         return []
 

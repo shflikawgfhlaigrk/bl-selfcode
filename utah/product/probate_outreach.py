@@ -48,6 +48,11 @@ def compose_letter(case: dict, footer_address: str | None = None) -> dict:
     arv = case.get("arv")
     arv_line = (f"County records list the property's assessed value around "
                 f"${int(arv):,}. " if isinstance(arv, (int, float)) and arv else "")
+    # area context: average assessed value within 3 miles (county rolls, when resolved)
+    area = hc.get("area_avg_3mi") or {}
+    if area.get("available") and area.get("avg_value"):
+        arv_line += (f"Properties within three miles average around "
+                     f"${int(area['avg_value']):,} on the county rolls. ")
     body = (
         f"{addressee}\n{mail.get('full', '')}\n\n"
         f"Dear {addressee},\n\n"

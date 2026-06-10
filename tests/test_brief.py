@@ -72,3 +72,26 @@ def test_run_emails_when_enabled():
     )
     assert r["emailed"] is True and not r["email_gated"]
     assert sent
+
+
+def test_compose_brief_shows_3mile_average_when_present():
+    """The '3-mile average' Michael flagged missing (2026-06-10): when the probate row
+    carries area_avg_3mi, the brief renders it next to the parcel's own ARV."""
+    text = brief.compose_brief(
+        ledger_counts={"leads": 1, "probate": 64, "outreach_ledger": 0, "fires": 0},
+        memory_live=5, failures_recent=[], leads_recent=[],
+        probate_top=[{"case_name": "JEAN OSBORN SAWYER", "county": "hall",
+                      "arv": 913400, "address": "434 THUNDER ROAD",
+                      "area_avg": 152340}],
+    )
+    assert "3mi avg $152,340" in text
+
+
+def test_compose_brief_omits_3mile_average_when_gated():
+    text = brief.compose_brief(
+        ledger_counts={"leads": 1, "probate": 64, "outreach_ledger": 0, "fires": 0},
+        memory_live=5, failures_recent=[], leads_recent=[],
+        probate_top=[{"case_name": "JEAN OSBORN SAWYER", "county": "bryan",
+                      "arv": 913400, "address": "434 THUNDER ROAD"}],
+    )
+    assert "3mi avg" not in text                       # gated county: no fabricated number

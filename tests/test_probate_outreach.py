@@ -123,3 +123,26 @@ def test_queue_accepts_situs_mail_cases(tmp_path, monkeypatch):
     res = probate_outreach.queue(Led(), [case])
     assert res["queued"] == 1 and res["no_addr"] == 0
     assert (tmp_path / "joe-louis-ray.txt").exists()
+
+
+def test_compose_letter_mentions_3mile_average_when_known():
+    """The letter cites the area context (avg assessed value within 3 miles) when the
+    enrichment resolved it — county records, never a fabricated comps claim."""
+    case = {"case_name": "Estate of John Smith", "county": "harris", "arv": 185000,
+            "heir_contact": {"owner": "SMITH JOHN",
+                             "owner_mail": {"street": "PO Box 55",
+                                            "full": "PO Box 55, Newnan GA 30263"},
+                             "area_avg_3mi": {"available": True, "avg_value": 152340,
+                                              "parcels": 412, "radius_m": 4828}}}
+    letter = probate_outreach.compose_letter(case, footer_address="28 Dogwood Rd, Newnan GA 30263")
+    assert "three miles" in letter["body"] and "$152,340" in letter["body"]
+
+
+def test_compose_letter_silent_on_3mile_average_when_gated():
+    case = {"case_name": "Estate of John Smith", "county": "bryan", "arv": 185000,
+            "heir_contact": {"owner": "SMITH JOHN",
+                             "owner_mail": {"street": "PO Box 55",
+                                            "full": "PO Box 55, Newnan GA 30263"},
+                             "area_avg_3mi": {"available": False, "gated": True}}}
+    letter = probate_outreach.compose_letter(case, footer_address="28 Dogwood Rd, Newnan GA 30263")
+    assert "three miles" not in letter["body"]         # never a fabricated area claim

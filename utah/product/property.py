@@ -238,8 +238,90 @@ def radius_check(lat, lng, radius_m: int = maps.THREE_MILES_M, *, places_fetch=N
     return out
 
 
+def _arcgis_stats_query(url: str, params: dict, fetch=None, timeout: int = 20) -> dict:
+    """One ArcGIS server-side STATISTICS query → parsed JSON (injectable for tests).
+    Separate from ``_arcgis_query`` because stats use geometry+outStatistics params, not a
+    WHERE page of feature rows."""
+    if fetch is not None:
+        return fetch(url, params)
+    full = url + "?" + urllib.parse.urlencode(params)
+    req = urllib.request.Request(full, headers={"User-Agent": "Utah/1.0 property"})
+    with urllib.request.urlopen(req, timeout=timeout, context=_ssl_context()) as r:
+        return json.loads(r.read().decode("utf-8", "replace"))
+
+
+def area_value_avg(county: str, lat, lng, radius_m: int = maps.THREE_MILES_M, *,
+                   fetch=None) -> dict:
+    """AVERAGE county-assessed parcel value within ``radius_m`` of ``(lat,lng)`` — the
+    '3-mile average' the reports were missing (2026-06-10). Computed SERVER-SIDE
+    (outStatistics avg+count) on the SAME county layer that produced the parcel's own
+    ``arv``, so it is county-assessed values — honest, NOT a sold-comps average. Gates
+    when the county has no registered value layer or the server errors; never fabricates."""
+    reg = COUNTY_ARCGIS.get((county or "").strip().lower())
+    vf = (reg or {}).get("value_field")
+    if not reg or not vf:
+        return {"available": False, "gated": True, "county": county,
+                "reason": "no county value layer"}
+    stats_params = {
+        "where": "1=1",
+        "geometry": json.dumps({"x": float(lng), "y": float(lat),
+                                "spatialReference": {"wkid": 4326}}),
+        "geometryType": "esriGeometryPoint", "inSR": "4326",
+        "spatialRel": "esriSpatialRelIntersects",
+        "distance": str(int(radius_m)), "units": "esriSRUnit_Meter",
+        "outStatistics": json.dumps([
+            {"statisticType": "avg", "onStatisticField": vf,
+             "outStatisticFieldName": "avg_value"},
+            {"statisticType": "count", "onStatisticField": vf,
+             "outStatisticFieldName": "n_parcels"}]),
+        "returnGeometry": "false", "f": "json",
+    }
+    try:
+        data = _arcgis_stats_query(reg["url"], stats_params, fetch=fetch)
+        attrs = (data.get("features") or [{}])[0].get("attributes") or {}
+        avg = _to_money(attrs.get("avg_value"))
+        if avg is None:
+            raise RuntimeError(f"no avg in response: {str(data)[:120]}")
+        return {"available": True, "gated": False, "avg_value": avg,
+                "parcels": int(attrs.get("n_parcels") or 0), "radius_m": radius_m,
+                "field": vf, "method": "server_stats"}
+    except Exception as stats_exc:  # noqa: BLE001 — try the bbox-sample fallback below
+        last = stats_exc
+    # FALLBACK — Hall + Harris layers 400 on ANY outStatistics (live-diagnosed
+    # 2026-06-10): fetch the parcel VALUES inside the 3-mile bbox (paged) and average
+    # client-side. Same square-bbox approximation radius_check uses for OSM; labeled
+    # method=bbox_sample with the real parcel count. Never fabricates.
+    import math
+    dlat = radius_m / 111_320.0
+    dlng = radius_m / (111_320.0 * max(0.1, math.cos(math.radians(float(lat)))))
+    values: list[int] = []
+    try:
+        for page in range(4):                              # ≤4k parcels bounds the run
+            data = _arcgis_stats_query(reg["url"], {
+                "where": "1=1",
+                "geometry": f"{float(lng) - dlng},{float(lat) - dlat},"
+                            f"{float(lng) + dlng},{float(lat) + dlat}",
+                "geometryType": "esriGeometryEnvelope", "inSR": "4326",
+                "spatialRel": "esriSpatialRelIntersects", "outFields": vf,
+                "returnGeometry": "false", "resultRecordCount": "1000",
+                "resultOffset": str(page * 1000), "f": "json"}, fetch=fetch)
+            feats = data.get("features") or []
+            values += [m for f in feats
+                       if (m := _to_money((f.get("attributes") or {}).get(vf))) is not None]
+            if len(feats) < 1000 or not data.get("exceededTransferLimit", True):
+                break
+        if not values:
+            raise RuntimeError(f"no parcel values in bbox (stats err: {last})")
+        return {"available": True, "gated": False,
+                "avg_value": int(sum(values) / len(values)), "parcels": len(values),
+                "radius_m": radius_m, "field": vf, "method": "bbox_sample"}
+    except Exception as exc:  # noqa: BLE001 — both paths down: gate, never fabricate
+        failures.record("property", "area_avg_failed", f"{county}: {exc}")
+        return {"available": False, "gated": True, "county": county, "reason": str(exc)}
+
+
 def enrich(case_name: str, county: str, *, fetch=None, geocode_fetch=None,
-           places_fetch=None, smb_fetch=None) -> dict:
+           places_fetch=None, smb_fetch=None, stats_fetch=None) -> dict:
     """Full enrichment for one decedent: resolve the PROPERTY (address/parcel/owner/
     assessed-value) → geocode → nearby-business survey. Returns the property payload (or an
     honest unresolved marker). NOTE: this resolves the property, NOT the HEIR's contact —
@@ -270,6 +352,9 @@ def enrich(case_name: str, county: str, *, fetch=None, geocode_fetch=None,
         # 'nearby' (renamed from the misleading 'comps'): a nearby-BUSINESS survey, not a
         # comparable-home-sale price average. Honesty fix, audit §3.2.
         payload["nearby"] = radius_check(lat, lng, places_fetch=places_fetch, smb_fetch=smb_fetch)
+        # the 3-mile AVERAGE assessed value (county layer, server-side stats) — gates
+        # honestly for counties without a value layer; reports render it when available.
+        payload["area_avg_3mi"] = area_value_avg(county, lat, lng, fetch=stats_fetch)
     return payload
 
 
@@ -317,4 +402,39 @@ def enrich_ledger(limit: int = 25, *, ledger=None, fetch=None, geocode_fetch=Non
     return {"scanned": len(rows), "resolved": resolved, "gated": gated}
 
 
-__all__ = ["resolve_property", "radius_check", "enrich", "enrich_ledger", "COUNTY_ARCGIS"]
+def backfill_area_avg(limit: int = 50, *, ledger=None, fetch=None) -> dict:
+    """Stamp ``area_avg_3mi`` onto probate rows that were enriched BEFORE the key existed
+    (2026-06-10). Cheap targeted pass: one stats query per row, only rows with a resolved
+    point; counties without a value layer get the honest gate marker so they rest. Merges
+    into the existing heir_contact jsonb (update_probate replaces the column wholesale)."""
+    import psycopg
+
+    from utah import config
+    from utah.product.ledger import Ledger
+
+    lg = ledger or Ledger()
+    with psycopg.connect(config.DB_DSN, autocommit=True) as conn:
+        rows = conn.execute(
+            "SELECT case_name, county, heir_contact FROM probate "
+            "WHERE heir_contact ? 'address' AND NOT heir_contact ? 'area_avg_3mi' "
+            "LIMIT %s", (limit,)).fetchall()
+    stamped = available = 0
+    for case_name, county, hc in rows:
+        hc = hc or {}
+        lat, lng = hc.get("lat"), hc.get("lng")
+        if lat is None or lng is None:
+            hc["area_avg_3mi"] = {"available": False, "gated": True, "reason": "no point"}
+        else:
+            hc["area_avg_3mi"] = area_value_avg(county, lat, lng, fetch=fetch)
+        try:
+            lg.update_probate(case_name, county, heir_contact=hc)
+            stamped += 1
+            available += 1 if hc["area_avg_3mi"].get("available") else 0
+        except Exception as exc:  # noqa: BLE001 — one bad row must not abort the pass
+            failures.record("property", "area_backfill_failed", f"{case_name[:40]}: {exc}")
+    log.info("area_avg backfill: stamped=%d available=%d", stamped, available)
+    return {"scanned": len(rows), "stamped": stamped, "available": available}
+
+
+__all__ = ["resolve_property", "radius_check", "area_value_avg", "enrich", "enrich_ledger",
+           "backfill_area_avg", "COUNTY_ARCGIS"]
