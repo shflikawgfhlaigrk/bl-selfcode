@@ -32,8 +32,44 @@ def compose_caption(subject: dict) -> str:
     return cap[:MAX_CAPTION]
 
 
-def _real_publish(caption: str, media_ref: str, channel: str):  # pragma: no cover
-    raise RuntimeError(f"{channel} posting not configured (creds at {_SECRETS}/{channel}.json)")
+def _real_publish(caption: str, media_ref: str, channel: str):  # pragma: no cover — network
+    """REAL Instagram Reels publish via the Graph API (two-step: create container with a
+    PUBLIC video_url, then publish). Was a stub that raised — the marketer could never
+    post even WITH creds. Creds: ~/.utah/secrets/instagram.json
+    {"access_token": "...", "ig_user_id": "..."} (IG Business/Creator account token with
+    instagram_content_publish). media_ref must be a PUBLIC https mp4 URL. Other channels
+    still raise → honest post_failed, never faked."""
+    if channel != "instagram":
+        raise RuntimeError(f"{channel} posting not implemented (creds at {_SECRETS}/{channel}.json)")
+    import json as _json
+    import time as _time
+    import urllib.parse as _up
+    import urllib.request as _ur
+
+    creds = _json.loads((_SECRETS / "instagram.json").read_text())
+    token, user = creds["access_token"], creds["ig_user_id"]
+    base = f"https://graph.facebook.com/v21.0/{user}"
+
+    def _post(url, params):
+        data = _up.urlencode(params).encode()
+        with _ur.urlopen(_ur.Request(url, data=data), timeout=60) as r:
+            return _json.loads(r.read().decode())
+
+    container = _post(f"{base}/media", {
+        "media_type": "REELS", "video_url": media_ref,
+        "caption": caption[:2190], "access_token": token,
+    })["id"]
+    for _ in range(30):                       # video processing: poll until FINISHED
+        st = _json.loads(_ur.urlopen(
+            f"https://graph.facebook.com/v21.0/{container}"
+            f"?fields=status_code&access_token={_up.quote(token)}", timeout=30).read())
+        if st.get("status_code") == "FINISHED":
+            break
+        if st.get("status_code") == "ERROR":
+            raise RuntimeError(f"IG container processing failed: {st}")
+        _time.sleep(5)
+    return _post(f"{base}/media_publish",
+                 {"creation_id": container, "access_token": token})["id"]
 
 
 def post(caption: str, *, media_ref: str, channel: str = "instagram", publish_fn=None) -> dict:
