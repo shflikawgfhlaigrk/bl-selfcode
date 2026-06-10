@@ -435,13 +435,16 @@ class BarStream:
             if new_key == prev_key:
                 continue       # only the forming bar grew — nothing new to judge
             evaluated += 1
-            sig = trading.evaluate(closes, lookback=self.lookback, engine=self.engine)
-            if sig and sig.get("direction"):
-                self.ledger.record_fire(self.engine, sig["direction"], entry=closes[-1],
-                                        synthetic=False, symbol=symbol)
-                fires += 1
-                log.info("wc_feed FIRE: %s %s @ %.2f (%d bars)", symbol,
-                         sig["direction"], closes[-1], len(closes))
+            # EVERY implemented engine judges the same closed bar under its OWN name —
+            # separate fires, separate grading, separate dash rows (2026-06-10).
+            for eng in trading.implemented_engines():
+                sig = trading.evaluate(closes, lookback=self.lookback, engine=eng)
+                if sig and sig.get("direction"):
+                    self.ledger.record_fire(eng, sig["direction"], entry=closes[-1],
+                                            synthetic=False, symbol=symbol)
+                    fires += 1
+                    log.info("wc_feed FIRE: %s %s %s @ %.2f (%d bars)", eng, symbol,
+                             sig["direction"], closes[-1], len(closes))
         return {"symbols": len(self.buf), "ticked": ticked, "evaluated": evaluated,
                 "fires": fires, "ready": ready,
                 "bars": {s: len(v.get("closes", [])) for s, v in self.state.items()}}

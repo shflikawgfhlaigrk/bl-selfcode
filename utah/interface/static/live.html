@@ -1398,7 +1398,7 @@ async function openLab(){
     h+='<div class="drill-sec">ENGINE ROSTER</div>';
     h+=(d.engines||[]).map(e=>
        `<div class="drill-row"><span class="led ${e.state==='live'?'ok':''}"></span> `+
-       `<b>${esc(e.name)}</b><span class="drill-meta">${esc(e.kind)} · ${esc((e.state||'').toUpperCase())}</span></div>`).join("");
+       `<b>${esc(e.name)}</b><span class="drill-meta">${esc(e.kind)} · ${esc((e.state||'').toUpperCase())}${e.fires?` · ${esc(e.fires)} FIRES`:''}</span></div>`).join("");
     h+='<div class="drill-sec">'+((d.rows||[]).length)+' FIRES</div>';
     h+= (d.rows&&d.rows.length)
         ? d.rows.map(r=>`<div class="drill-row"><b>${esc(r.engine)}</b><span class="drill-meta">${esc(r.direction)} · ${esc(r.outcome||'open')} · ${esc(r.ts||'')}</span></div>`).join("")

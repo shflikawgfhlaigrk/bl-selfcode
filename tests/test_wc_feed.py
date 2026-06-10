@@ -239,7 +239,11 @@ def test_barstream_hooks_once_and_flushes_incrementally():
     bs.feed("CM.NQM6", 5, 110.0)
     bs.feed("CM.NQM6", 6, 111.0)
     r2 = bs.flush()
-    assert r2["fires"] == 1 and lg.fired == [("breakout", "long", 110.0, False, "CM.NQM6")]
+    # the SAME closed bar judged by every implemented engine under its OWN name:
+    # breakout chases the new high, meanrev fades the 2σ extreme — true separation.
+    assert r2["fires"] == 2
+    assert ("breakout", "long", 110.0, False, "CM.NQM6") in lg.fired
+    assert ("meanrev", "short", 110.0, False, "CM.NQM6") in lg.fired
     # every closed bar persisted exactly once across the two flushes
     all_ts = [ts for _, rows, _ in lg.persisted for (ts, *_a) in rows]
     assert sorted(all_ts) == [1, 2, 3, 4, 5, 6] and len(all_ts) == len(set(all_ts))
@@ -253,10 +257,11 @@ def test_barstream_no_new_closed_bar_means_no_reevaluation():
     for ep, px in [(0, 100.0), (1, 101.0), (2, 102.0), (3, 101.0),
                    (4, 103.0), (5, 110.0), (6, 111.0)]:
         bs.feed("X", ep, px)
-    assert bs.flush()["fires"] == 1
+    first = bs.flush()["fires"]
+    assert first >= 1
     bs.feed("X", 6, 111.5)                              # forming bar only
     r = bs.flush()
-    assert r["evaluated"] == 0 and r["fires"] == 0 and len(lg.fired) == 1
+    assert r["evaluated"] == 0 and r["fires"] == 0 and len(lg.fired) == first
 
 
 def test_barstream_trims_its_buffer_to_the_forming_bar():
