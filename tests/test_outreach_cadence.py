@@ -114,7 +114,9 @@ def test_auto_channel_caps_total_at_limit(monkeypatch):
 
 # --- iMessage fallback when Twilio is absent ---------------------------------
 
-def test_sms_falls_back_to_imessage_when_no_twilio(monkeypatch):
+def test_sms_falls_back_to_imessage_when_no_twilio(monkeypatch, tmp_path):
+    from utah import sms as _sms
+    monkeypatch.setattr(_sms, "DAILY_COUNTER", tmp_path / "sms_daily.json")   # live cap state never decides a unit test
     """No Twilio creds → the text goes out via Messages.app (Michael's own texts),
     not a dead gate."""
     failures.set_store(FakeFailureStore())

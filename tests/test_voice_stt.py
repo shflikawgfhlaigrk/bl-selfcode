@@ -52,8 +52,11 @@ def test_default_stt_prefers_whisper_for_accuracy(monkeypatch):
     assert isinstance(stt._build_default_stt(), stt.MoonshineSTT)
 
     monkeypatch.setattr(config, "STT_ENGINE", "whisper")
-    if importlib.util.find_spec("mlx_whisper") is None:
-        # no MLX on this host -> graceful fallback to Moonshine, never a crash
+    # whisper.cpp is the post-MLX core (2026-06-10): when the server binary + a ggml
+    # model are provisioned it wins outright; otherwise MLX, then Moonshine.
+    if stt._best_whispercpp_model() and __import__("os").path.exists(config.WHISPERCPP_BIN):
+        assert isinstance(stt._build_default_stt(), stt.WhisperCppSTT)
+    elif importlib.util.find_spec("mlx_whisper") is None:
         assert isinstance(stt._build_default_stt(), stt.MoonshineSTT)
     else:
         # MLX runs in a KILLABLE worker (SubprocessSTT) so a Metal hang can't deafen
