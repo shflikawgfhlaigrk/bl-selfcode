@@ -84,8 +84,11 @@ def _count_since(table: str, hours: float) -> int | None:
     try:
         with psycopg.connect(config.DB_DSN, autocommit=True, connect_timeout=8) as conn:
             row = conn.execute(
+                # NB: not make_interval(hours => %s) — that signature is integer-only and
+                # psycopg binds a Python float as double precision → "function does not
+                # exist" (found live; the unit tests fake the DB so they couldn't catch it).
                 f"select count(*) from {table} "  # noqa: S608 — table is a fixed literal
-                f"where ts > now() - make_interval(hours => %s)",
+                f"where ts > now() - (%s * interval '1 hour')",
                 (hours,),
             ).fetchone()
         return int(row[0]) if row and row[0] is not None else 0
