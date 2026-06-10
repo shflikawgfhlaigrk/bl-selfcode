@@ -94,6 +94,17 @@ CREATE TABLE IF NOT EXISTS mail_replies (
   ts timestamptz NOT NULL DEFAULT now(),
   UNIQUE (message_id)                          -- a message is recorded once, ever
 );
+CREATE TABLE IF NOT EXISTS bars (
+  id bigserial PRIMARY KEY,
+  symbol text NOT NULL,                        -- e.g. CM.MNQM6 (the WC feed symbol)
+  ts timestamptz NOT NULL,                     -- bar CLOSE time (when its close became real)
+  o numeric, h numeric, l numeric,             -- best-effort from intra-bar tick closes
+  c numeric NOT NULL,                          -- authoritative bar close (the grading price)
+  bar_seconds integer NOT NULL DEFAULT 15,
+  ts_recorded timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (symbol, ts)                          -- a bar lands once — overlap-safe
+);
+ALTER TABLE fires ADD COLUMN IF NOT EXISTS symbol text;  -- which bar stream grades the fire
 """
 
 
@@ -326,17 +337,93 @@ class Ledger:
                         "contact": contact, "source": "probate"})
         return out
 
-    def record_fire(self, engine, direction, entry=None, synthetic=False) -> int:
-        """Record an engine fire (real only on the board; synthetic flagged)."""
+    def record_fire(self, engine, direction, entry=None, synthetic=False,
+                    symbol=None) -> int:
+        """Record an engine fire (real only on the board; synthetic flagged). ``symbol``
+        names the bar stream the fire grader walks to fill outcome/pnl."""
         with self._conn() as c:
             row = c.execute(
-                "INSERT INTO fires (engine, direction, entry, synthetic) "
-                "VALUES (%s,%s,%s,%s) RETURNING id",
-                (engine, direction, entry, synthetic),
+                "INSERT INTO fires (engine, direction, entry, synthetic, symbol) "
+                "VALUES (%s,%s,%s,%s,%s) RETURNING id",
+                (engine, direction, entry, synthetic, symbol),
             ).fetchone()
         if not synthetic:
             self._emit("trading", {"engine": engine, "direction": direction, "id": row[0]})
         return int(row[0])
+
+    # --- bars + fire grading (the measurability lane: utah/product/fire_grader.py) ---
+
+    def record_bars(self, symbol, bars, bar_seconds=15) -> int:
+        """Persist closed bars — ``bars`` is ``[(close_epoch_s, o, h, l, c), ...]``.
+        ``ts`` is the bar CLOSE time; never-twice per (symbol, ts) so overlapping
+        collection windows can't double-store. Returns how many were NEW."""
+        new = 0
+        with self._conn() as c:
+            for ep, o, h, l, close in bars:
+                row = c.execute(
+                    "INSERT INTO bars (symbol, ts, o, h, l, c, bar_seconds) "
+                    "VALUES (%s, to_timestamp(%s), %s,%s,%s,%s,%s) "
+                    "ON CONFLICT (symbol, ts) DO NOTHING RETURNING id",
+                    (symbol, ep, o, h, l, close, bar_seconds),
+                ).fetchone()
+                if row:
+                    new += 1
+        return new
+
+    def ungraded_fires(self, older_than_minutes=30) -> list[dict]:
+        """Real (non-synthetic) fires with no outcome yet, older than the evaluation
+        horizon — the grader's worklist, oldest first."""
+        with self._conn() as c:
+            rows = c.execute(
+                "SELECT id, engine, direction, entry::float8, ts, symbol FROM fires "
+                "WHERE outcome IS NULL AND synthetic = false "
+                "AND ts < now() - (%s * interval '1 minute') ORDER BY ts",
+                (float(older_than_minutes),),
+            ).fetchall()
+        return [{"id": r[0], "engine": r[1], "direction": r[2], "entry": r[3],
+                 "ts": r[4], "symbol": r[5]} for r in rows]
+
+    def bars_before(self, symbol, ts, limit) -> list[float]:
+        """The last *limit* bar closes at/before *ts*, chronological (the grader's
+        structural-stop window)."""
+        with self._conn() as c:
+            rows = c.execute(
+                "SELECT c::float8 FROM bars WHERE symbol=%s AND ts <= %s "
+                "ORDER BY ts DESC LIMIT %s", (symbol, ts, int(limit)),
+            ).fetchall()
+        return [r[0] for r in reversed(rows)]
+
+    def bars_between(self, symbol, start, end) -> list[float]:
+        """Bar closes with ``start < ts <= end``, chronological (the grader's exit walk)."""
+        with self._conn() as c:
+            rows = c.execute(
+                "SELECT c::float8 FROM bars WHERE symbol=%s AND ts > %s AND ts <= %s "
+                "ORDER BY ts", (symbol, start, end),
+            ).fetchall()
+        return [r[0] for r in rows]
+
+    def bar_symbols_between(self, start, end) -> list[str]:
+        """Distinct symbols holding bars in a window — lets the grader attach a
+        symbol-less fire to the ONLY candidate bar stream (never a guess between two)."""
+        with self._conn() as c:
+            rows = c.execute(
+                "SELECT DISTINCT symbol FROM bars WHERE ts > %s AND ts <= %s ORDER BY 1",
+                (start, end),
+            ).fetchall()
+        return [r[0] for r in rows]
+
+    def grade_fire(self, fire_id, outcome, pnl=None) -> bool:
+        """Fill a fire's outcome/pnl exactly once (``WHERE outcome IS NULL`` — a graded
+        fire is never regraded). True if this call did the grading."""
+        with self._conn() as c:
+            cur = c.execute(
+                "UPDATE fires SET outcome=%s, pnl=%s WHERE id=%s AND outcome IS NULL",
+                (outcome, pnl, int(fire_id)),
+            )
+            updated = (cur.rowcount or 0) > 0
+        if updated:
+            self._emit("trading", {"id": int(fire_id), "outcome": outcome, "pnl": pnl})
+        return updated
 
     def record_mail(self, recipient, subject, status="sent", channel="email") -> bool:
         """Record an email attempt; True if new (False = this message already sent).
@@ -463,7 +550,8 @@ class Ledger:
         "outreach": ("outreach_ledger",
                      "id, recipient, campaign, channel, to_char(ts,'YYYY-MM-DD HH24:MI') ts"),
         "fires": ("fires",
-                  "id, engine, direction, outcome, to_char(ts,'YYYY-MM-DD HH24:MI') ts"),
+                  "id, engine, direction, symbol, outcome, pnl::float8 pnl, "
+                  "to_char(ts,'YYYY-MM-DD HH24:MI') ts"),
         "mail": ("mail_ledger",
                  "id, recipient, subject, channel, status, to_char(ts,'YYYY-MM-DD HH24:MI') ts"),
         "marketer": ("marketer_posts",

@@ -10,8 +10,11 @@ Evaluating EVERY tick is noise (the first cut fired ~never on real lookback and 
 jitter when forced). So we AGGREGATE ticks into CLOSED BARS per symbol (bucket by
 ``cepoch // BAR_SECONDS``; the last close of a completed bucket is the bar's close, the
 still-forming bucket is excluded), keep a persistent per-symbol bar history, and evaluate the
-engines on the bar series → ``ledger.record_fire`` on a real breakout. Read-only (never sends
-an order); gates honestly when WC is unreachable; never fabricates a price.
+engines on the bar series → ``ledger.record_fire`` on a real breakout. Every newly-closed bar
+is ALSO persisted to the ledger's ``bars`` table (ts = bar close time) so recorded fires are
+gradable after the fact — utah/product/fire_grader.py walks those bars to fill outcome/pnl.
+Read-only (never sends an order); gates honestly when WC is unreachable; never fabricates a
+price.
 """
 from __future__ import annotations
 
@@ -98,6 +101,44 @@ def closed_bars(ticks, bar_seconds: int = BAR_SECONDS) -> list[tuple[int, float]
         last[k] = cl
     closed = order[:-1] if len(order) >= 2 else []
     return [(k, last[k]) for k in closed]
+
+
+def ohlc_bars(ticks, bar_seconds: int = BAR_SECONDS) -> list[tuple[int, float, float, float, float]]:
+    """``[(epoch, close), ...]`` → ``[(bar_key, o, h, l, c), ...]`` for CLOSED buckets only
+    (forming bucket excluded, same rule as :func:`closed_bars`). o/h/l/c are derived from
+    the ~1s tick closes observed inside each bucket — REAL prices; o/h/l are best-effort
+    within the collection window, c (the grading price) is authoritative. PURE."""
+    order: list[int] = []
+    agg: dict[int, list[float]] = {}
+    for ep, cl in ticks:
+        if ep is None or cl is None:
+            continue
+        k = int(ep) // bar_seconds
+        if k not in agg:
+            order.append(k)
+            agg[k] = []
+        agg[k].append(cl)
+    closed = order[:-1] if len(order) >= 2 else []
+    return [(k, agg[k][0], max(agg[k]), min(agg[k]), agg[k][-1]) for k in closed]
+
+
+def _persist_bars(ledger, symbol: str, ticks, prev_key: int, bar_seconds: int) -> int:
+    """Write the window's NEWLY-closed bars (bar_key > *prev_key*) to the ledger's ``bars``
+    table with ts = bar CLOSE epoch — the price history that makes fires gradable after
+    the fact (utah/product/fire_grader.py). Best-effort: a store hiccup (or a minimal
+    ledger without record_bars) never stops the feed loop."""
+    if not hasattr(ledger, "record_bars"):
+        return 0
+    rows = [((k + 1) * bar_seconds, o, h, l, c)
+            for k, o, h, l, c in ohlc_bars(ticks, bar_seconds) if k > prev_key]
+    if not rows:
+        return 0
+    try:
+        return ledger.record_bars(symbol, rows, bar_seconds=bar_seconds)
+    except Exception as exc:  # noqa: BLE001 — persistence must never kill the feed
+        from utah import failures
+        failures.record("trading", "bars_persist_failed", str(exc))
+        return 0
 
 
 def ingest(state: dict, symbol: str, ticks, *, bar_seconds: int = BAR_SECONDS,
@@ -189,14 +230,17 @@ def run(ledger, *, seconds: float = 30.0, bar_seconds: int = BAR_SECONDS, lookba
     ticks = (collect_fn or collect_ticks)(seconds)
     fires = evaluated = ready = 0
     for symbol, tk in ticks.items():
+        prev_key = state.get(symbol, {}).get("last_key", -1)
         closes = ingest(state, symbol, tk, bar_seconds=bar_seconds)
+        _persist_bars(ledger, symbol, tk, prev_key, bar_seconds)
         if len(closes) < lookback + 1:
             continue
         ready += 1
         evaluated += 1
         sig = trading.evaluate(closes, lookback=lookback, engine=engine)
         if sig and sig.get("direction"):
-            ledger.record_fire(engine, sig["direction"], entry=closes[-1], synthetic=False)
+            ledger.record_fire(engine, sig["direction"], entry=closes[-1],
+                               synthetic=False, symbol=symbol)
             fires += 1
             log.info("wc_feed FIRE: %s %s @ %.2f (%d bars)", symbol, sig["direction"],
                      closes[-1], len(closes))
@@ -249,6 +293,10 @@ def main() -> int:
     interval = float(os.environ.get("UTAH_WC_INTERVAL", "30"))
     lookback = int(os.environ.get("UTAH_WC_LOOKBACK", "20"))
     ledger = Ledger()
+    try:
+        ledger.init_schema()   # bars table + fires.symbol exist before the first persist
+    except Exception as exc:  # noqa: BLE001 — store down at boot: record, loop will retry
+        failures.record("trading", "bars_schema", str(exc))
     state: dict = {}
     while True:
         if not ensure_chrome_wc():
@@ -265,8 +313,9 @@ def main() -> int:
         _time.sleep(1.0)
 
 
-__all__ = ["parse_candle", "closed_bars", "ingest", "feed_available", "collect_ticks",
-           "run", "ensure_chrome_wc", "main", "CDP_PORT", "WC_HOST", "BAR_SECONDS"]
+__all__ = ["parse_candle", "closed_bars", "ohlc_bars", "ingest", "feed_available",
+           "collect_ticks", "run", "ensure_chrome_wc", "main", "CDP_PORT", "WC_HOST",
+           "BAR_SECONDS"]
 
 
 if __name__ == "__main__":

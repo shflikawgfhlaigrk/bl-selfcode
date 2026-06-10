@@ -32,6 +32,7 @@ def ledger():
         c.execute("DELETE FROM mail_ledger WHERE recipient=%s", (MARK,))
         c.execute("DELETE FROM marketer_posts WHERE channel=%s", (MARK,))
         c.execute("DELETE FROM sync_log WHERE source=%s", (MARK,))
+        c.execute("DELETE FROM bars WHERE symbol=%s", (MARK,))
 
 
 def test_record_lead_is_never_twice(ledger):
@@ -98,6 +99,35 @@ def test_counts_includes_all_tables(ledger):
     c = ledger.counts()
     assert {"leads", "probate", "outreach_ledger", "fires",
             "mail_ledger", "marketer_posts", "sync_log"} <= set(c)
+
+
+def test_record_bars_is_never_twice_per_symbol_ts(ledger):
+    rows = [(1_700_000_000, 1.0, 2.0, 0.5, 1.5), (1_700_000_015, 1.5, 1.6, 1.4, 1.5)]
+    assert ledger.record_bars(MARK, rows, bar_seconds=15) == 2
+    assert ledger.record_bars(MARK, rows, bar_seconds=15) == 0   # UNIQUE(symbol, ts)
+
+
+def test_bars_before_and_between_walk_real_closes(ledger):
+    from datetime import datetime, timedelta, timezone
+
+    base = 1_700_000_000
+    ledger.record_bars(MARK, [(base + 15 * i, None, None, None, float(100 + i))
+                              for i in range(5)])
+    cut = datetime.fromtimestamp(base + 30, tz=timezone.utc)
+    assert ledger.bars_before(MARK, cut, 3) == [100.0, 101.0, 102.0]   # ts <= cut, chrono
+    assert ledger.bars_between(MARK, cut, cut + timedelta(seconds=60)) == [103.0, 104.0]
+    assert MARK in ledger.bar_symbols_between(cut, cut + timedelta(seconds=60))
+
+
+def test_fire_grading_roundtrip_grades_exactly_once(ledger):
+    fid = ledger.record_fire(MARK, "long", 101.0, symbol=MARK)
+    mine = [f for f in ledger.ungraded_fires(older_than_minutes=0) if f["id"] == fid]
+    assert mine and mine[0]["symbol"] == MARK and mine[0]["entry"] == 101.0
+    assert ledger.grade_fire(fid, "target", 2.0) is True
+    assert ledger.grade_fire(fid, "stop", -1.0) is False     # graded once, ever
+    assert all(f["id"] != fid for f in ledger.ungraded_fires(older_than_minutes=0))
+    row = [r for r in ledger.recent("fires", 200) if r["id"] == fid]
+    assert row and row[0]["outcome"] == "target" and row[0]["pnl"] == 2.0
 
 
 def test_uncontacted_smb_leads_exclude_wrong_source(ledger):
