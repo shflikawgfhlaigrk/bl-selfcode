@@ -34,7 +34,8 @@ def _brief_recipient() -> str:
 
 
 def compose_brief(*, ledger_counts: dict, memory_live: int,
-                  failures_recent: list, leads_recent: list) -> str:
+                  failures_recent: list, leads_recent: list,
+                  probate_top: list | None = None) -> str:
     """A grounded brief from live state. All numbers are real; nothing invented."""
     lc = ledger_counts or {}
     lines = ["UTAH MORNING BRIEF", ""]
@@ -43,6 +44,12 @@ def compose_brief(*, ledger_counts: dict, memory_live: int,
         f"{lc.get('outreach_ledger', 0)} outreach queued, {lc.get('fires', 0)} engine fires."
     )
     lines.append(f"Memory: {memory_live} live facts grounding the brain.")
+    if probate_top:
+        # The property intel Michael never received (2026-06-10): top resolved estates.
+        lines.append("Real estate — top resolved probate properties (county ARV):")
+        for p in probate_top[:5]:
+            lines.append(f"  • {p.get('case_name')} ({(p.get('county') or '?').title()}) — "
+                         f"${int(p.get('arv') or 0):,} — {p.get('address')}")
     if leads_recent:
         names = ", ".join((l.get("name") or "?") for l in leads_recent[:3])
         lines.append(f"Newest leads: {names}.")
@@ -65,7 +72,25 @@ def gather() -> dict:
         "memory_live": memory.get_backend().live_counts().get("live", 0),
         "failures_recent": failures.recent(8),
         "leads_recent": lg.recent("leads", 3),
+        "probate_top": _probate_top(),
     }
+
+
+def _probate_top(limit: int = 5) -> list[dict]:
+    """Top RESOLVED probate properties by county ARV — best-effort, never blocks the brief."""
+    try:
+        import psycopg
+
+        from utah import config
+        with psycopg.connect(config.DB_DSN, autocommit=True) as conn:
+            rows = conn.execute(
+                "SELECT case_name, county, arv, heir_contact->>'address' FROM probate "
+                "WHERE arv IS NOT NULL AND heir_contact ? 'address' "
+                "ORDER BY arv DESC LIMIT %s", (limit,)).fetchall()
+        return [{"case_name": c, "county": co, "arv": int(a), "address": ad}
+                for c, co, a, ad in rows]
+    except Exception:  # noqa: BLE001 — store down: brief still ships without the section
+        return []
 
 
 def run(*, gather=gather, speak_fn=None, email_fn=None, can_email=False,

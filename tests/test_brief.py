@@ -27,6 +27,27 @@ def test_compose_brief_includes_live_state():
     assert "MORNING BRIEF" in text.upper()
 
 
+def test_compose_brief_surfaces_real_estate_intel():
+    """The probate property intel (ARV + resolved address) reaches Michael in the daily
+    brief — it existed in the ledger for days without ever being DELIVERED (2026-06-10)."""
+    text = brief.compose_brief(
+        ledger_counts={"leads": 1, "probate": 64, "outreach_ledger": 0, "fires": 0},
+        memory_live=5, failures_recent=[], leads_recent=[],
+        probate_top=[{"case_name": "JEAN OSBORN SAWYER", "county": "hall",
+                      "arv": 913400, "address": "434 THUNDER ROAD"}],
+    )
+    assert "JEAN OSBORN SAWYER" in text and "913,400" in text
+    assert "434 THUNDER ROAD" in text and "REAL ESTATE" in text.upper()
+
+
+def test_compose_brief_omits_real_estate_section_when_empty():
+    text = brief.compose_brief(
+        ledger_counts={"leads": 1, "probate": 0, "outreach_ledger": 0, "fires": 0},
+        memory_live=5, failures_recent=[], leads_recent=[], probate_top=[],
+    )
+    assert "real estate" not in text.lower()           # never an empty fabricated section
+
+
 def test_run_speaks_and_documents_email_gate():
     store = FakeFailureStore(); failures.set_store(store)
     spoken = []
