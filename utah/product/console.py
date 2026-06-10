@@ -107,7 +107,11 @@ def _status_text(*, selfcode=None, loadavg=None) -> str:
             "  console     : PROPOSE-ONLY — /code never merges to main; review + merge stays yours")
 
 
-def _findings_text(*, pending_fn=None) -> str:
+def _findings_text(*, pending_fn=None, harvest_fn=None) -> str:
+    try:
+        (harvest_fn or sica_discover.harvest_failure_findings)()   # self-heal refresh
+    except Exception as exc:  # noqa: BLE001 — harvest trouble never hides findings
+        log.debug("selfheal harvest skipped: %s", exc)
     try:
         from utah import sica_discover
         pending = (pending_fn or sica_discover.pending_findings)()

@@ -65,8 +65,49 @@ def pulse_wake(command: str = "", *, publish=None) -> None:
         log.warning("voice wake publish failed: %s", exc)
 
 
+#: Voice → coding-agent bridge (Michael 2026-06-10: "the voice and the coding agent
+#: don't use each other to fix itself"). "ace, code <task>" / "ace, fix your <x>"
+#: dispatches a REAL propose-only self-code job via the deck console lane.
+_CODE_PREFIXES = ("code ", "self code ", "selfcode ")
+_FIX_PREFIXES = ("fix your", "fix the", "improve your", "debug your", "repair your")
+
+
+def coding_task(command: str) -> str | None:
+    """The self-code task a spoken command carries, or None (normal brain turn)."""
+    low = (command or "").lower().strip()
+    for t in _CODE_PREFIXES:
+        if low.startswith(t):
+            task = command.strip()[len(t):].strip()
+            return task or None
+    if low.startswith(_FIX_PREFIXES):
+        return command.strip()
+    return None
+
+
+def _selfcode_dispatch(task: str, *, http_post=None) -> str | None:
+    """POST the task into the deck console's /code lane (the web process owns the
+    job runner + live transcript). Returns the job id or None. Never raises."""
+    import json as _json
+    import urllib.request
+
+    try:
+        if http_post is None:
+            def http_post(url, data):
+                req = urllib.request.Request(
+                    url, data=data, headers={"Content-Type": "application/json"})
+                with urllib.request.urlopen(req, timeout=10) as r:
+                    return r.read().decode("utf-8", "replace")
+        raw = http_post("http://127.0.0.1:8766/api/console",
+                        _json.dumps({"line": "/code " + task}).encode())
+        return (_json.loads(raw) or {}).get("job")
+    except Exception as exc:  # noqa: BLE001 — voice must never crash on a dead web layer
+        log.warning("voice selfcode dispatch failed: %s", exc)
+        return None
+
+
 def handle_utterance(transcript, *, audio_wake: bool = False, tell=None, tell_stream=None,
-                     speak_stream=None, publish=None, on_speaking=None) -> dict | None:
+                     speak_stream=None, publish=None, on_speaking=None,
+                     dispatch=None) -> dict | None:
     """Handle one heard utterance. Returns ``None`` if the wake word is absent
     (utterance ignored). Otherwise runs the brain, speaks the answer SENTENCE BY
     SENTENCE as it streams (low latency — the first sentence plays while the brain
@@ -98,6 +139,25 @@ def handle_utterance(transcript, *, audio_wake: bool = False, tell=None, tell_st
 
     if not command:
         return {"wake": True, "command": "", "answer": ""}  # bare "ace"
+
+    # voice → coding agent: "code <task>" / "fix your <x>" runs a REAL propose-only
+    # self-code job; Ace acknowledges aloud and the console shows his live transcript.
+    task = coding_task(command)
+    if task is not None:
+        job = (dispatch or _selfcode_dispatch)(task)
+        answer = (("On it — coding that now, propose-only on my isolated clone. "
+                   "Open the Self-Code console to watch me work.") if job else
+                  "I couldn't reach my coding bay — the deck web layer looks down.")
+        try:
+            speak_stream(iter([answer]), on_start=on_speaking)
+        except Exception as exc:  # noqa: BLE001
+            log.warning("voice speak failed: %s", exc)
+        try:
+            publish("voice", {"q": command, "answer": answer, "source": "selfcode"})
+        except Exception as exc:  # noqa: BLE001
+            log.warning("voice publish failed: %s", exc)
+        return {"wake": True, "command": command, "answer": answer,
+                "source": "selfcode", "job": job}
 
     tell_fn = tell or core.tell
     try:
@@ -149,4 +209,4 @@ def handle_utterance(transcript, *, audio_wake: bool = False, tell=None, tell_st
     return {"wake": True, "command": command, "answer": answer, "source": captured["source"]}
 
 
-__all__ = ["handle_utterance", "pulse_wake"]
+__all__ = ["handle_utterance", "pulse_wake", "coding_task"]

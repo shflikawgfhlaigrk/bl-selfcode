@@ -116,6 +116,62 @@ def write_finding(domain: str, signals: str, *, brain_fn, findings_dir=None,
     return rec
 
 
+def harvest_failure_findings(*, recent_fn=None, log_path: Path | None = None,
+                             used_path: Path | None = None, min_count: int = 3,
+                             window: int = 60) -> dict:
+    """Self-healing bridge: RECURRING live failures become pending self-code findings —
+    the system that complains about its own line now files the fix task (Michael
+    2026-06-10: "the voice and the coding agent don't use each other to fix itself").
+
+    Reads the failure feed, groups by source/kind, and appends a ``selfheal`` finding
+    (with a concrete suggested task) for every failure recurring ≥ *min_count* times —
+    deduped against findings already pending or used, so the queue never spams. The
+    console's /findings refreshes this on every view; /do n (or the autonomous loop)
+    runs the fix. Never raises."""
+    import time as _time
+
+    from utah import failures as _failures
+
+    out = {"scanned": 0, "harvested": 0, "skipped": 0}
+    try:
+        rows = (recent_fn or _failures.recent)(window)
+    except Exception as exc:  # noqa: BLE001 — feed down: nothing to harvest
+        out["error"] = str(exc)
+        return out
+    counts: dict[tuple[str, str], int] = {}
+    for r in rows:
+        out["scanned"] += 1
+        key = (str(getattr(r, "source", "?")), str(getattr(r, "kind", "?")))
+        counts[key] = counts.get(key, 0) + 1
+    already = {rec.get("failure") for rec in list_findings(log_path=log_path)
+               if rec.get("domain") == "selfheal"}
+    for (source, kind), n in sorted(counts.items(), key=lambda kv: -kv[1]):
+        if n < min_count:
+            continue
+        tag = f"{source}/{kind}"
+        if tag in already:
+            out["skipped"] += 1
+            continue
+        rec = {
+            "ts": _time.time(),
+            "domain": "selfheal",
+            "brief_path": "",
+            "suggested_task": (
+                f"Self-heal: the live failure {tag} recurred {n}x in the last {window} "
+                f"failure rows. Find the root cause in the {source} lane (read the "
+                f"failure details via utah.failures.recent and the {source} module), "
+                f"fix it properly with a test that pins the regression, and keep the "
+                f"fix honest — never silence the failure without fixing the cause."),
+            "chars": 0,
+            "failure": tag,
+            "count": n,
+        }
+        _append_record(rec, log_path=log_path)
+        out["harvested"] += 1
+        log.info("selfheal finding: %s x%d -> pending task", tag, n)
+    return out
+
+
 def run_discover(*, brain_fn, domains=BROWSER_DOMAINS, gather_fn=None,
                  findings_dir=None, log_path=None) -> dict:
     """Run browser discovery for each domain. Never raises."""
@@ -213,6 +269,7 @@ __all__ = [
     "BROWSER_DOMAINS",
     "DISCOVERIES_LOG",
     "FINDINGS_DIR",
+    "harvest_failure_findings",
     "USED_PATH",
     "file_task",
     "list_findings",
