@@ -1115,7 +1115,7 @@ function ask(preset){
 $("q").addEventListener("keydown",e=>{if(e.key==="Enter")ask();});
 
 /* ============================ DRILL-DOWN (transparency) ============================ */
-function drillClose(){ $("drill").classList.remove("open"); $("drill-body").innerHTML=""; }
+function drillClose(){ $("drill").classList.remove("open"); $("drill-body").innerHTML=""; if(typeof _labTimer!=="undefined"&&_labTimer){clearInterval(_labTimer);_labTimer=null;} }
 function drillOpen(title,html){ $("drill-title").textContent=title; $("drill-body").innerHTML=html; $("drill").classList.add("open"); }
 function toggleMenu(){ $("menu").classList.toggle("open"); }
 function closeMenu(){ $("menu").classList.remove("open"); }
@@ -1384,13 +1384,36 @@ async function openConsole(panel, title){
 /* Trading Engine Lab — merged roster + live fires ledger; honest GATED until WC feed lands.
    Reachable from the hamburger menu AND the right-rail card, so CLOSE the menu (idempotent)
    rather than toggle it — toggling from the card would pop the menu over the lab drawer. */
+let _labTimer=null;
+function tickerHtml(ticks){
+  if(!ticks||!ticks.length) return '<div class="drill-sec">LIVE TICKS</div>'+emptyBox("NO LIVE TICKS YET — feed warming up");
+  return '<div class="drill-sec">LIVE TICKS — straight off the WealthCharts hook</div>'+
+    '<div class="kpis" id="lab-ticker">'+ticks.map(t=>{
+      const fresh=t.age_ms<2500;
+      return `<div class="kpi" style="min-width:120px"><b style="color:${fresh?'#7dc97f':'#c97d7d'}">${esc(t.price)}</b>`+
+             `<span>${esc(t.symbol)} · ${t.age_ms<1000?esc(t.age_ms)+' ms':esc((t.age_ms/1000).toFixed(1))+' s'} ago</span></div>`;
+    }).join("")+'</div>';
+}
+async function refreshTicker(){
+  try{
+    const d=await getPanel("trading");
+    const el=document.getElementById("lab-ticker");
+    if(!el){ return; }
+    const fresh=tickerHtml(d.ticks||[]);
+    const tmp=document.createElement("div"); tmp.innerHTML=fresh;
+    const nw=tmp.querySelector("#lab-ticker");
+    if(nw) el.replaceWith(nw);
+  }catch(e){/* next tick retries */}
+}
 async function openLab(){
   closeMenu();
+  if(_labTimer){clearInterval(_labTimer);_labTimer=null;}
   drillOpen("⚡ TRADING ENGINE LAB", emptyBox("LOADING…"));
   try{
     const d=await getPanel("trading");
     const gated=d.feed!=="live";
     let h=`<div class="lab-banner ${gated?'gated':'live'}">${esc(d.note||"")}</div>`;
+    h+=tickerHtml(d.ticks||[]);
     h+='<div class="kpis">'+
        `<div class="kpi"><b>${esc((d.engines||[]).length)}</b><span>ENGINES</span></div>`+
        `<div class="kpi"><b>${esc((d.feed||"—").toUpperCase())}</b><span>WC FEED</span></div>`+
@@ -1404,6 +1427,7 @@ async function openLab(){
         ? d.rows.map(r=>`<div class="drill-row"><b>${esc(r.engine)}</b><span class="drill-meta">${esc(r.direction)} · ${esc(r.outcome||'open')} · ${esc(r.ts||'')}</span></div>`).join("")
         : emptyBox("DORMANT — 0 FIRES (NO PRODUCER WIRED · WC FEED LANDS TOMORROW)");
     drillOpen("⚡ TRADING ENGINE LAB", h);
+    _labTimer=setInterval(refreshTicker,1000);   // ms-fresh ticker while the lab is open
   }catch(e){ drillOpen("⚡ TRADING ENGINE LAB", emptyBox("unavailable — "+String(e.message||e))); }
 }
 /* ===================== PER-ENGINE PAGE — apex-style drill ===================== */

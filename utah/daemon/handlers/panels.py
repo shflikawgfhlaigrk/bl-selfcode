@@ -171,10 +171,14 @@ async def _panel_trading(ctx: Context) -> dict:
             rows = lg.recent("fires", 30)
         except Exception:  # noqa: BLE001
             fires, rows = 0, []
+        try:
+            ticks = lg.live_ticks()
+        except Exception:  # noqa: BLE001 — surface may predate the wc_live table
+            ticks = []
         from collections import Counter
         by_engine = Counter((r.get("engine") or "?") for r in rows)
         return {"panel": "trading", **trading.lab_state(fires, by_engine=dict(by_engine)),
-                "rows": rows}
+                "rows": rows, "ticks": ticks}
 
     with ctx.governor.admission():
         return await ctx.pool.run(_lab)

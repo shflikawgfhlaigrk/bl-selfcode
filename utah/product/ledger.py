@@ -104,6 +104,12 @@ CREATE TABLE IF NOT EXISTS bars (
   ts_recorded timestamptz NOT NULL DEFAULT now(),
   UNIQUE (symbol, ts)                          -- a bar lands once — overlap-safe
 );
+CREATE UNLOGGED TABLE IF NOT EXISTS wc_live (
+  symbol text PRIMARY KEY,                     -- one row per symbol: the LAST tick
+  price numeric NOT NULL,
+  ts timestamptz NOT NULL,                     -- the tick's (normalized) market time
+  recorded timestamptz NOT NULL                -- wall-clock landing time, ms precision
+);                                             -- UNLOGGED: a throughput surface, not history
 ALTER TABLE fires ADD COLUMN IF NOT EXISTS symbol text;  -- which bar stream grades the fire
 ALTER TABLE fires ADD COLUMN IF NOT EXISTS stop numeric;
 ALTER TABLE fires ADD COLUMN IF NOT EXISTS target numeric;
@@ -271,6 +277,21 @@ class Ledger:
                 "SELECT 1 FROM outreach_ledger WHERE recipient=%s AND campaign=%s",
                 (recipient, campaign)).fetchone() is not None
 
+    def mark_lead_contacted(self, recipient) -> int:
+        """Flip matching ``leads`` rows new→contacted AFTER a send actually LANDED.
+        Funnel truth: ``leads.status`` mirrors reality (the deck/metrics read it), while
+        the never-twice guarantee stays in ``outreach_ledger``. Matches the recipient
+        against the contact email OR phone; returns rows flipped (0 = recipient wasn't
+        a leads row, e.g. a probate heir or a self-test send — both correct no-ops)."""
+        if not recipient:
+            return 0
+        with self._conn() as c:
+            rows = c.execute(
+                "UPDATE leads SET status='contacted' "
+                "WHERE status='new' AND (contact->>'email'=%s OR contact->>'phone'=%s) "
+                "RETURNING id", (recipient, recipient)).fetchall()
+        return len(rows)
+
     def uncontacted_email_leads(self, campaign, limit=8) -> list[dict]:
         """SMB ``leads`` rows with email, not yet contacted — **never** probate heirs."""
         if campaign != SMB_OUTREACH_CAMPAIGN:
@@ -351,6 +372,21 @@ class Ledger:
                         "contact": contact, "source": "probate"})
         return out
 
+    def fire_state(self, engine) -> dict:
+        """Open-position + cooldown truth for an engine — the state machine's memory.
+        Live 2026-06-10: 749 fires in ONE day because stateless engines re-fired every
+        bar a condition persisted (468 'breakout trades' = one trend counted hundreds
+        of times). ``open`` = a real fire the grader hasn't closed yet (outcome IS
+        NULL), capped at 4h so a dead grader can't blind the engines forever."""
+        with self._conn() as c:
+            row = c.execute(
+                "SELECT extract(epoch FROM now() - max(ts)), "
+                "       count(*) FILTER (WHERE outcome IS NULL "
+                "                        AND ts > now() - interval '4 hours') "
+                "FROM fires WHERE engine=%s AND NOT synthetic", (engine,)).fetchone()
+        age = float(row[0]) if row and row[0] is not None else None
+        return {"last_fire_age_s": age, "open": bool(row and row[1])}
+
     def record_fire(self, engine, direction, entry=None, synthetic=False,
                     symbol=None, *, stop=None, target=None, rationale=None) -> int:
         """Record an engine fire (real only on the board; synthetic flagged). ``symbol``
@@ -374,6 +410,31 @@ class Ledger:
         return int(row[0])
 
     # --- bars + fire grading (the measurability lane: utah/product/fire_grader.py) ---
+
+    def record_tick(self, symbol, price, epoch_s) -> None:
+        """Write-through one live tick — the deck's millisecond surface. One row per
+        symbol (upsert), ``recorded`` stamped with ``clock_timestamp()`` so the deck can
+        show true tick-to-screen age. Tiny and hot-path: called for EVERY feed tick."""
+        with self._conn() as c:
+            c.execute(
+                "INSERT INTO wc_live (symbol, price, ts, recorded) "
+                "VALUES (%s, %s, to_timestamp(%s), clock_timestamp()) "
+                "ON CONFLICT (symbol) DO UPDATE SET price = EXCLUDED.price, "
+                "ts = EXCLUDED.ts, recorded = EXCLUDED.recorded",
+                (symbol, price, epoch_s),
+            )
+
+    def live_ticks(self) -> list[dict]:
+        """The last tick per symbol with millisecond ages — what the Engine Lab's live
+        ticker renders. ``age_ms`` = how stale the surface is right now."""
+        with self._conn() as c:
+            rows = c.execute(
+                "SELECT symbol, price::float8, ts, recorded, "
+                "round(extract(epoch from (clock_timestamp() - recorded)) * 1000) "
+                "FROM wc_live ORDER BY symbol",
+            ).fetchall()
+        return [{"symbol": r[0], "price": r[1], "ts": str(r[2]), "recorded": str(r[3]),
+                 "age_ms": int(r[4])} for r in rows]
 
     def record_bars(self, symbol, bars, bar_seconds=15) -> int:
         """Persist closed bars — ``bars`` is ``[(close_epoch_s, o, h, l, c), ...]``.

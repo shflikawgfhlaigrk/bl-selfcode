@@ -93,6 +93,19 @@ def parse_candle(payload: str) -> dict | None:
             "high": _f(candle.get("cM")), "low": _f(candle.get("cm")), "epoch": int(epoch)}
 
 
+def normalize_epoch(epoch: int, arrival: float, *, step: int = 900) -> int:
+    """Strip WC's exchange-wall-clock lie from a frame's epoch. Equity candles arrive
+    stamped in EXCHANGE time written as if it were a unix epoch (+3600s vs reality,
+    proven in the bars table 2026-06-10: every US.* bar landed 1h in the future while
+    CM.* futures were true) — so fire grading and the deck saw "future" bars. Ticks
+    reach us within ~2s of their stamp, so any whole multiple of *step* (15 min, the
+    smallest real timezone granularity) between stamp and ARRIVAL clock is timezone
+    skew, not latency: snap it to zero and keep the sub-step remainder (the real
+    intra-bar timing) exactly. PURE (unit-tested)."""
+    skew = round((int(epoch) - arrival) / step) * step
+    return int(epoch - skew)
+
+
 def closed_bars(ticks, bar_seconds: int = BAR_SECONDS) -> list[tuple[int, float]]:
     """``ticks``: time-ordered ``[(epoch, close), ...]`` → ``[(bar_key, close), ...]`` for the
     CLOSED bars only (the still-forming final bucket is excluded). PURE (unit-tested)."""
@@ -228,7 +241,8 @@ def collect_ticks(seconds: float = 30.0, *, page=None) -> dict[str, list[tuple[i
                     continue
                 cd = parse_candle(m["params"]["response"]["payloadData"])
                 if cd:
-                    series.setdefault(cd["symbol"], []).append((cd["epoch"], cd["close"]))
+                    ep = normalize_epoch(cd["epoch"], _time.time())
+                    series.setdefault(cd["symbol"], []).append((ep, cd["close"]))
 
     try:
         asyncio.run(_run())
@@ -414,9 +428,25 @@ class BarStream:
         #: (level-firing produced 271 fires/hr on 2026-06-10 and paged the phone for
         #: each one). A no-signal bar re-arms the edge.
         self._sig: dict[tuple[str, str], str | None] = {}
+        #: forming-bucket key per symbol — lets feed() report the INSTANT a bar closes
+        #: so the consumer flushes on bar-close, not on a wall timer ("none are coming
+        #: in millisecond time", 2026-06-10).
+        self._forming: dict[str, int] = {}
 
-    def feed(self, symbol: str, epoch: int, close: float) -> None:
+    def feed(self, symbol: str, epoch: int, close: float) -> bool:
+        """Buffer one tick; write it through to the live-tick surface; return True the
+        instant this tick ROLLS the symbol's bar bucket (its previous bar just closed)
+        so the caller can flush immediately instead of waiting for the timer."""
         self.buf.setdefault(symbol, []).append((int(epoch), float(close)))
+        if hasattr(self.ledger, "record_tick"):
+            try:
+                self.ledger.record_tick(symbol, float(close), int(epoch))
+            except Exception:  # noqa: BLE001 — the live surface must never stall the hook
+                pass
+        key = int(epoch) // self.bar_seconds
+        prev = self._forming.get(symbol)
+        self._forming[symbol] = key
+        return prev is not None and key > prev
 
     def flush(self) -> dict:
         from utah.product import trading
@@ -516,7 +546,11 @@ def stream(ledger, *, interval: float = 30.0, bar_seconds: int = BAR_SECONDS,
                     if m.get("method") == "Network.webSocketFrameReceived":
                         cd = parse_candle(m["params"]["response"]["payloadData"])
                         if cd:
-                            bs.feed(cd["symbol"], cd["epoch"], cd["close"])
+                            ep = normalize_epoch(cd["epoch"], _time.time())
+                            if bs.feed(cd["symbol"], ep, cd["close"]):
+                                # a bar just CLOSED — persist + evaluate NOW (ms after
+                                # the roll), not at the next wall-timer flush.
+                                bs.flush()
                 if _time.monotonic() - last >= interval:
                     r = bs.flush()
                     log.info("wcfeed flush: %s", r)
@@ -609,7 +643,7 @@ def main() -> int:
         _time.sleep(2.0)
 
 
-__all__ = ["parse_candle", "closed_bars", "ohlc_bars", "ingest", "feed_available", "BarStream", "stream", "SilentWatch",
+__all__ = ["parse_candle", "normalize_epoch", "closed_bars", "ohlc_bars", "ingest", "feed_available", "BarStream", "stream", "SilentWatch",
            "collect_ticks", "run", "ensure_chrome_wc", "main", "CDP_PORT", "WC_HOST",
            "BAR_SECONDS"]
 

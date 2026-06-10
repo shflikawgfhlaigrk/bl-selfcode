@@ -317,3 +317,69 @@ def test_spawn_disables_chrome_tab_pausing(monkeypatch):
                  "--disable-backgrounding-occluded-windows",
                  "--disable-renderer-backgrounding"):
         assert flag in argv["args"]
+
+
+# ── true time + millisecond lane (Michael 2026-06-10: "0 of these are true bars
+# … none are coming in millisecond time") ──────────────────────────────────────
+
+def test_normalize_epoch_strips_exchange_wallclock_skew():
+    """US.* candles arrive stamped in EXCHANGE wall-clock written as an epoch (+1h vs
+    reality, proven in the bars table) — the whole-quarter-hour skew is snapped out,
+    using only the frame's own arrival clock."""
+    now = 1781045182.4
+    assert wc_feed.normalize_epoch(int(now) + 3600, now) == int(now)        # ET-as-epoch
+    assert wc_feed.normalize_epoch(int(now) - 3600, now) == int(now)        # other direction
+    assert wc_feed.normalize_epoch(int(now) + 1800, now) == int(now)        # half-hour zones
+
+
+def test_normalize_epoch_preserves_true_timing_exactly():
+    """Sub-step deltas are REAL (network latency, intra-bar timing) — untouched, in both
+    directions, with and without a timezone lie on top."""
+    now = 1781045182.0
+    assert wc_feed.normalize_epoch(int(now) - 2, now) == int(now) - 2       # honest 2s lag
+    assert wc_feed.normalize_epoch(int(now), now) == int(now)               # exact
+    assert wc_feed.normalize_epoch(int(now) + 3600 - 2, now) == int(now) - 2  # lag under the lie
+
+
+def test_barstream_feed_reports_bar_close_for_instant_flush():
+    """feed() returns True the INSTANT a tick rolls the bucket — the consumer flushes
+    on bar-close (ms), not on the 30s wall timer. First-ever tick never reports a roll
+    (there was no prior bar to close)."""
+    bs = wc_feed.BarStream(_FireLedger(), bar_seconds=10, lookback=5)
+    assert bs.feed("CM.NQM6", 100, 1.0) is False     # first tick: nothing to close
+    assert bs.feed("CM.NQM6", 105, 2.0) is False     # same bucket
+    assert bs.feed("CM.NQM6", 110, 3.0) is True      # bucket rolled -> bar 10 just closed
+    assert bs.feed("CM.NQM6", 111, 4.0) is False     # same new bucket
+    assert bs.feed("US.SPY", 111, 5.0) is False      # other symbol: its own first tick
+
+
+def test_barstream_writes_every_tick_through_to_the_live_surface():
+    """Every fed tick lands on the ledger's live-tick surface (the deck's ms ticker) —
+    and a minimal ledger without record_tick still streams fine."""
+    class _TickLedger(_FireLedger):
+        def __init__(self):
+            super().__init__()
+            self.ticks = []
+
+        def record_tick(self, symbol, price, epoch_s):
+            self.ticks.append((symbol, price, epoch_s))
+
+    lg = _TickLedger()
+    bs = wc_feed.BarStream(lg, bar_seconds=10, lookback=5)
+    bs.feed("CM.NQM6", 100, 1.0)
+    bs.feed("US.SPY", 101, 2.0)
+    assert lg.ticks == [("CM.NQM6", 1.0, 100), ("US.SPY", 2.0, 101)]
+    # minimal ledger (no record_tick) — must not raise
+    bs2 = wc_feed.BarStream(_FireLedger(), bar_seconds=10, lookback=5)
+    bs2.feed("CM.NQM6", 100, 1.0)
+
+
+def test_barstream_tick_surface_failure_never_stalls_the_hook():
+    """A wedged live-tick write (store hiccup) must never break tick buffering."""
+    class _BadTickLedger(_FireLedger):
+        def record_tick(self, symbol, price, epoch_s):
+            raise RuntimeError("pg down")
+
+    bs = wc_feed.BarStream(_BadTickLedger(), bar_seconds=10, lookback=5)
+    bs.feed("CM.NQM6", 100, 1.0)                      # no raise
+    assert bs.buf["CM.NQM6"] == [(100, 1.0)]
