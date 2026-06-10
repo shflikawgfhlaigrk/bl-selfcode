@@ -1397,14 +1397,50 @@ async function openLab(){
        `<div class="kpi"><b>${esc(d.fires||0)}</b><span>FIRES (LEDGER)</span></div></div>`;
     h+='<div class="drill-sec">ENGINE ROSTER</div>';
     h+=(d.engines||[]).map(e=>
-       `<div class="drill-row"><span class="led ${e.state==='live'?'ok':''}"></span> `+
-       `<b>${esc(e.name)}</b><span class="drill-meta">${esc(e.kind)} · ${esc((e.state||'').toUpperCase())}${e.fires?` · ${esc(e.fires)} FIRES`:''}</span></div>`).join("");
+       `<div class="drill-row drillable" onclick="openEngine('${esc(e.name)}')"><span class="led ${e.state==='live'?'ok':''}"></span> `+
+       `<b>${esc(e.name)}</b><span class="hint">TAP</span><span class="drill-meta">${esc(e.kind)} · ${esc((e.state||'').toUpperCase())}${e.fires?` · ${esc(e.fires)} FIRES`:''}</span></div>`).join("");
     h+='<div class="drill-sec">'+((d.rows||[]).length)+' FIRES</div>';
     h+= (d.rows&&d.rows.length)
         ? d.rows.map(r=>`<div class="drill-row"><b>${esc(r.engine)}</b><span class="drill-meta">${esc(r.direction)} · ${esc(r.outcome||'open')} · ${esc(r.ts||'')}</span></div>`).join("")
         : emptyBox("DORMANT — 0 FIRES (NO PRODUCER WIRED · WC FEED LANDS TOMORROW)");
     drillOpen("⚡ TRADING ENGINE LAB", h);
   }catch(e){ drillOpen("⚡ TRADING ENGINE LAB", emptyBox("unavailable — "+String(e.message||e))); }
+}
+/* ===================== PER-ENGINE PAGE — apex-style drill ===================== */
+function eqSvg(eq){
+  if(!eq || eq.length<2) return '<div class="empty" style="padding:18px">EQUITY CURVE ARMS AFTER 2+ GRADED FIRES</div>';
+  const W=640,H=150,P=10, vals=eq.map(p=>p.cum);
+  const mn=Math.min(0,...vals), mx=Math.max(0,...vals), span=(mx-mn)||1;
+  const x=i=>P+i*(W-2*P)/(eq.length-1), y=v=>H-P-(v-mn)*(H-2*P)/span;
+  const pts=eq.map((p,i)=>`${x(i).toFixed(1)},${y(p.cum).toFixed(1)}`).join(" ");
+  const zero=y(0).toFixed(1), last=vals[vals.length-1];
+  return `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:150px;display:block">`+
+    `<line x1="${P}" y1="${zero}" x2="${W-P}" y2="${zero}" stroke="#3a352a" stroke-dasharray="3 4"/>`+
+    `<polyline points="${pts}" fill="none" stroke="${last>=0?'#7dc97f':'#c97d7d'}" stroke-width="2"/>`+
+    `<text x="${W-P}" y="${y(last)-6}" fill="#d4af37" font-size="12" text-anchor="end">${last>=0?'+':''}${last.toFixed(1)} pts</text></svg>`;
+}
+async function openEngine(name){
+  drillOpen("⚙️ ENGINE — "+name.toUpperCase(), emptyBox("LOADING…"));
+  try{
+    const d=await getPanel("engine:"+name);
+    const sc=d.scorecard||{};
+    const stateTxt=d.implemented?(d.feed==="live"?"LIVE ON THE FEED":"DORMANT (feed gated)"):"AWAITING PORT FROM THE ACE BUNDLES";
+    let h=`<div class="lab-banner ${d.implemented&&d.feed==='live'?'live':'gated'}">${esc(name.toUpperCase())} · ${esc(d.kind||"")} · ${stateTxt}</div>`;
+    h+='<div class="kpis">'+
+      `<div class="kpi"><b>${esc(sc.graded??0)}</b><span>GRADED</span></div>`+
+      `<div class="kpi"><b>${sc.win_rate!=null?(sc.win_rate*100).toFixed(0)+"%":"—"}</b><span>WIN RATE</span></div>`+
+      `<div class="kpi"><b>${sc.net_pnl!=null?((sc.net_pnl>=0?"+":"")+sc.net_pnl):"—"}</b><span>NET PTS (PAPER)</span></div>`+
+      `<div class="kpi"><b>${esc((d.fires||[]).length)}</b><span>FIRES SHOWN</span></div></div>`;
+    h+='<div class="drill-sec">EQUITY CURVE — cumulative graded paper PnL</div>'+eqSvg(d.equity);
+    h+='<div class="drill-sec">FIRES (newest first)</div>';
+    h+=(d.fires&&d.fires.length)?d.fires.map(f=>
+      `<div class="drill-row" style="flex-wrap:wrap"><b>${esc(f.direction)}</b>`+
+      `<span class="drill-meta">${esc(f.symbol||"?")} @ ${esc(f.entry??"—")} · ${esc(f.outcome||"open")}${f.pnl!=null?` · ${f.pnl>=0?"+":""}${esc(f.pnl)} pts`:""} · ${esc(f.ts||"")}</span>`+
+      (f.assessment?`<div style="flex-basis:100%;color:#9a8f6f;font-size:11px;font-style:italic;padding:3px 0 0 14px">🧠 ${esc(f.assessment)}</div>`:"")+
+      `</div>`).join("")
+      : emptyBox(d.implemented?"NO FIRES YET — warming up on the live feed":"NO RULES PORTED YET — this engine has never fired");
+    drillOpen("⚙️ ENGINE — "+name.toUpperCase(), h);
+  }catch(e){ drillOpen("⚙️ ENGINE — "+name.toUpperCase(), emptyBox("unavailable — "+String(e.message||e))); }
 }
 document.addEventListener("keydown",e=>{ if(e.key==="Escape")drillClose(); });
 

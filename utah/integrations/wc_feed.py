@@ -409,6 +409,11 @@ class BarStream:
         self.state = state if state is not None else {}
         self.max_bars = max_bars
         self.buf: dict[str, list[tuple[int, float]]] = {}
+        #: EDGE-firing state: last signal direction per (engine, symbol). An engine
+        #: fires when its signal APPEARS or FLIPS — never again on every extended bar
+        #: (level-firing produced 271 fires/hr on 2026-06-10 and paged the phone for
+        #: each one). A no-signal bar re-arms the edge.
+        self._sig: dict[tuple[str, str], str | None] = {}
 
     def feed(self, symbol: str, epoch: int, close: float) -> None:
         self.buf.setdefault(symbol, []).append((int(epoch), float(close)))
@@ -436,15 +441,19 @@ class BarStream:
                 continue       # only the forming bar grew — nothing new to judge
             evaluated += 1
             # EVERY implemented engine judges the same closed bar under its OWN name —
-            # separate fires, separate grading, separate dash rows (2026-06-10).
+            # separate fires, separate grading, separate dash rows. EDGE-fired: a fire
+            # records only when the signal appears or flips, not on every extended bar.
             for eng in trading.implemented_engines():
                 sig = trading.evaluate(closes, lookback=self.lookback, engine=eng)
-                if sig and sig.get("direction"):
-                    self.ledger.record_fire(eng, sig["direction"], entry=closes[-1],
+                direction = (sig or {}).get("direction")
+                prev = self._sig.get((eng, symbol))
+                self._sig[(eng, symbol)] = direction
+                if direction and direction != prev:
+                    self.ledger.record_fire(eng, direction, entry=closes[-1],
                                             synthetic=False, symbol=symbol)
                     fires += 1
                     log.info("wc_feed FIRE: %s %s %s @ %.2f (%d bars)", eng, symbol,
-                             sig["direction"], closes[-1], len(closes))
+                             direction, closes[-1], len(closes))
         return {"symbols": len(self.buf), "ticked": ticked, "evaluated": evaluated,
                 "fires": fires, "ready": ready,
                 "bars": {s: len(v.get("closes", [])) for s, v in self.state.items()}}

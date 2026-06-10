@@ -369,7 +369,7 @@ class Ledger:
             # phone (alerts never raises; gates/dedup live in utah/alerts.py).
             from utah import alerts
             alerts.trade_fire(engine, direction, entry, fire_id=int(row[0]),
-                              stop=stop, target=target,
+                              symbol=symbol, stop=stop, target=target,
                               rationale=" ".join(x for x in (symbol, rationale) if x) or None)
         return int(row[0])
 
@@ -506,6 +506,31 @@ class Ledger:
                 (ts, engine, kind, content, confidence),
             )
             return (cur.rowcount or 0) > 0
+
+    def engine_detail(self, engine, limit: int = 80) -> dict:
+        """Everything the deck's per-engine page shows (apex-style drill, 2026-06-10):
+        scorecard, the cumulative paper-PnL curve over graded fires (chronological),
+        and recent fires with outcomes + Ace's think-on-fire read. All ledger facts."""
+        sc = self.engine_scorecard(engine)
+        with self._conn() as c:
+            eq = c.execute(
+                "SELECT ts, sum(pnl) OVER (ORDER BY ts, id)::float8 FROM fires "
+                "WHERE engine=%s AND outcome IS NOT NULL AND outcome != 'ungradable' "
+                "AND pnl IS NOT NULL AND synthetic=false ORDER BY ts, id",
+                (engine,)).fetchall()
+            rows = c.execute(
+                "SELECT id, direction, entry::float8, outcome, pnl::float8, symbol, ts, "
+                "stop::float8, target::float8, assessment FROM fires WHERE engine=%s "
+                "AND synthetic=false ORDER BY ts DESC LIMIT %s",
+                (engine, int(limit))).fetchall()
+        return {
+            "engine": engine,
+            "scorecard": sc,
+            "equity": [{"ts": str(t)[:16], "cum": round(v, 2)} for t, v in eq],
+            "fires": [{"id": r[0], "direction": r[1], "entry": r[2], "outcome": r[3],
+                       "pnl": r[4], "symbol": r[5], "ts": str(r[6])[:19],
+                       "stop": r[7], "target": r[8], "assessment": r[9]} for r in rows],
+        }
 
     def record_mail(self, recipient, subject, status="sent", channel="email") -> bool:
         """Record an email attempt; True if new (False = this message already sent).

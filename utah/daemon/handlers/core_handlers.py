@@ -350,6 +350,20 @@ async def panel_detail(ctx: Context, params: object) -> dict:
     from utah.daemon.handlers.panels import PANEL_REGISTRY
 
     panel = str(_as_dict(params).get("panel", "")).strip()
+    if panel.startswith("engine:"):
+        # apex-style per-engine page: scorecard + equity curve + fires + Ace's reads
+        from utah.product import trading
+        from utah.product.ledger import Ledger
+
+        name = panel.split(":", 1)[1]
+        def _detail() -> dict:
+            d = Ledger().engine_detail(name)
+            d["implemented"] = name in trading.ENGINE_RULES
+            d["kind"] = dict(trading.ENGINES).get(name, "")
+            d["feed"] = "live" if trading.feed_available() else "gated"
+            return {"panel": panel, **d}
+        with ctx.governor.admission():
+            return await ctx.pool.run(_detail)
     handler = PANEL_REGISTRY.get(panel)
     if handler is None:
         return {"panel": panel, "rows": []}

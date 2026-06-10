@@ -72,6 +72,22 @@ def _dedup_ok(key: str | None, ttl: int) -> bool:
     return True
 
 
+def _mirror_desktop(title: str, message: str, *, priority: int) -> None:
+    """Readable Mac fallback when iOS Pushover's notification extension fails to decrypt.
+
+    iPhone lock-screen alerts can show "error decrypting" even with E2E disabled — that's
+    Apple's per-device payload encryption + a broken Pushover NSE, not Utah's send path.
+    High-priority streams also ping the Mac so breakage still surfaces in plain text."""
+    if priority < 1:
+        return
+    try:
+        from utah.integrations import notify
+        if notify.perms_available():
+            notify.notify(message, title=title.replace("⚠️ ", "").replace("📈 ", ""))
+    except Exception:  # noqa: BLE001 — mirror must never block the phone push
+        pass
+
+
 def _send(stream: str, message: str, *, title: str, target: str | None = None,
           url: str | None = None, url_title: str | None = None,
           dedup_key: str | None = None, dedup_ttl: int | None = None,
@@ -90,8 +106,11 @@ def _send(stream: str, message: str, *, title: str, target: str | None = None,
         if push is None:
             from utah.integrations import pushover
             push = pushover.send
-        return push(message, title=title, priority=priority, target=target,
-                    url=url, url_title=url_title)
+        result = push(message, title=title, priority=priority, target=target,
+                      url=url, url_title=url_title)
+        if result.get("sent"):
+            _mirror_desktop(title, message, priority=priority)
+        return result
     except Exception as exc:  # noqa: BLE001 — paging must never crash the caller
         log.debug("alert send swallowed (stream=%s): %s", stream, exc, exc_info=True)
         return {"sent": False, "gated": False, "error": str(exc)}
@@ -134,17 +153,23 @@ def prospect_reply(sender_email: str, subject: str = "", *, sender=None) -> dict
 
 
 def trade_fire(engine: str, direction: str, entry, *, fire_id=None,
-               target: float | None = None, stop: float | None = None, sender=None) -> dict:
-    """Page an engine fire (entry / direction / optional target & stop)."""
+               symbol: str | None = None,
+               target: float | None = None, stop: float | None = None,
+               rationale: str | None = None, sender=None) -> dict:
+    """Page an engine fire. DEDUP is engine+symbol+direction with the stream TTL —
+    NEVER per fire_id (unique every time): 271 fires/hr paged Michael's phone 271
+    times on 2026-06-10. One page per signal episode, not per bar."""
     msg = f"{str(engine).upper()} {str(direction).upper()} @ {entry}"
-    if target is not None:
-        msg += f"  tgt {target}"
     if stop is not None:
         msg += f"  stop {stop}"
+    if target is not None:
+        msg += f"  tgt {target}"
+    if rationale:
+        msg += f" — {rationale}"
     if fire_id is not None:
         msg += f"  (fire #{fire_id})"
     return _send("trade", msg, title="📈 Utah trade fire",
-                 dedup_key=(f"trade:{fire_id}" if fire_id is not None else None),
+                 dedup_key=f"trade:{engine}:{symbol or '?'}:{direction}",
                  sender=sender)
 
 

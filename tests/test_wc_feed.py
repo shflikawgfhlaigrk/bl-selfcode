@@ -274,6 +274,23 @@ def test_barstream_trims_its_buffer_to_the_forming_bar():
     assert len(bs.buf["X"]) <= 1                        # only the forming bucket retained
 
 
+def test_barstream_fires_on_signal_edge_not_every_extended_bar():
+    """271 fires/hr (2026-06-10): level-firing recorded a fire on EVERY bar beyond the
+    band and paged the phone each time. Edge contract: fire when the signal appears or
+    flips; a no-signal bar re-arms; an extended run fires ONCE."""
+    lg = _FireLedger()
+    bs = wc_feed.BarStream(lg, bar_seconds=1, lookback=5)
+    for ep, px in [(0, 100.0), (1, 101.0), (2, 102.0), (3, 101.0), (4, 103.0)]:
+        bs.feed("X", ep, px)
+    bs.flush()
+    # three consecutive new-high bars: breakout signal LEVEL stays on -> ONE fire
+    for ep, px in [(5, 110.0), (6, 111.0), (7, 112.0), (8, 113.0)]:
+        bs.feed("X", ep, px)
+    bs.flush()
+    breakout_fires = [f for f in lg.fired if f[0] == "breakout"]
+    assert len(breakout_fires) == 1                     # edge, not level
+
+
 def test_silent_watch_pages_michael_once_not_every_flush():
     """A hooked-but-silent feed (WC login wall renders at the ROOT url, so the /login
     gate can't see it — proven live 2026-06-10) must PAGE Michael once, not loop
