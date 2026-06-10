@@ -147,3 +147,33 @@ def test_stream_result_error_surfaces():
 
 def test_stream_malformed_event_never_raises():
     assert console.format_stream_event({"weird": True}, {}) == []
+
+
+def test_effort_mode_round_trips_and_shapes_jobs():
+    """Claude-style /effort: list, set, budget + rigor suffix for /code jobs."""
+    from utah.product import console as con
+    assert "medium" in con.run_fast("effort")["output"]          # listing shows levels
+    out = con.run_fast("effort", "ultracode")["output"]
+    assert "ultracode" in out
+    assert con.effort() == "ultracode" and con.effort_budget() == 2400.0
+    assert "self-review" in con.effort_suffix()
+    assert "unknown effort" in con.run_fast("effort", "warp")["output"]
+    con.run_fast("effort", "medium")                              # restore default
+    assert con.effort_suffix() == ""
+
+
+def test_skills_lists_the_real_registries():
+    from utah.product import console as con
+    out = con.run_fast("skills")["output"]
+    assert "daemon capabilities" in out and "panel" in out
+    assert "/code" in out and "/effort" in out                    # console surface listed
+
+
+def test_history_shows_the_conversation_newest_last():
+    from utah.product import console as con
+    rows = [("2026-06-10 09:45", "Q: hi A: hey"), ("2026-06-10 09:40", "Q: a A: b")]
+    out = con.run_fast("history", "2", turns_fn=lambda n: rows)["output"]
+    lines = out.splitlines()
+    assert lines[0].startswith("[2026-06-10 09:40")               # oldest first
+    assert lines[-1].startswith("[2026-06-10 09:45")              # newest last
+    assert "Q: hi" in out

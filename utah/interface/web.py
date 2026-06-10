@@ -218,10 +218,12 @@ def _run_console_job(job_id: str, text: str) -> None:
                 del log[:-800]
 
     try:
+        # /effort mode shapes the job: budget (timeout) + a rigor instruction suffix.
         result = selfcode_web.run_edit(
-            text,
+            text + con.effort_suffix(),
             run_claude=lambda t: con.run_claude_streamed(
-                t, cwd=str(selfcode_web.REPO_DIR), on_line=_sink),
+                t, cwd=str(selfcode_web.REPO_DIR), on_line=_sink,
+                timeout=con.effort_budget()),
         )
         job["result"] = result
         job["status"] = "error" if result.get("ran") is False else "done"

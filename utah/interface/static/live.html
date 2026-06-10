@@ -840,7 +840,7 @@ function openTerminal(){
   const inner='<div class="con-wrap"><div id="con-out" class="con-out"></div>'+
     '<div class="con-in-row"><span class="con-ps">›</span>'+
     '<input id="con-in" class="con-in" autocomplete="off" spellcheck="false" '+
-    'placeholder="/help · /findings · /code &lt;task&gt; · /do &lt;n&gt; · /ask &lt;q&gt;   (a bare line = /ask)"/></div></div>';
+    'placeholder="/help · /skills · /effort · /history · /code &lt;task&gt; · /do &lt;n&gt; · /ask   (a bare line = /ask)"/></div></div>';
   drillOpen("⌨️ SELF-CODE CONSOLE — genuine / commands", inner);
   const inEl=$("con-in");
   if(inEl){ inEl.addEventListener("keydown",e=>{ if(e.key==="Enter") runConsole(); }); }
@@ -1448,11 +1448,14 @@ document.addEventListener("keydown",e=>{ if(e.key==="Escape")drillClose(); });
 // DEMO build (B16): /?demo=1 (or #demo) hides no-producer/gated panels for a clean walk-
 // through. Default (no flag) keeps them visible — honest-empty is the doctrine, not a bug.
 if(/[?&#]demo\b/.test(location.search+location.hash)) document.body.classList.add("demo");
+// Ace.app opens ?lab=1 after setup so Michael lands in the Trading Engine Lab (local only).
+const _labBoot=/[?&#]lab\b/.test(location.search+location.hash);
 function clock(){$("clock").textContent=new Date().toLocaleTimeString([],{hour:"2-digit",minute:"2-digit",second:"2-digit"})+" · ET";}
 // label the static "awaiting events…" placeholder from STATE_LABELS (first-paint a11y)
 $("ticker").innerHTML=`<div${markerAttrs("awaiting events…")}>awaiting events…</div>`;
 renderLegend(); renderMarkerLegend(); renderTabs(); loadDash("overview");
 poll(); setInterval(poll,2500);
+if(_labBoot) setTimeout(()=>openLab(), 800);
 clock(); setInterval(clock,1000);
 // JOIN DISCORD — light the header button only when an invite is configured.
 async function discordChip(){try{const d=await(await fetch("/api/discord")).json();
