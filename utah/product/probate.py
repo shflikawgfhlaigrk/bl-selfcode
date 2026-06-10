@@ -327,6 +327,8 @@ def run_scheduled(days: int = DAILY_DAYS, max_pages: int = DAILY_MAX_PAGES,
     res = scout(ledger, category="probate", counties=set(), days=days,
                 max_pages=max_pages, fetch=fetch)
     log.info("probate cron (statewide): %s", res)
+    from utah import alerts
+    alerts.leads_probate(res, kind="probate")   # daily pipeline push (never raises)
     return res
 
 

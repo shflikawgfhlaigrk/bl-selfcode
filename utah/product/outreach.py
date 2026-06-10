@@ -469,6 +469,8 @@ def run_scheduled(campaign: str = DEFAULT_CAMPAIGN, limit: int = DAILY_OUTREACH,
 
     log.info("outreach run_scheduled: campaign=%s channel=%s sent=%d queued=%d",
              campaign, result.get("channel", ch), result.get("sent", 0), result.get("queued", 0))
+    from utah import alerts
+    alerts.leads_probate(result, kind="outreach")   # daily pipeline push (never raises)
     return result
 
 

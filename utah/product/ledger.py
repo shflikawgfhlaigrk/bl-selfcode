@@ -105,6 +105,9 @@ CREATE TABLE IF NOT EXISTS bars (
   UNIQUE (symbol, ts)                          -- a bar lands once — overlap-safe
 );
 ALTER TABLE fires ADD COLUMN IF NOT EXISTS symbol text;  -- which bar stream grades the fire
+ALTER TABLE fires ADD COLUMN IF NOT EXISTS stop numeric;
+ALTER TABLE fires ADD COLUMN IF NOT EXISTS target numeric;
+ALTER TABLE fires ADD COLUMN IF NOT EXISTS rationale text;
 """
 
 
@@ -338,17 +341,25 @@ class Ledger:
         return out
 
     def record_fire(self, engine, direction, entry=None, synthetic=False,
-                    symbol=None) -> int:
+                    symbol=None, *, stop=None, target=None, rationale=None) -> int:
         """Record an engine fire (real only on the board; synthetic flagged). ``symbol``
-        names the bar stream the fire grader walks to fill outcome/pnl."""
+        names the bar stream the fire grader walks to fill outcome/pnl. Optional
+        ``stop``/``target``/``rationale`` feed the rich Pushover alert and deck detail."""
         with self._conn() as c:
             row = c.execute(
-                "INSERT INTO fires (engine, direction, entry, synthetic, symbol) "
-                "VALUES (%s,%s,%s,%s,%s) RETURNING id",
-                (engine, direction, entry, synthetic, symbol),
+                "INSERT INTO fires (engine, direction, entry, synthetic, symbol, "
+                "stop, target, rationale) "
+                "VALUES (%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id",
+                (engine, direction, entry, synthetic, symbol, stop, target, rationale),
             ).fetchone()
         if not synthetic:
             self._emit("trading", {"engine": engine, "direction": direction, "id": row[0]})
+            # The trade stream's single chokepoint: every REAL fire pages Michael's
+            # phone (alerts never raises; gates/dedup live in utah/alerts.py).
+            from utah import alerts
+            alerts.trade_fire(engine, direction, entry, fire_id=int(row[0]),
+                              stop=stop, target=target,
+                              rationale=" ".join(x for x in (symbol, rationale) if x) or None)
         return int(row[0])
 
     # --- bars + fire grading (the measurability lane: utah/product/fire_grader.py) ---
@@ -550,7 +561,9 @@ class Ledger:
         "outreach": ("outreach_ledger",
                      "id, recipient, campaign, channel, to_char(ts,'YYYY-MM-DD HH24:MI') ts"),
         "fires": ("fires",
-                  "id, engine, direction, symbol, outcome, pnl::float8 pnl, "
+                  "id, engine, direction, symbol, entry::float8 entry, "
+                  "stop::float8 stop, target::float8 target, rationale, "
+                  "outcome, pnl::float8 pnl, "
                   "to_char(ts,'YYYY-MM-DD HH24:MI') ts"),
         "mail": ("mail_ledger",
                  "id, recipient, subject, channel, status, to_char(ts,'YYYY-MM-DD HH24:MI') ts"),

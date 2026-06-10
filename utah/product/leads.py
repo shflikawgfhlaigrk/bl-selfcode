@@ -510,6 +510,8 @@ def run_scheduled(region: str = "Georgia Frontier", target: int = DAILY_TARGET,
     except Exception as exc:  # noqa: BLE001 — audit is observability, never the ingest
         log.debug("leads sync_log record skipped: %s", exc)
     log.info("leads cron (self-replenishing frontier): %s", out)
+    from utah import alerts
+    alerts.leads_probate(out, kind="leads")   # daily pipeline push (never raises)
     return out
 
 
