@@ -351,6 +351,34 @@ class Ledger:
             self._emit("mail", {"recipient": recipient, "subject": subject, "id": row[0]})
         return bool(row)
 
+    def followup_candidates(self, base_campaign, fu_campaign, min_age_days, limit=10) -> list[dict]:
+        """Prospects pitched on *base_campaign* (email) ≥ *min_age_days* ago who have
+        NOT replied (mail_replies), NOT bounced (mail_ledger), and NOT yet received
+        *fu_campaign*. Joined back to ``leads`` for the name/kind the composer needs.
+        This is only possible since reply detection exists — without it a follow-up
+        could land on someone who already said yes (or on a dead address)."""
+        with self._conn() as c:
+            rows = c.execute(
+                "SELECT o.recipient, l.name, l.kind, l.region, l.contact "
+                "FROM outreach_ledger o "
+                "JOIN leads l ON lower(l.contact->>'email') = lower(o.recipient) "
+                "WHERE o.campaign = %s AND o.channel = 'email' "
+                "AND o.ts < now() - (%s * interval '1 day') "
+                "AND NOT EXISTS (SELECT 1 FROM mail_replies r "
+                "  WHERE lower(r.sender) = lower(o.recipient)) "
+                "AND NOT EXISTS (SELECT 1 FROM mail_ledger m "
+                "  WHERE lower(m.recipient) = lower(o.recipient) AND m.status = 'bounced') "
+                "AND NOT EXISTS (SELECT 1 FROM outreach_ledger f "
+                "  WHERE f.recipient = o.recipient AND f.campaign = %s) "
+                "ORDER BY o.ts ASC LIMIT %s",
+                (base_campaign, float(min_age_days), fu_campaign, limit),
+            ).fetchall()
+        return [
+            {"recipient": r[0], "name": r[1], "kind": r[2], "region": r[3],
+             "contact": r[4] if isinstance(r[4], dict) else {}}
+            for r in rows
+        ]
+
     def pitched_recipients(self) -> set[str]:
         """Every address we have ever pitched (outreach + mail ledgers), lowercased.
         The reply poller matches inbound senders against this set — a hit is the

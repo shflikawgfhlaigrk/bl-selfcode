@@ -133,6 +133,83 @@ def compose(lead: dict, campaign: str, footer: dict | None = None) -> dict:
     return {"subject": subject, "body": body}
 
 
+#: Follow-up cadence: (days-after-first-touch, campaign suffix, is-final). Two touches
+#: max, ever — a nudge at day 3 and a final note at day 7. Candidates are filtered by
+#: the ledger to non-repliers/non-bounces only (reply detection makes this safe).
+FOLLOWUP_STAGES: tuple[tuple[float, str, bool], ...] = (
+    (3.0, "fu3", False),
+    (7.0, "fu7", True),
+)
+#: Per-run budget for follow-ups inside the hourly cron (cold sends keep their own
+#: limit; the mail-side per-inbox daily cap is the true ceiling for both).
+FOLLOWUP_RUN_LIMIT = 10
+
+
+def compose_followup(lead: dict, *, final: bool = False, footer: dict | None = None) -> dict:
+    """Short follow-up to a prospect who never answered the first note. Same CAN-SPAM
+    footer; deliberately brief (follow-ups convert on politeness, not repetition)."""
+    f = footer or default_footer()
+    name = (lead.get("name") or "").strip()
+    greeting = f"Hello {name}," if name else "Hello,"
+    if final:
+        subject = f"Last note — website for {name}" if name else "Last note from me"
+        middle = (
+            "I won't keep nudging — this is my last note. The offer stands: a "
+            "professional website for around $700, preview before you pay, live "
+            "within a day. If the timing's ever right, my number is below.\n\n"
+        )
+    else:
+        subject = f"Following up — website for {name}" if name else "Following up"
+        middle = (
+            "Just floating my note back up in case it got buried. I build websites "
+            "for small businesses — around $700, you see the design before you pay, "
+            "and it can be live within a day.\n\n"
+        )
+    body = (
+        f"{greeting}\n\n{middle}"
+        "Best regards,\n"
+        "Michael Barber\n"
+        "678-876-1170\n\n"
+        f"—\n{f['address']}\n{f['unsubscribe']}"
+    )
+    return {"subject": subject, "body": body}
+
+
+def run_followups(*, ledger=None, send_fn=None, limit: int = FOLLOWUP_RUN_LIMIT,
+                  now_hour: int | None = None) -> dict:
+    """Send due day-3 / day-7 follow-ups (email only). Business-hours gated like every
+    send path; suppression is per-stage via the ``<campaign>_<stage>`` ledger key so a
+    prospect gets each follow-up at most once, and never after a reply or bounce."""
+    if not config.within_business_hours(now_hour):
+        return {"sent": 0, "skipped": True, "reason": "outside business hours"}
+    footer = default_footer()
+    if not _footer_is_real(footer):
+        return {"sent": 0, "blocked": True, "reason": "CAN-SPAM footer incomplete"}
+    if ledger is None:
+        from utah.product.ledger import Ledger
+        ledger = Ledger()
+    from utah import mail
+
+    sent = 0
+    stages: dict[str, int] = {}
+    for age_days, suffix, final in FOLLOWUP_STAGES:
+        if sent >= limit:
+            break
+        fu_campaign = f"{SMB_OUTREACH_CAMPAIGN}_{suffix}"
+        for cand in ledger.followup_candidates(
+                SMB_OUTREACH_CAMPAIGN, fu_campaign, age_days, limit - sent):
+            recipient = cand["recipient"]
+            if not ledger.log_outreach(recipient, fu_campaign, channel="email"):
+                continue   # already got this stage
+            msg = compose_followup(cand, final=final, footer=footer)
+            res = mail.send(recipient, msg["subject"], msg["body"], send_fn=send_fn)
+            if res.get("sent"):
+                sent += 1
+                stages[suffix] = stages.get(suffix, 0) + 1
+                ledger.record_mail(recipient, msg["subject"], status="sent")
+    return {"sent": sent, "stages": stages}
+
+
 def compose_sms(lead: dict, campaign: str, footer: dict | None = None) -> dict:
     """Short SMS pitch — TCPA opt-out included; no subject."""
     f = footer or default_footer()
@@ -367,13 +444,28 @@ def run_scheduled(campaign: str = DEFAULT_CAMPAIGN, limit: int = DAILY_OUTREACH,
         candidates = ledger.uncontacted_email_leads(campaign, max(limit * 4, limit))
         leads = [l for l in candidates if _is_emailable_prospect(l)][:limit]
         if not leads:
-            return {"campaign": campaign, "channel": "email", "sent": 0, "queued": 0,
-                    "reason": "no emailable SMB prospects (chains/corporate filtered)"}
-        result = queue(ledger, campaign, leads, footer=default_footer(),
-                       can_send=True, send_fn=send_fn, prefer="email")
-        result["channel"] = "email"
+            # No early return: follow-ups below must still run — an exhausted cold
+            # pool is exactly when the due day-3/day-7 nudges are the day's sends.
+            result = {"campaign": campaign, "channel": "email", "sent": 0, "queued": 0,
+                      "reason": "no emailable SMB prospects (chains/corporate filtered)"}
+        else:
+            result = queue(ledger, campaign, leads, footer=default_footer(),
+                           can_send=True, send_fn=send_fn, prefer="email")
+            result["channel"] = "email"
     else:  # auto — email-first, then fill the remaining quota with text (SMS/iMessage)
         result = _run_auto(ledger, campaign, limit, send_fn)
+
+    # Follow-ups ride every email-capable run: due day-3/day-7 nudges go out FIRST in
+    # spirit (warmer than cold) but are accounted separately so the cold quota and the
+    # plist contract stay untouched. The per-inbox daily mail cap bounds the total.
+    if ch in ("email", "auto"):
+        try:
+            fu = run_followups(ledger=ledger, send_fn=send_fn, now_hour=now_hour)
+            if fu.get("sent"):
+                result["followups"] = fu
+                result["sent"] = result.get("sent", 0) + fu["sent"]
+        except Exception as exc:  # noqa: BLE001 — follow-ups must never break cold sends
+            log.warning("outreach follow-ups failed: %s", exc)
 
     log.info("outreach run_scheduled: campaign=%s channel=%s sent=%d queued=%d",
              campaign, result.get("channel", ch), result.get("sent", 0), result.get("queued", 0))
