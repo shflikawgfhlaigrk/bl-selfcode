@@ -352,6 +352,10 @@ CHROME_NO_THROTTLE_FLAGS = (
     "--disable-renderer-backgrounding",
     "--disable-features=HighEfficiencyModeAvailable,MemorySaverModeAggressiveness",
 )
+#: Michael's directive (2026-06-10): the WC window never lands in his face again. Spawns
+#: start SMALL in the bottom-right corner — present (WC needs a real rendered session;
+#: minimizing risks the page unsubscribing its feed) but out of the way.
+CHROME_WINDOW_FLAGS = ("--window-position=1100,760", "--window-size=700,480")
 
 
 def _spawn_chrome() -> bool:
@@ -362,7 +366,7 @@ def _spawn_chrome() -> bool:
         subprocess.Popen(
             [CHROME, f"--remote-debugging-port={CDP_PORT}", "--remote-allow-origins=*",
              f"--user-data-dir={WC_PROFILE}", "--no-first-run", "--no-default-browser-check",
-             *CHROME_NO_THROTTLE_FLAGS, f"https://{WC_HOST}/"],
+             *CHROME_NO_THROTTLE_FLAGS, *CHROME_WINDOW_FLAGS, f"https://{WC_HOST}/"],
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         return True
     except Exception as exc:  # noqa: BLE001
