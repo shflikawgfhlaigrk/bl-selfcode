@@ -274,6 +274,13 @@ STT_MAX_NO_SPEECH: float = float(os.environ.get("UTAH_STT_MAX_NO_SPEECH", "0.4")
 #: recovered by KILLING the worker after this budget — the mic loop gets "" and keeps
 #: listening (never deaf), and the next call respawns a fresh worker. Healthy <1s.
 STT_HANG_TIMEOUT_S: float = float(os.environ.get("UTAH_STT_HANG_TIMEOUT", "8.0"))
+#: STT respawn circuit-breaker (load-storm fix 2026-06-10). After a worker hang, skip
+#: re-spawning for this cooldown (a fresh MLX/Metal compile under load just deadlocks
+#: again and each respawn spawns a Metal compiler — the amplifier). Multiplied when the
+#: host is overloaded (load/core over the threshold).
+STT_RESPAWN_COOLDOWN_S: float = float(os.environ.get("UTAH_STT_RESPAWN_COOLDOWN", "20.0"))
+STT_RESPAWN_OVERLOAD_MULT: float = float(os.environ.get("UTAH_STT_RESPAWN_OVERLOAD_MULT", "6.0"))
+STT_RESPAWN_MAX_LOAD: float = float(os.environ.get("UTAH_STT_RESPAWN_MAX_LOAD", "2.5"))
 #: Seconds to wait for the STT worker to load its model on boot (MLX compiles on the
 #: first transcribe). An overrun means a wedged worker → respawn.
 STT_WORKER_BOOT_S: float = float(os.environ.get("UTAH_STT_WORKER_BOOT", "30.0"))

@@ -13,6 +13,7 @@ import select
 import subprocess
 import sys
 import threading
+import time
 from typing import Protocol
 
 from utah import config
@@ -89,6 +90,28 @@ class SubprocessSTT:
     def __init__(self) -> None:
         self._proc: subprocess.Popen | None = None
         self._lock = threading.Lock()
+        #: Load-aware respawn cooldown. A hang under host overload means the next
+        #: MLX/Metal compile will ALSO deadlock — and each respawn spawns a fresh
+        #: Metal shader compile, so blind retry becomes a load-storm AMPLIFIER (live
+        #: 2026-06-10: STT respawning every few seconds spawned 46 MTLCompilerService
+        #: procs while load was 172). After a hang, refuse to respawn for a cooldown
+        #: that scales with load — the mic stays alive, just stops feeding the fire.
+        self._cooldown_until = 0.0
+
+    def _arm_cooldown(self) -> float:
+        """Arm the load-aware respawn cooldown (hang OR error — any reset path):
+        base seconds, multiplied while the host is overloaded, because the Metal
+        compile a respawn triggers is exactly what deadlocks under load."""
+        cd = (config.STT_RESPAWN_COOLDOWN_S
+              * (config.STT_RESPAWN_OVERLOAD_MULT if self._overloaded() else 1.0))
+        self._cooldown_until = time.monotonic() + cd
+        return cd
+
+    def _overloaded(self) -> bool:
+        try:
+            return os.getloadavg()[0] / (os.cpu_count() or 1) > config.STT_RESPAWN_MAX_LOAD
+        except Exception:  # noqa: BLE001
+            return False
 
     def _spawn(self) -> None:
         self._proc = subprocess.Popen(
@@ -119,6 +142,10 @@ class SubprocessSTT:
 
     def transcribe(self, wav_path: str) -> str:
         with self._lock:
+            # In the respawn cooldown after a hang: skip cheaply (no spawn, no Metal
+            # compile) so a wedged worker under host overload stops amplifying load.
+            if self._proc is None and time.monotonic() < self._cooldown_until:
+                return ""
             try:
                 if self._proc is None or self._proc.poll() is not None:
                     self._kill()
@@ -128,15 +155,19 @@ class SubprocessSTT:
                 self._proc.stdin.flush()
                 line = self._readline(config.STT_HANG_TIMEOUT_S)
                 if line is None:  # worker wedged (MLX/Metal deadlock) — kill + recover
+                    cd = self._arm_cooldown()
                     log.error(
                         "STT worker hung >%ss (likely MLX/Metal deadlock) — killing + "
-                        "respawning; the mic stays alive", config.STT_HANG_TIMEOUT_S,
+                        "backing off %.0fs (load-aware); the mic stays alive",
+                        config.STT_HANG_TIMEOUT_S, cd,
                     )
                     self._kill()
                     return ""
                 return (json.loads(line).get("text") or "").strip()
             except Exception as exc:  # noqa: BLE001
-                log.warning("STT worker error (%s) — resetting worker", exc)
+                cd = self._arm_cooldown()
+                log.warning("STT worker error (%s) — resetting worker, backing off %.0fs",
+                            exc, cd)
                 self._kill()
                 return ""
 
