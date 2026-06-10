@@ -387,6 +387,108 @@ def _await_feed(seconds: float = 30.0) -> bool:
         _time.sleep(1.5)
 
 
+class BarStream:
+    """Incremental tick→closed-bar processor for the PERSISTENT attach.
+
+    The original design re-attached to the CDP websocket every 30s window (collect →
+    detach → sleep → re-attach): ~120 reconnects/hour, Chrome flashing its debug banner
+    and reflowing the WC page on every attach — Michael's "why does it keep looping; run
+    it ONE time and get the hook for the data" (2026-06-10). This class is the hook's
+    consumer half: ``feed()`` ticks as they arrive on the ONE connection; ``flush()``
+    folds newly-closed bars into the persistent per-symbol state, persists them, and
+    evaluates the engine — never touching the connection. All bar math reuses the same
+    pure helpers (``ingest``/``ohlc_bars``) the windowed path proved out."""
+
+    def __init__(self, ledger, *, bar_seconds: int = BAR_SECONDS, lookback: int = 20,
+                 engine: str = "breakout", state: dict | None = None,
+                 max_bars: int = MAX_BARS):
+        self.ledger = ledger
+        self.bar_seconds = bar_seconds
+        self.lookback = lookback
+        self.engine = engine
+        self.state = state if state is not None else {}
+        self.max_bars = max_bars
+        self.buf: dict[str, list[tuple[int, float]]] = {}
+
+    def feed(self, symbol: str, epoch: int, close: float) -> None:
+        self.buf.setdefault(symbol, []).append((int(epoch), float(close)))
+
+    def flush(self) -> dict:
+        from utah.product import trading
+
+        fires = evaluated = ready = 0
+        for symbol, ticks in list(self.buf.items()):
+            if not ticks:
+                continue
+            prev_key = self.state.get(symbol, {}).get("last_key", -1)
+            closes = ingest(self.state, symbol, ticks, bar_seconds=self.bar_seconds,
+                            max_bars=self.max_bars)
+            _persist_bars(self.ledger, symbol, ticks, prev_key, self.bar_seconds)
+            new_key = self.state[symbol]["last_key"]
+            # bound the hook's memory: only the still-forming bucket's ticks are kept
+            self.buf[symbol] = [(e, c) for (e, c) in ticks
+                                if e // self.bar_seconds > new_key]
+            if len(closes) < self.lookback + 1:
+                continue
+            ready += 1
+            if new_key == prev_key:
+                continue       # only the forming bar grew — nothing new to judge
+            evaluated += 1
+            sig = trading.evaluate(closes, lookback=self.lookback, engine=self.engine)
+            if sig and sig.get("direction"):
+                self.ledger.record_fire(self.engine, sig["direction"], entry=closes[-1],
+                                        synthetic=False, symbol=symbol)
+                fires += 1
+                log.info("wc_feed FIRE: %s %s @ %.2f (%d bars)", symbol,
+                         sig["direction"], closes[-1], len(closes))
+        return {"symbols": len(self.buf), "evaluated": evaluated, "fires": fires,
+                "ready": ready,
+                "bars": {s: len(v.get("closes", [])) for s, v in self.state.items()}}
+
+
+def stream(ledger, *, interval: float = 30.0, bar_seconds: int = BAR_SECONDS,
+           lookback: int = 20, engine: str = "breakout", state: dict | None = None) -> None:
+    """ONE persistent hook: attach to the live WC websocket ONCE and consume ticks until
+    the connection itself drops — flushing closed bars every *interval* seconds without
+    ever detaching. Returns only when the hook is lost (caller re-establishes)."""
+    import asyncio
+    import time as _time
+
+    page = _wc_page()
+    if not page:
+        return
+    bs = BarStream(ledger, bar_seconds=bar_seconds, lookback=lookback,
+                   engine=engine, state=state)
+
+    async def _run():
+        import websockets
+
+        async with websockets.connect(page["webSocketDebuggerUrl"], max_size=None) as ws:
+            await ws.send(json.dumps({"id": 1, "method": "Network.enable"}))
+            log.info("wc_feed: HOOKED — one persistent attach on :%d (no reconnect loop)",
+                     CDP_PORT)
+            last = _time.monotonic()
+            while True:
+                try:
+                    raw = await asyncio.wait_for(ws.recv(), timeout=2)
+                except asyncio.TimeoutError:
+                    raw = None
+                if raw is not None:
+                    m = json.loads(raw)
+                    if m.get("method") == "Network.webSocketFrameReceived":
+                        cd = parse_candle(m["params"]["response"]["payloadData"])
+                        if cd:
+                            bs.feed(cd["symbol"], cd["epoch"], cd["close"])
+                if _time.monotonic() - last >= interval:
+                    log.info("wcfeed flush: %s", bs.flush())
+                    last = _time.monotonic()
+
+    try:
+        asyncio.run(_run())
+    except Exception as exc:  # noqa: BLE001 — hook dropped (chrome/page/network)
+        log.warning("wc_feed: hook dropped (%s) — re-establishing", exc)
+
+
 def ensure_chrome_wc() -> bool:
     """Bring up the logged-in ``chrome-wc`` profile on Utah's CDP port — Ace bringing up his
     own market access. Headful (WC's realtime feed needs a real render). Converges instead of
@@ -449,15 +551,15 @@ def main() -> int:
             _time.sleep(interval)
             continue
         try:
-            r = run(ledger, seconds=interval, lookback=lookback, state=state)
-            bars = {s: len(v["closes"]) for s, v in state.items()}
-            log.info("wcfeed cycle: %s | bars=%s", r, bars)
-        except Exception as exc:  # noqa: BLE001 — never let one cycle kill the loop
-            log.warning("wcfeed cycle failed: %s", exc)
-        _time.sleep(1.0)
+            # ONE persistent hook — returns only if the connection drops; bar state
+            # survives re-hooks so the lookback never restarts from zero.
+            stream(ledger, interval=interval, lookback=lookback, state=state)
+        except Exception as exc:  # noqa: BLE001 — never let one drop kill the loop
+            log.warning("wcfeed stream failed: %s", exc)
+        _time.sleep(2.0)
 
 
-__all__ = ["parse_candle", "closed_bars", "ohlc_bars", "ingest", "feed_available",
+__all__ = ["parse_candle", "closed_bars", "ohlc_bars", "ingest", "feed_available", "BarStream", "stream",
            "collect_ticks", "run", "ensure_chrome_wc", "main", "CDP_PORT", "WC_HOST",
            "BAR_SECONDS"]
 

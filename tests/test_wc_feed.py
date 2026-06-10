@@ -211,6 +211,64 @@ def test_ensure_spawns_fresh_chrome_when_none_running(monkeypatch):
     assert c["result"] is True and c["spawn"] == 1 and c["kill"] == []
 
 
+class _FireLedger:
+    def __init__(self):
+        self.fired, self.persisted = [], []
+
+    def record_fire(self, engine, direction, entry=None, synthetic=False, symbol=None):
+        self.fired.append((engine, direction, entry, synthetic, symbol))
+        return 1
+
+    def record_bars(self, symbol, rows, bar_seconds=15):
+        self.persisted.append((symbol, list(rows), bar_seconds))
+        return len(rows)
+
+
+def test_barstream_hooks_once_and_flushes_incrementally():
+    """The PERSISTENT attach: ticks stream in continuously, flush() folds closed bars
+    into state WITHOUT a detach/re-attach window — and overlapping flushes never
+    double-count a bar or re-persist it (Michael 2026-06-10: 'run it the one time
+    and get the hook for the data', not a 30s reconnect loop)."""
+    lg = _FireLedger()
+    bs = wc_feed.BarStream(lg, bar_seconds=1, lookback=5)
+    for ep, px in [(0, 100.0), (1, 101.0), (2, 102.0), (3, 101.0), (4, 103.0)]:
+        bs.feed("CM.NQM6", ep, px)
+    r1 = bs.flush()
+    assert r1["fires"] == 0 and lg.fired == []          # warm-up: 4 closed bars < lookback+1
+    # ...stream continues on the SAME hook: bar 5 closes at a breakout, bar 6 forming
+    bs.feed("CM.NQM6", 5, 110.0)
+    bs.feed("CM.NQM6", 6, 111.0)
+    r2 = bs.flush()
+    assert r2["fires"] == 1 and lg.fired == [("breakout", "long", 110.0, False, "CM.NQM6")]
+    # every closed bar persisted exactly once across the two flushes
+    all_ts = [ts for _, rows, _ in lg.persisted for (ts, *_a) in rows]
+    assert sorted(all_ts) == [1, 2, 3, 4, 5, 6] and len(all_ts) == len(set(all_ts))
+
+
+def test_barstream_no_new_closed_bar_means_no_reevaluation():
+    """Flushing while only the forming bar grew must not re-evaluate (no duplicate
+    fires from the same closed bar)."""
+    lg = _FireLedger()
+    bs = wc_feed.BarStream(lg, bar_seconds=1, lookback=5)
+    for ep, px in [(0, 100.0), (1, 101.0), (2, 102.0), (3, 101.0),
+                   (4, 103.0), (5, 110.0), (6, 111.0)]:
+        bs.feed("X", ep, px)
+    assert bs.flush()["fires"] == 1
+    bs.feed("X", 6, 111.5)                              # forming bar only
+    r = bs.flush()
+    assert r["evaluated"] == 0 and r["fires"] == 0 and len(lg.fired) == 1
+
+
+def test_barstream_trims_its_buffer_to_the_forming_bar():
+    """The hook runs for hours — the per-symbol tick buffer must not grow unboundedly."""
+    lg = _FireLedger()
+    bs = wc_feed.BarStream(lg, bar_seconds=1, lookback=5)
+    for ep in range(50):
+        bs.feed("X", ep, 100.0 + ep * 0.01)
+    bs.flush()
+    assert len(bs.buf["X"]) <= 1                        # only the forming bucket retained
+
+
 def test_spawn_disables_chrome_tab_pausing(monkeypatch):
     """Chrome throttles/discards background tabs — which silently pauses the realtime WC
     feed (available:True, symbols:0, chart frozen) whenever the window is occluded. The
