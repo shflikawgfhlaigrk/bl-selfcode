@@ -268,19 +268,20 @@ def is_national_chain(name: str) -> bool:
 
 
 def build_query(bbox: tuple[float, float, float, float]) -> str:
-    """Overpass QL: every node/way in *bbox* in a target category with NO web presence.
+    """Overpass QL: every named node/way in *bbox* in a target category.
 
-    "No website" means NONE of ``website`` / ``contact:website`` / ``url`` is set —
-    otherwise a business that tags its site under contact:website/url would wrongly
-    slip into the no-website list."""
+    Niche-broadening (Michael, 2026-06-09): the old query EXCLUDED businesses with a
+    ``website``/``contact:website``/``url`` tag — which capped the emailable pool at
+    ~1% of supply. The pitch is niche-agnostic and a tagged website is the PRECISE
+    email-enrichment source (scrape their own contact page), so has-website SMBs are
+    now captured too; chains are still dropped by name + kind filters."""
     south, west, north, east = bbox
-    no_web = '["website"!~"."]["contact:website"!~"."]["url"!~"."]'
     parts: list[str] = []
     for k, v in _CATEGORIES:
         sel = f'["{k}"]' if v == "*" else f'["{k}"="{v}"]'
         box = f"({south},{west},{north},{east})"
-        parts.append(f'node{sel}["name"]{no_web}{box};')
-        parts.append(f'way{sel}["name"]{no_web}{box};')
+        parts.append(f'node{sel}["name"]{box};')
+        parts.append(f'way{sel}["name"]{box};')
     return f"[out:json][timeout:{QUERY_TIMEOUT_S}];(" + "".join(parts) + ");out tags center;"
 
 
@@ -314,9 +315,11 @@ def normalize_phone(raw: str) -> str:
 
 
 def _extract_contact(tags: dict) -> dict:
-    """Pull phone + email + address from OSM tags into a contact dict (empties dropped)."""
+    """Pull phone + email + address + website from OSM tags (empties dropped). The
+    website feeds enrich.find_email's precise own-site path."""
     phone = normalize_phone(tags.get("phone") or tags.get("contact:phone") or "")
     email = (tags.get("email") or tags.get("contact:email") or "").strip()
+    website = (tags.get("website") or tags.get("contact:website") or tags.get("url") or "").strip()
     street = " ".join(x for x in (tags.get("addr:housenumber"), tags.get("addr:street")) if x)
     address = ", ".join(x for x in (
         street, tags.get("addr:city"), tags.get("addr:state"), tags.get("addr:postcode")
@@ -328,6 +331,8 @@ def _extract_contact(tags: dict) -> dict:
         contact["email"] = email
     if address:
         contact["address"] = address
+    if website:
+        contact["website"] = website
     return contact
 
 
@@ -517,12 +522,13 @@ def _maps_kind(types: list[str]) -> str:
 
 
 def parse_maps_place(place: dict) -> dict | None:
-    """Maps place → lead dict if no website + has phone + pitchable SMB; else None."""
+    """Maps place → lead dict if it has a phone + is a pitchable SMB; else None.
+
+    Niche-broadening (Michael, 2026-06-09): a place WITH a website is kept (was
+    discarded) — the site is stored in contact for precise email enrichment."""
     name = (place.get("name") or "").strip()
     if not name or is_national_chain(name):
         return None
-    if (place.get("website") or "").strip():
-        return None   # has a site — not our pitch
     phone = normalize_phone(place.get("phone") or "")
     if not phone:
         return None
@@ -530,6 +536,9 @@ def parse_maps_place(place: dict) -> dict | None:
     if not _is_pitchable_smb(name, kind):
         return None
     contact: dict[str, str] = {"phone": phone}
+    website = (place.get("website") or "").strip()
+    if website:
+        contact["website"] = website
     if place.get("address"):
         contact["address"] = place["address"]
     return Lead(name=name, kind=kind, contact=contact, source="google_maps").as_dict()

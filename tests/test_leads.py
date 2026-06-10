@@ -16,17 +16,22 @@ def test_chain_filter_exact_single_word_and_prefix_multiword():
     assert leads.is_national_chain("") is False
 
 
-def test_build_query_targets_no_website_in_bbox():
+def test_build_query_keeps_has_website_businesses():
+    """Niche-broadening (Michael, 2026-06-09): the pitch is niche-agnostic, so the
+    scout must capture has-website SMBs too — they are the EASY enrichment case
+    (their own site yields a precise email). The old no-web predicate capped the
+    emailable pool at ~1% of supply."""
     q = leads.build_query((33.20, -84.95, 33.55, -84.55))
-    assert '["website"!~"."]' in q          # the no-website predicate
-    assert '["contact:website"!~"."]' in q and '["url"!~"."]' in q  # full no-web-presence
+    assert '["website"!~"."]' not in q       # no-web exclusion is GONE
+    assert '["contact:website"!~"."]' not in q and '["url"!~"."]' not in q
     assert "33.2" in q and "-84.95" in q     # the bbox
     assert "out tags center" in q
 
 
 _SAMPLE = json.dumps({"elements": [
     {"type": "node", "tags": {"name": "Joe's Diner", "amenity": "restaurant",
-                               "phone": "770-555-1234"}},
+                               "phone": "770-555-1234",
+                               "website": "https://joesdiner.example"}},
     {"type": "node", "tags": {"name": "Newnan Hardware", "shop": "hardware"}},
     {"type": "node", "tags": {"name": "Subway", "amenity": "fast_food"}},     # chain -> drop
     {"type": "node", "tags": {"amenity": "cafe"}},                            # no name -> skip
@@ -39,6 +44,7 @@ def test_find_parses_filters_and_shapes():
     assert names == {"Joe's Diner", "Newnan Hardware"}           # chain + no-name removed
     joe = next(s for s in found if s["name"] == "Joe's Diner")
     assert joe["kind"] == "restaurant" and joe["contact"]["phone"] == "+17705551234"
+    assert joe["contact"]["website"] == "https://joesdiner.example"  # captured for enrich
 
 
 def test_extract_contact_pulls_phone_email_address():

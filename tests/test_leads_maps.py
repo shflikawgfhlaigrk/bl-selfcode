@@ -15,10 +15,16 @@ def test_parse_maps_place_keeps_no_website_with_phone():
     assert lead and lead["contact"]["phone"] == "+17705559999"
 
 
-def test_parse_maps_place_skips_when_website_present():
+def test_parse_maps_place_keeps_and_stores_website():
+    """Niche-broadening (Michael, 2026-06-09): has-website businesses are kept —
+    their own site is the precise email-enrichment source, and the pitch is
+    niche-agnostic (a $700 rebuild beats most aging sites)."""
     place = {"name": "Web Co", "phone": "7705551234", "website": "https://example.com",
              "types": ["general_contractor"]}
-    assert leads.parse_maps_place(place) is None
+    lead = leads.parse_maps_place(place)
+    assert lead is not None
+    assert lead["contact"]["website"] == "https://example.com"
+    assert lead["contact"]["phone"] == "+17705551234"
 
 
 def test_find_maps_no_website_trades_uses_injected_search():
