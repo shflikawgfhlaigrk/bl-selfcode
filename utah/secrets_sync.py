@@ -1,9 +1,13 @@
 """Hydrate ``~/.utah/secrets/`` from sources Utah already has — not Michael's job.
 
-Ace/Utah already hold Gmail creds, Pushover, Discord, Ace ``outreach-config.yaml``,
-and ``~/.ace/config.yaml`` OAuth client ids. This module copies forward what exists,
-never overwrites a real value with a placeholder, and reports what's still missing
-so Ace can ask Michael *once by voice* instead of handing him JSON files.
+Utah already holds Gmail creds, Pushover, Discord, an outreach-config, and OAuth client
+ids. This module copies forward what exists, never overwrites a real value with a
+placeholder, and reports what's still missing so Ace can ask Michael *once by voice*.
+
+**Isolation (binding rule M):** the RUNTIME never reads ``~/.ace``. The Ace config that
+once lived there is forward-migrated into ``~/.utah/secrets/`` exactly ONCE (when the
+``~/.utah`` copy is absent); every recurring read after that is from ``~/.utah``. So
+"Utah is separate from Ace" is true in the code, not just the docs.
 
 Called from :mod:`utah.foundation` on every probe cycle (cheap, idempotent).
 """
@@ -12,6 +16,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+import shutil
 from pathlib import Path
 from typing import Any
 
@@ -19,12 +24,33 @@ from utah import config
 
 log = logging.getLogger("utah.secrets_sync")
 
-ACE_OUTREACH = Path.home() / ".ace" / "outreach-config.yaml"
-ACE_CONFIG = Path.home() / ".ace" / "config.yaml"
 SECRETS = config.UTAH_HOME / "secrets"
 GMAIL = SECRETS / "gmail.json"
 BUSINESS = config.BUSINESS_CREDS
 GOOGLE = SECRETS / "google.json"
+
+#: Utah-owned config (read every cycle). The Ace originals are migrated here ONCE.
+OUTREACH_CFG = SECRETS / "outreach-config.yaml"
+OAUTH_CFG = SECRETS / "google-oauth.yaml"
+#: Legacy Ace sources — touched ONLY by the one-time migration below, never at runtime.
+_OUTREACH_CFG_LEGACY = Path.home() / ".ace" / "outreach-config.yaml"
+_OAUTH_CFG_LEGACY = Path.home() / ".ace" / "config.yaml"
+
+
+def _migrate_legacy_once() -> None:
+    """Forward-migrate the Ace config into ``~/.utah`` exactly once (copy iff the target
+    is absent and the legacy exists). After this the runtime reads only ``~/.utah`` — the
+    recurring ``~/.ace`` dependency the audit flagged is gone. Never raises."""
+    for legacy, target in ((_OUTREACH_CFG_LEGACY, OUTREACH_CFG), (_OAUTH_CFG_LEGACY, OAUTH_CFG)):
+        try:
+            if not target.exists() and legacy.is_file():
+                target.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+                shutil.copy2(legacy, target)
+                target.chmod(0o600)
+                log.info("secrets_sync: migrated %s → %s (one-time; ~/.ace not read again)",
+                         legacy, target)
+        except OSError as exc:  # noqa: PERF203 — best-effort, two paths
+            log.debug("secrets_sync: legacy migrate skipped (%s): %s", legacy, exc)
 
 _PLACEHOLDER = re.compile(
     r"placeholder|replace|\[can-spam|your real|your email|example\.com",
@@ -99,17 +125,17 @@ def sync_business_from_memory() -> str | None:
 
 def _fix_ace_outreach_email() -> bool:
     """Rewrite Ace outreach-config if it still has the mthburnsbarber typo."""
-    if not ACE_OUTREACH.is_file():
+    if not OUTREACH_CFG.is_file():
         return False
     try:
-        raw = ACE_OUTREACH.read_text(encoding="utf-8")
+        raw = OUTREACH_CFG.read_text(encoding="utf-8")
         if "mthburnsbarber@gmail.com" not in raw.lower():
             return False
         fixed = raw.replace("mthburnsbarber@gmail.com", config.OWNER_EMAIL)
         fixed = fixed.replace("mthburnsbarber@GMAIL.COM", config.OWNER_EMAIL)
         if fixed != raw:
-            ACE_OUTREACH.write_text(fixed, encoding="utf-8")
-            log.info("secrets_sync: fixed mthburnsbarber typo in %s", ACE_OUTREACH)
+            OUTREACH_CFG.write_text(fixed, encoding="utf-8")
+            log.info("secrets_sync: fixed mthburnsbarber typo in %s", OUTREACH_CFG)
             return True
     except OSError:
         pass
@@ -120,7 +146,7 @@ def sync_business(*, write: bool = True) -> dict[str, Any]:
     """Merge business.json from Ace outreach-config + gmail.json + memory."""
     _fix_ace_outreach_email()
     biz = _load_json(BUSINESS)
-    ace = _parse_yaml_kv(ACE_OUTREACH) if ACE_OUTREACH.is_file() else {}
+    ace = _parse_yaml_kv(OUTREACH_CFG) if OUTREACH_CFG.is_file() else {}
     gmail = _load_json(GMAIL)
 
     updates: list[str] = []
@@ -159,11 +185,11 @@ def sync_google(*, write: bool = True) -> dict[str, Any]:
     """Seed google.json OAuth client from Ace config when absent."""
     if GOOGLE.exists() and _load_json(GOOGLE).get("refresh_token"):
         return {"updated": [], "skipped": "google.json already has refresh_token"}
-    ace = _parse_yaml_kv(ACE_CONFIG) if ACE_CONFIG.is_file() else {}
+    ace = _parse_yaml_kv(OAUTH_CFG) if OAUTH_CFG.is_file() else {}
     # config.yaml nests under google_oauth — parse crudely from raw file
     client_id = client_secret = ""
     try:
-        raw = ACE_CONFIG.read_text(encoding="utf-8")
+        raw = OAUTH_CFG.read_text(encoding="utf-8")
         m = re.search(r'client_id:\s*"?([^"\n]+)"?', raw)
         if m:
             client_id = m.group(1).strip()
@@ -193,6 +219,7 @@ def sync_google(*, write: bool = True) -> dict[str, Any]:
 
 def sync_all(*, write: bool = True) -> dict[str, Any]:
     """Idempotent hydrate pass. Never raises."""
+    _migrate_legacy_once()   # one-time ~/.ace → ~/.utah; runtime reads only ~/.utah after
     report = {
         "business": sync_business(write=write),
         "google": sync_google(write=write),

@@ -76,6 +76,10 @@
   .card h2 .tag{color:var(--ok);font-size:9px;letter-spacing:1.5px}
   .card h2 .tag.warn{color:var(--warn)} .card h2 .tag.off{color:var(--err)}
   .card.dormant{opacity:.6} .card.dormant::before{background:var(--dim)} .card.dormant h2{color:var(--mut)}
+  /* DEMO build (B16): /?demo=1 hides the honestly-empty no-producer panels (risk kernel,
+     sync & ingest, etc.) so a reviewer never clicks a dead panel. Dev (default) still shows
+     them — DORMANT/GATED is the no-fake doctrine, not a bug, so it stays visible normally. */
+  body.demo .sysrow.gated, body.demo .fn.gated, body.demo .card.dormant{display:none}
   .rail-title{font-size:10px;letter-spacing:2.5px;color:var(--mut);padding:2px 2px 0;display:flex;justify-content:space-between}
 
   .row{display:flex;justify-content:space-between;align-items:baseline;padding:3px 0;border-bottom:1px dotted #1b1b24}
@@ -1147,7 +1151,7 @@ const EXPLAIN={
     read:"Each row = one message sent. Recipient + campaign + channel + when."},
   probate:{what:"Probate real-estate cases — inherited properties that often sell below market — pulled statewide from county filings.",
     why:"A second income lane: motivated heirs, discounted homes you can approach early.",
-    read:"Each row = one case: the estate name, county, filing date, and estimated after-repair value (ARV) where known."},
+    read:"Each row = one case: the estate name, county, filing date, and the parcel's county-assessed value where known (not a comp/after-repair estimate)."},
   research:{what:"Facts Utah taught itself. When it doesn't know something, it reads the web, grounds the answer, and saves it here forever.",
     why:"Utah gets smarter the more you use it — every gap it fills is permanent.",
     read:"Each row = one learned fact, with where it came from."},
@@ -1191,7 +1195,7 @@ function sec(t){ return `<div class="drill-sec">${esc(t)}</div>`; }
 /* one full record, every field in plain labels (leads / facts / outreach / etc.) */
 const FIELD_LABELS={name:"Business",case_name:"Estate",recipient:"Sent to",kind:"Type",region:"Where",
   county:"County",source:"Found via",status:"Status",campaign:"Campaign",channel:"Channel",
-  direction:"Direction",outcome:"Outcome",engine:"Engine",arv:"Est. value (ARV)",filed:"Filed",
+  direction:"Direction",outcome:"Outcome",engine:"Engine",arv:"Assessed value",filed:"Filed",
   confidence:"Confidence",ts:"When",id:"Record #",subject:"Subject",post_id:"Post id",rows_in:"Rows in"};
 function contactBlock(c){
   if(!c||typeof c!=="object"||!Object.keys(c).length) return '<span class="nocontact">— no phone/email/address on file yet</span>';
@@ -1405,6 +1409,9 @@ async function openLab(){
 document.addEventListener("keydown",e=>{ if(e.key==="Escape")drillClose(); });
 
 /* ============================ BOOT ============================ */
+// DEMO build (B16): /?demo=1 (or #demo) hides no-producer/gated panels for a clean walk-
+// through. Default (no flag) keeps them visible — honest-empty is the doctrine, not a bug.
+if(/[?&#]demo\b/.test(location.search+location.hash)) document.body.classList.add("demo");
 function clock(){$("clock").textContent=new Date().toLocaleTimeString([],{hour:"2-digit",minute:"2-digit",second:"2-digit"})+" · ET";}
 // label the static "awaiting events…" placeholder from STATE_LABELS (first-paint a11y)
 $("ticker").innerHTML=`<div${markerAttrs("awaiting events…")}>awaiting events…</div>`;

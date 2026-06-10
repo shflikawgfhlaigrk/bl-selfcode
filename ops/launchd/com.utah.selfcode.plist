@@ -1,23 +1,35 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <!--
-  com.utah.selfcode — SICA autonomous self-improvement cycle (continuous loop).
+  com.utah.selfcode — SICA self-improvement, EDGE-TRIGGERED (B12b / doc 13-autonomy).
 
-  Runs utah.sica_autonomy --loop: one governed cycle, then sleep UTAH_SELFCODE_INTERVAL
-  (default 900s / 15m). Each cycle browses first (frontend deck + web research),
-  writes finding pages under ~/.utah/findings/, then codes the oldest unused TASK.
-  codes it in the ISOLATED dedicated repo (UTAH_SELFCODE_REPO=~/.utah/selfcode-repo)
-  under the overseer, the full suite gates it, the attempt is utility-scored + archived,
-  and a Tier-A green change auto-merges (after the supervised ramp). Skips when substrate
-  is red (foundation.json). Kill switch (~/.utah/run/selfcode.disabled) stops each cycle;
-  automerge (~/.utah/run/selfcode.automerge) arms merging.
+  The 13-autonomy spec is explicit: "bounded, edge-triggered, single-instance — NO
+  KeepAlive." This job was a KeepAlive `--loop` running a cycle every 15 min forever — the
+  exact 24/7 churn the spec forbids (it spent cycles on cosmetics while revenue sat at $0).
+  It is now:
+
+  * ONE bounded cycle per launch (no `--loop`) — run, then EXIT. No KeepAlive.
+  * EDGE-TRIGGERED via WatchPaths on ~/.utah/run/selfcode.trigger: any subsystem that files
+    a concrete repair (revenue_heal, etc., via sica_discover.file_task) bumps that sentinel,
+    and launchd fires exactly one cycle to work it. The cycle never touches the sentinel, so
+    it never self-retriggers.
+  * Plus a SPARSE business-hours heartbeat (a handful of calendar ticks/day) so the browse
+    + research discovery domains still seed new tasks when nothing else filed one — bounded,
+    not continuous.
+  * RunAtLoad is FALSE (a reboot never kicks a cycle); ThrottleInterval coalesces a burst of
+    filed tasks into at most one launch per 5 min.
+
+  Each cycle codes in the ISOLATED repo (UTAH_SELFCODE_REPO) under the overseer + suite gate;
+  a Tier-A green change auto-merges after the supervised ramp; higher tiers stay proposals.
+  Skips when substrate is red. Kill switch (~/.utah/run/selfcode.disabled) stops each cycle;
+  automerge flag (~/.utah/run/selfcode.automerge) arms merging.
 
   Install:
     cp ops/launchd/com.utah.selfcode.plist ~/Library/LaunchAgents/
+    launchctl bootout   gui/$(id -u)/com.utah.selfcode 2>/dev/null
     launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.utah.selfcode.plist
   Force-run now:  launchctl kickstart -k gui/$(id -u)/com.utah.selfcode
   Pause:          touch ~/.utah/run/selfcode.disabled   (or bootout the job)
-  Faster/slower:  set UTAH_SELFCODE_INTERVAL (seconds) in this plist, then reload
 -->
 <plist version="1.0">
 <dict>
@@ -29,13 +41,11 @@
     <string>/Users/michaelbarber/.utah/venv/bin/python</string>
     <string>-m</string>
     <string>utah.sica_autonomy</string>
-    <string>--loop</string>
   </array>
 
   <!-- WorkingDirectory is ~/.utah, NOT the TCC-protected Desktop: under launchd a
-       Desktop cwd made every subprocess's getcwd() return EPERM ("Unable to read
-       current working directory"), aborting git propagation. PYTHONPATH still points
-       at the repo so imports resolve regardless of cwd. -->
+       Desktop cwd made every subprocess's getcwd() return EPERM, aborting git
+       propagation. PYTHONPATH still points at the repo so imports resolve regardless. -->
   <key>WorkingDirectory</key>
   <string>/Users/michaelbarber/.utah</string>
 
@@ -47,20 +57,30 @@
     <string>/Users/michaelbarber/.utah/selfcode-repo</string>
     <key>UTAH_SELFCODE_TIME_LIMIT</key>
     <string>900</string>
-    <key>UTAH_SELFCODE_INTERVAL</key>
-    <string>900</string>
     <key>PYTHONUNBUFFERED</key>
     <string>1</string>
     <key>PATH</key>
     <string>/Users/michaelbarber/.utah/venv/bin:/opt/homebrew/bin:/usr/local/bin:/Users/michaelbarber/.local/bin:/usr/bin:/bin</string>
   </dict>
 
+  <!-- EDGE TRIGGER: fire one cycle when a repair is filed (sentinel bumped). -->
+  <key>WatchPaths</key>
+  <array>
+    <string>/Users/michaelbarber/.utah/run/selfcode.trigger</string>
+  </array>
+
+  <!-- Sparse discovery heartbeat: a few single-shot ticks during the day, NOT a loop. -->
+  <key>StartCalendarInterval</key>
+  <array>
+    <dict><key>Hour</key><integer>9</integer><key>Minute</key><integer>20</integer></dict>
+    <dict><key>Hour</key><integer>13</integer><key>Minute</key><integer>20</integer></dict>
+    <dict><key>Hour</key><integer>17</integer><key>Minute</key><integer>20</integer></dict>
+  </array>
+
   <key>RunAtLoad</key>
-  <true/>
-  <key>KeepAlive</key>
-  <true/>
+  <false/>
   <key>ThrottleInterval</key>
-  <integer>30</integer>
+  <integer>300</integer>
   <key>ProcessType</key>
   <string>Background</string>
 

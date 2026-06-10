@@ -46,3 +46,19 @@ def test_run_discover_writes_both_browser_domains(tmp_path, monkeypatch):
     )
     assert out["count"] == 2
     assert len(list(fdir.glob("*.md"))) == 2
+
+
+def test_file_task_edge_triggers_selfcode_via_sentinel(tmp_path, monkeypatch):
+    """B12b: a filed repair bumps the selfcode.trigger sentinel so the EDGE-TRIGGERED
+    launchd job fires one cycle (no 24/7 KeepAlive loop). The cycle's own discovery does
+    not touch it, so the job never self-retriggers."""
+    trigger = tmp_path / "selfcode.trigger"
+    monkeypatch.setattr(sica_discover, "TRIGGER_PATH", trigger)
+    log = tmp_path / "discoveries.jsonl"
+    # injected log_path is a test fixture → no trigger; the real (default) path touches it
+    sica_discover.file_task("revenue", "fix the sender", log_path=log)
+    assert not trigger.exists()
+    monkeypatch.setattr(sica_discover, "DISCOVERIES_LOG", log)
+    monkeypatch.setattr(sica_discover, "USED_PATH", tmp_path / "used.json")
+    sica_discover.file_task("revenue", "fix the sender for real")   # default path → trigger
+    assert trigger.exists()

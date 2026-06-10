@@ -271,3 +271,30 @@ def test_run_cycle_no_frontend_verify_on_nonfrontend_merge(monkeypatch, tmp_path
         propagate_fn=lambda clone=None: {"propagated": True},
         verify_fn=lambda: called.update(ran=True) or {}, discover_fn=_SKIP_DISCOVER)
     assert "frontend_verify" not in r and "ran" not in called
+
+
+def test_autonomy_slot_evolves_from_archive_best(monkeypatch, tmp_path):
+    """Audit #25: on the 'autonomy' rotation slot, the next task is the archive-argmax
+    meta-task (next_task_from_archive), so self-improvement COMPOUNDS from best() — not a
+    generic goal. The meta-agent reads the archive and the brain proposes the evolution."""
+    monkeypatch.setattr(selfcode, "KILL_SWITCH", tmp_path / "nope")
+    monkeypatch.setattr(sica, "ARCHIVE_PATH", tmp_path / "arch.jsonl")
+    from utah import sica_goals
+    # force the rotation onto 'autonomy', and prove sica_goals.next_task is NOT used there
+    monkeypatch.setattr(sica_goals, "select_domain", lambda i: "autonomy")
+    monkeypatch.setattr(sica_goals, "next_task",
+                        lambda *a, **k: "GENERIC-SHOULD-NOT-BE-USED")
+    # the meta-agent (brain over the archive) proposes the evolution task
+    meta_brain = lambda prompt: "evolve the best leaf helper found so far"
+    seen = {}
+
+    def fake_propose(task):
+        seen["task"] = task
+        return {"utility": 0.5, "tests_passed": True, "merged": False, "cost_usd": 0}
+
+    r = sica_autonomy.run_cycle(repo=tmp_path, sync_fn=lambda repo: True,
+                                brain_fn=meta_brain, propose_fn=fake_propose,
+                                discover_fn=_SKIP_DISCOVER)
+    assert r["ran"] is True
+    assert seen["task"] == "evolve the best leaf helper found so far"   # archive-driven
+    assert r["task"] != "GENERIC-SHOULD-NOT-BE-USED"

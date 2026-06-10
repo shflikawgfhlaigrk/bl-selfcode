@@ -26,12 +26,20 @@ CLI as the only paid lane.
 10 storage   ✅ pg MVCC primary + DuckDB OLAP (postgres_scanner ATTACH)
 11 interface ✅ event bus + starlette web bridge (deck + /status + SSE) + honest deck
 12 product   ✅ Postgres revenue ledger (UNIQUE never-twice; publishes to bus)
---- STOP HERE (item 13 = autonomy) ---
-14 migration  ⏳ NEXT: port Ace tools so each DORMANT deck panel gets a real producer
-13 autonomy   ⏳ after migration, on the proven base
+13 autonomy   ✅ LIVE — SICA self-coding, edge-triggered (NOT KeepAlive), tiered+kill-switch
+14 migration  ⏳ ongoing: wire each remaining DORMANT deck panel to a real producer
 ```
 
-## 2. Architecture / code map (3,424 LOC, 33 modules, package `utah`)
+> **CURRENT STATE (corrected 2026-06-09, accurate over aspirational):** ~19,900 LOC across
+> ~120 `utah/` modules; 97 test files (~1,024 tests green). Postgres has **16 tables**.
+> **Autonomy (item 13) is LIVE** — edge-triggered self-coding with the byte-checked
+> kill-switch + tier ceiling (NOT the earlier "gated"). **Email outreach is LIVE** (real
+> Gmail SMTP + CAN-SPAM address; phone-only leads reached by iMessage text). Probate
+> resolves the parcel's **county-assessed value + nearby-business survey** (NOT sold-comps/
+> ARV) and direct-mails heirs. Realized revenue is still **$0** — the outcome gate
+> (`revenue_heal.outcome_gate`) reports that honestly until money flows.
+
+## 2. Architecture / code map (~19,900 LOC across ~120 modules, package `utah`)
 **Brain** (`utah/`): `core.tell` = recall→ground→reason→remember. `memory.py` =
 pure decision fns (`decide_write`/`rrf_fuse`/`compute_decay`/`passes_gate`) +
 `StoreBackend` Protocol + `PostgresStore` (ONE managed conn, reconnects, no fd

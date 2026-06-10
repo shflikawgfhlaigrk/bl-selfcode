@@ -25,7 +25,27 @@ from utah.integrations import oauth
 
 log = logging.getLogger("utah.auth_repair")
 
-ACE_CHROME = Path.home() / ".ace" / "chrome-ace"
+#: The Google-auth Chrome profile lives under ~/.utah now (binding rule M: the runtime
+#: never reads ~/.ace). The legacy ~/.ace/chrome-ace login is forward-migrated ONCE.
+WC_CHROME = runtime.UTAH_HOME / "chrome-ace"
+_CHROME_LEGACY = Path.home() / ".ace" / "chrome-ace"
+
+
+def _migrate_chrome_once() -> None:
+    """Copy the logged-in Ace Google Chrome profile into ~/.utah exactly once (iff the
+    ~/.utah profile is absent and the legacy exists). Best-effort; never raises."""
+    import shutil
+
+    try:
+        if not WC_CHROME.is_dir() and _CHROME_LEGACY.is_dir():
+            shutil.copytree(_CHROME_LEGACY, WC_CHROME, dirs_exist_ok=False,
+                            ignore=shutil.ignore_patterns("Singleton*", "*.lock"))
+            log.info("auth_repair: migrated chrome profile %s → %s (one-time)",
+                     _CHROME_LEGACY, WC_CHROME)
+    except Exception as exc:  # noqa: BLE001 — a copy hiccup just means Michael re-logs in
+        log.debug("auth_repair: chrome profile migrate skipped: %s", exc)
+
+
 REPAIR_STATE = runtime.RUN_DIR / "auth_repair.json"
 GMAIL_CREDS = runtime.UTAH_HOME / "secrets" / "gmail.json"
 GOOGLE_CREDS = runtime.UTAH_HOME / "secrets" / "google.json"
@@ -82,18 +102,19 @@ def open_chrome_ace(url: str) -> bool:
         chrome = browser.chrome_binary()
     except Exception:  # noqa: BLE001
         pass
-    if chrome and ACE_CHROME.is_dir():
+    _migrate_chrome_once()
+    if chrome and WC_CHROME.is_dir():
         try:
             subprocess.Popen(
-                [chrome, f"--user-data-dir={ACE_CHROME}", url],
+                [chrome, f"--user-data-dir={WC_CHROME}", url],
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
                 start_new_session=True,
             )
-            log.info("auth_repair: opened chrome-ace → %s", url[:80])
+            log.info("auth_repair: opened chrome profile → %s", url[:80])
             return True
         except OSError as exc:
-            log.warning("auth_repair chrome-ace launch failed: %s", exc)
+            log.warning("auth_repair chrome launch failed: %s", exc)
     try:
         subprocess.run(["open", url], check=False, timeout=5)
         return True

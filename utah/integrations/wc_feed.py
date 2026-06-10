@@ -25,7 +25,26 @@ log = logging.getLogger("utah.integrations.wc_feed")
 CDP_PORT = int(os.environ.get("UTAH_WC_CDP_PORT", "9222"))
 WC_HOST = "app.wealthcharts.com"
 CHROME = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
-WC_PROFILE = os.path.expanduser(os.environ.get("UTAH_WC_PROFILE", "~/.ace/chrome-wc"))
+#: The WC Chrome profile lives under ~/.utah now (binding rule M: the runtime never reads
+#: ~/.ace). The legacy ~/.ace/chrome-wc login is forward-migrated ONCE by ensure_chrome_wc.
+WC_PROFILE = os.path.expanduser(os.environ.get("UTAH_WC_PROFILE", "~/.utah/chrome-wc"))
+_WC_PROFILE_LEGACY = os.path.expanduser("~/.ace/chrome-wc")
+
+
+def _migrate_wc_profile_once() -> None:
+    """Copy the logged-in Ace WC Chrome profile into ~/.utah exactly once (iff the ~/.utah
+    profile is absent and the legacy exists), so the WC login is preserved WITHOUT a
+    recurring ~/.ace dependency. Best-effort; Chrome must not be running against it."""
+    import shutil
+
+    try:
+        if not os.path.isdir(WC_PROFILE) and os.path.isdir(_WC_PROFILE_LEGACY):
+            shutil.copytree(_WC_PROFILE_LEGACY, WC_PROFILE, dirs_exist_ok=False,
+                            ignore=shutil.ignore_patterns("Singleton*", "*.lock"))
+            log.info("wc_feed: migrated WC profile %s → %s (one-time)",
+                     _WC_PROFILE_LEGACY, WC_PROFILE)
+    except Exception as exc:  # noqa: BLE001 — a copy hiccup just means Michael re-logs in
+        log.debug("wc_feed: WC profile migrate skipped: %s", exc)
 #: Bar size in seconds (the feed is ~1s candles; 15s bars + lookback 20 = a 5-minute
 #: breakout — a real intraday timeframe, not tick jitter). Tune with UTAH_WC_BAR_SECONDS.
 BAR_SECONDS = int(os.environ.get("UTAH_WC_BAR_SECONDS", "15"))
@@ -191,6 +210,7 @@ def ensure_chrome_wc() -> bool:
     render). Returns True once a logged-in WC page is reachable. Never raises."""
     if feed_available():
         return True
+    _migrate_wc_profile_once()   # one-time ~/.ace/chrome-wc → ~/.utah/chrome-wc (preserve login)
     if not os.path.isdir(WC_PROFILE):
         log.warning("wc_feed: no chrome-wc profile at %s — Michael's WC login required", WC_PROFILE)
         return False

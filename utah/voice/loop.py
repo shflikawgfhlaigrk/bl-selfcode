@@ -183,18 +183,27 @@ def run() -> None:
     def _monitor():
         while True:
             time.sleep(MONITOR_S)
-            state.write(**vstate)
             # The callback drops mic frames while WE process OR while ANY process is speaking
             # (echo guard). The monitor must skip those windows too, or it counts a correctly-
             # muted mic as "deaf" → false mic_silent. (The real deaf cause — a hung afplay
             # holding the play-lock — is now bounded by AFPLAY_TIMEOUT_S in tts._afplay.)
             if processing.is_set() or tts.is_anything_playing():
                 level["last_loud"] = time.monotonic()
+                vstate["deaf"] = False           # intentionally muted, not deaf
+                vstate["mic_quiet_s"] = 0.0
+                state.write(**vstate)
                 continue
             mx = level["max"]; level["max"] = 0.0
             log.debug("voice: audio level (max rms / %ds) = %.4f", MONITOR_S, mx)
             quiet_for = time.monotonic() - level["last_loud"]
             now = time.monotonic()
+            # Publish a DEAF heartbeat (B15): the device delivering pure zeros (< TRUE_SILENCE)
+            # this long means the mic is dead, not the room being quiet (a real room reads
+            # above TRUE_SILENCE). The supervisor's audio-liveness probe restarts the loop on
+            # this — reopening the stream recovers a wedged CoreAudio handle.
+            vstate["deaf"] = quiet_for > SILENCE_ALERT_S
+            vstate["mic_quiet_s"] = round(quiet_for, 1)
+            state.write(**vstate)
             cooled = (now - level["last_record"]) > MIC_SILENT_COOLDOWN_S
             if quiet_for > SILENCE_ALERT_S and not level["alerted"] and cooled:
                 level["alerted"] = True

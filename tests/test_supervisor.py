@@ -123,10 +123,72 @@ def test_per_child_circuit_breaks_after_max_restarts():
         sup.drain_all()
 
 
+def test_reset_circuit_rearms_the_breaker_for_in_place_recovery():
+    """B1′: the in-place recovery loop re-arms a circuit-broken child so the supervisor
+    can keep trying without exiting (no unsupervised launchd-backoff gap)."""
+    sup = Supervisor(
+        children=[ChildSpec("crasher", EXIT_NOW, probe=HEALTHY)],
+        max_restarts=3, window_s=60.0, ready_timeout=1.0,
+    )
+    child = sup._children[0]
+    for _ in range(3):
+        child.record_restart()
+    assert child.circuit_broken() is True
+    child.reset_circuit()                       # the recovery loop's re-arm
+    assert child.circuit_broken() is False      # ready to try again, no exit
+
+
+def test_children_down_alert_is_best_effort(monkeypatch):
+    """The all-children-down page must never crash the recovery loop."""
+    from utah.daemon import supervisor as sup_mod
+
+    sent = []
+    import utah.alerts as alerts
+    monkeypatch.setattr(alerts, "critical_async",
+                        lambda src, detail, key=None: sent.append((src, key)))
+    sup_mod._alert_children_down(["daemon", "web", "voice"])
+    assert sent and sent[0][1] == "supervisor/all_children_down"
+    # even if alerting blows up, it is swallowed
+    monkeypatch.setattr(alerts, "critical_async",
+                        lambda *a, **k: (_ for _ in ()).throw(RuntimeError("boom")))
+    sup_mod._alert_children_down(["daemon"])     # must not raise
+
+
 def test_http_probe_false_when_port_closed():
     """The web child's HTTP health probe returns False on a closed port."""
     from utah.daemon.supervisor import http_probe
     assert http_probe("http://127.0.0.1:9", timeout=0.5)() is False
+
+
+def test_voice_audio_probe_restarts_a_deaf_but_alive_loop(monkeypatch):
+    """B15: a fresh heartbeat that reports the mic deaf past the threshold → probe False
+    (wedged → restart). A healthy/quiet mic or a startup with no heartbeat → True."""
+    import time as _t
+
+    from utah.daemon import supervisor as sup_mod
+    from utah.voice import state as voice_state
+
+    now = _t.time()
+    probe = sup_mod.voice_audio_probe(deaf_after_s=75.0)
+
+    monkeypatch.setattr(voice_state, "read", lambda: None)
+    assert probe() is True                                   # no heartbeat → not our call
+
+    monkeypatch.setattr(voice_state, "read",
+                        lambda: {"ts": now, "deaf": False, "mic_quiet_s": 0.0})
+    assert probe() is True                                   # mic alive
+
+    monkeypatch.setattr(voice_state, "read",
+                        lambda: {"ts": now, "deaf": True, "mic_quiet_s": 90.0})
+    assert probe() is False                                  # deaf past threshold → restart
+
+    monkeypatch.setattr(voice_state, "read",
+                        lambda: {"ts": now, "deaf": True, "mic_quiet_s": 40.0})
+    assert probe() is True                                   # deaf but not yet past threshold
+
+    monkeypatch.setattr(voice_state, "read",
+                        lambda: {"ts": now - 999, "deaf": False, "mic_quiet_s": 0.0})
+    assert probe() is False                                  # frozen heartbeat → monitor wedged
 
 
 def test_child_spec_env_is_merged_into_subprocess(tmp_path):

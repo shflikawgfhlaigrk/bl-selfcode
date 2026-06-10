@@ -79,6 +79,40 @@ Unlocks: **calendar event creation**.
 
 ---
 
+## TIER 2.5 — revenue last-mile unlocks (added 2026-06-09; code built, gated on input)
+
+### 9. SMS / texting  → `~/.utah/secrets/twilio.json` OR the iMessage grant   ★ revenue
+Cold-text the ~790 phone-only leads (CAN-SPAM-compliant pitch with opt-out).
+- **Already works via iMessage** when no Twilio: `sms.send` falls back to Messages.app.
+  The ONE unlock there is the OS grant — System Settings → Privacy & Security → Automation
+  → allow the Utah Python to control **Messages** (one click). Then phone leads are reached.
+- For a dedicated number instead: `{ "account_sid": "AC...", "auth_token": "...", "from_number": "+1..." }`.
+  Wiring: DONE (Twilio adapter + iMessage relay both live).
+
+### 10. Email skip-trace  → `~/.utah/secrets/skiptrace.json`   (grows the emailable pool)
+The free open-web enricher already runs (finds public emails for some leads). A paid
+skip-trace raises the yield. Drop the provider creds and the provider path activates
+(`enrich._provider_find` — wire the real call when you pick a vendor). Without it, the free
+web pass still runs every cycle. No vendor chosen yet → free path only.
+
+### 11. Probate direct-mail  → `~/.utah/secrets/lob.json`   (auto-send heir letters)
+The probate last-mile generates ready-to-mail letters to `~/.utah/run/probate_letters/`
+today (Michael prints + mails). Drop a print-mail provider's creds (e.g. Lob) and the
+letters auto-send; suppression then commits on real send. Without it, letters are queued,
+never faked as sent.
+
+## HUMAN-ONLY blockers (no credential can unlock these — your call/action)
+These are the §1.4 blockers that are NOT code: the engine is built and waiting.
+- **The volume-send GO** — email is live + business-hours-capped at 50/hr (≤500/day). It
+  sends automatically on the `com.utah.outreach` schedule; the only "decision" is leaving it
+  armed (it is). Watch the first batch, then let it run.
+- **Close one sale** — the pipeline delivers (james-bros is a real built site). One reply
+  worked → one close moves the system off $0 (the `outcome_gate` flips green).
+- **WealthCharts login** — log into WC once in the migrated `~/.utah/chrome-wc` profile; the
+  CDP bridge reads the feed (engines stay paper until you fund a broker — by design).
+- **Fund a broker** — only when a backtest proves edge (`product/backtest.prove_edge`). Until
+  then trading stays paper, one engine. Don't fund on hope.
+
 ## Already covered — no action needed
 - **Brain / reasoning** = Claude CLI (`claude -p`), already logged in. CLI-only by design —
   do NOT add an Anthropic API key (credits depleted; CLI subscription is the free path).

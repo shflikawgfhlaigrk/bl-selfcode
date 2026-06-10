@@ -58,9 +58,12 @@ def test_daemon_down_is_documented():
     assert any(row[2] == "daemon_unreachable" for row in store.rows)
 
 
-def test_gate_cron_green_returns_none():
+def test_gate_cron_green_returns_none(monkeypatch):
     store = FakeFailureStore()
     failures.set_store(store)
+    # Isolate the SUBSTRATE gate from the heavy-cron governor (its load/mutex behavior is
+    # covered hermetically in test_cron_governor); in-daemon calls skip that governor.
+    monkeypatch.setattr(foundation, "_is_daemon_process", lambda: True)
     assert foundation.gate_cron("leads", status={"ok": True, "state": "green"}) is None
     assert store.rows == []
 

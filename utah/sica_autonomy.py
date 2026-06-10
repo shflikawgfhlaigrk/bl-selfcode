@@ -125,7 +125,15 @@ def propagate(live=None, clone=None) -> dict:
     pop_conflict = False
     if stashed:
         pop = g(live, "stash", "pop")
-        pop_conflict = pop.returncode != 0   # no overlap => should be clean; surface if not
+        if pop.returncode != 0:
+            # B13: a conflicted stash pop used to leave the live tree littered with conflict
+            # markers + a "resolve manually" note nobody reads — and once stranded real
+            # uncommitted work. A conflicted pop does NOT drop the stash, so the dev work is
+            # safe in stash@{0}. Recover the tree to a CLEAN state (the propagated commit) and
+            # PAGE Michael, instead of leaving a half-merged tree the daemon then runs from.
+            pop_conflict = True
+            g(live, "reset", "--hard", "HEAD")   # clear conflict markers; stash@{0} preserved
+            _alert_propagate_conflict()
     if res.returncode != 0:
         return {"propagated": False, "reason": f"not a fast-forward: {res.stderr.strip()[:120]}"}
     if before == after:
@@ -133,8 +141,23 @@ def propagate(live=None, clone=None) -> dict:
     log.info("propagated autonomous work to live main: %s -> %s", before[:8], after[:8])
     out = {"propagated": True, "from": before[:8], "to": after[:8]}
     if pop_conflict:
-        out["dev_work"] = "preserved in stash@{0} — pop conflicted, resolve manually"
+        out["dev_work"] = ("preserved in stash@{0} (pop conflicted) — tree left CLEAN, no "
+                           "conflict markers; recover with `git stash apply`. Michael paged.")
     return out
+
+
+def _alert_propagate_conflict() -> None:
+    """Page Michael when an autonomous propagate had to stash-recover dev work (B13).
+    Best-effort — alerting must never crash the autonomy cycle."""
+    try:
+        from utah import alerts, failures
+
+        msg = ("autonomous propagate stash-pop conflicted — your uncommitted dev work is "
+               "safe in `git stash@{0}` (live tree left clean). Recover: `git stash apply`.")
+        failures.record("selfcode", "propagate_conflict", msg)
+        alerts.critical_async("selfcode", msg, key="selfcode/propagate_conflict")
+    except Exception:  # noqa: BLE001
+        log.warning("propagate-conflict alert failed", exc_info=True)
 
 
 def sync_repo(repo: Path) -> bool:
@@ -235,6 +258,13 @@ def run_cycle(*, repo=None, brain_fn=None, propose_fn=None, sync_fn=None, task_f
             domain = sica_goals.select_domain(sica_goals.next_cycle_index())
             if pending is not None and pending[0] == domain:
                 domain, task, pending_rec = pending     # browser finding on its own turn
+            elif domain == "autonomy":
+                # CLOSE THE META-LOOP (audit #25): on the autonomy slot, evolve from the
+                # best archived attempt (argmax utility) instead of a generic task — this is
+                # what makes self-improvement COMPOUND rather than only rotate. Falls back to
+                # the goal generator if the archive is empty or the meta-agent is silent.
+                task = MetaLoop(archive=arch).next_task_from_archive(brain) \
+                    or sica_goals.next_task(domain, brain_fn=brain)
             else:
                 task = sica_goals.next_task(domain, brain_fn=brain)
     task = (task or "").strip() or DEFAULT_TASK   # empty/whitespace → safe default

@@ -112,6 +112,7 @@ def test_run_scheduled_enriches_and_writes():
         return {"email": "found@a.co"} if lead["name"] == "A Co" else {"email": None}
 
     r = enrich.run_scheduled(ledger=FakeLedger(), lead_fetch=lambda limit: leads,
-                             find_fn=fake_find, limit=10)
+                             find_fn=fake_find, limit=10,
+                             foundation_gate=lambda cap: None)   # substrate green (hermetic)
     assert r["enriched"] == 1
     assert updated == [("A Co", "GA", {"email": "found@a.co"})]

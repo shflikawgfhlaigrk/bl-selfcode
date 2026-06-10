@@ -224,9 +224,16 @@ def _leads_needing_email(limit: int) -> list[dict]:
     return [{"name": r[0], "kind": r[1], "region": r[2], "contact": r[3] or {}} for r in rows]
 
 
-def run_scheduled(limit: int = 50, *, ledger=None, lead_fetch=None, find_fn=None) -> dict:
+def run_scheduled(limit: int = 50, *, ledger=None, lead_fetch=None, find_fn=None,
+                  foundation_gate=None) -> dict:
     """``com.utah.enrich`` cron — pull leads needing an email, find + store one each. Runs
-    before the outreach cron so freshly-enriched leads are sendable the same hour."""
+    before the outreach cron so freshly-enriched leads are sendable the same hour. Skips on
+    a red substrate (same gate as every other cron)."""
+    from utah import foundation
+
+    skip = (foundation.gate_cron if foundation_gate is None else foundation_gate)("enrich")
+    if skip:
+        return skip
     if ledger is None:
         from utah.product.ledger import get_ledger
         ledger = get_ledger()

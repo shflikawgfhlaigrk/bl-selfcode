@@ -1,5 +1,12 @@
 """Property resolver — bridge a probate decedent (NAME + COUNTY) to the REAL property
-they owned (address / parcel / point), so the 3-mile-radius comp check has an anchor.
+they owned (address / parcel / point), so the 3-mile nearby-business survey has an anchor.
+
+HONESTY (audit §3.2 — the most important credibility correction): this resolves the
+decedent parcel's own COUNTY-ASSESSED / fair-market value (a single number off the parcel
+record — NOT a renovation-adjusted "after-repair value") and surveys NEARBY BUSINESSES
+within ~3 miles (Maps places + no-website SMBs). It does **not** compute an average of
+comparable home SALES — that needs a sold-comps source (ATTOM/Regrid/MLS) we don't have.
+``arv`` = the parcel's assessed value; ``nearby`` = the business survey. Never oversold.
 
 This is the hard, honest part. Georgia has 159 counties and NO free statewide
 owner→parcel API: Regrid needs a paid token, qPublic (Schneider) blocks bots, and only
@@ -94,6 +101,40 @@ def _arcgis_query(url: str, where: str, fetch=None, timeout: int = 20) -> dict:
         return json.loads(r.read().decode("utf-8", "replace"))
 
 
+#: ArcGIS parcel layers carry the owner's MAILING address under wildly varying field names.
+#: These substrings catch the common ones (the tax-bill address = the heir/owner contact).
+_MAIL_STREET_HINTS = ("MAILADD", "MAIL_ADD", "MAILADR", "OWNERADD", "OWNER_ADD", "OWNADDR",
+                      "MAILINGADD", "MAIL_STREET", "MAILADDR")
+_MAIL_CITY_HINTS = ("MAILCITY", "MAIL_CITY", "OWNERCITY", "OWNER_CITY", "MAILINGCITY")
+_MAIL_STATE_HINTS = ("MAILSTATE", "MAIL_STATE", "OWNERSTATE", "OWNER_STATE", "MAILST")
+_MAIL_ZIP_HINTS = ("MAILZIP", "MAIL_ZIP", "OWNERZIP", "OWNER_ZIP", "MAILINGZIP", "MAILZIPCODE")
+
+
+def _pick(attrs: dict, hints: tuple[str, ...]) -> str:
+    """First non-empty attr whose UPPER-cased key contains one of *hints*."""
+    up = {(k or "").upper(): v for k, v in attrs.items()}
+    for hint in hints:
+        for key, val in up.items():
+            if hint in key and str(val or "").strip() and str(val).strip().lower() != "null":
+                return str(val).strip()
+    return ""
+
+
+def _owner_mailing_address(attrs: dict) -> dict:
+    """Assemble the owner's mailing address from a parcel record (best-effort across county
+    field-name conventions). Returns ``{}`` when no mailing street is present — never faked.
+    A street alone is enough to skip-trace; city/state/zip fill in when the layer has them."""
+    street = _pick(attrs, _MAIL_STREET_HINTS)
+    if not street:
+        return {}
+    city = _pick(attrs, _MAIL_CITY_HINTS)
+    state = _pick(attrs, _MAIL_STATE_HINTS)
+    zipc = _pick(attrs, _MAIL_ZIP_HINTS)
+    line2 = " ".join(p for p in (city, state, zipc) if p).strip()
+    return {"street": street, "city": city, "state": state, "zip": zipc,
+            "full": (f"{street}, {line2}" if line2 else street)}
+
+
 def resolve_property(case_name: str, county: str, *, fetch=None) -> dict:
     """Decedent NAME + COUNTY → ``{available, source, address?, parcel?, lat?, lng?}``.
 
@@ -139,7 +180,10 @@ def resolve_property(case_name: str, county: str, *, fetch=None) -> dict:
         arv = _to_money(attrs.get(vf)) if vf else None   # county appraised/fair-market value
         return {"available": True, "gated": False, "county": cty, "source": "arcgis",
                 "address": attrs.get(af), "parcel": parcel, "arv": arv,
-                "owner": attrs.get(of), "lat": lat, "lng": lng}
+                "owner": attrs.get(of), "lat": lat, "lng": lng,
+                # The owner's MAILING address (where tax bills go) — the heir/owner direct-
+                # mail contact (often != the property situs). This is the probate last-mile.
+                "owner_mail": _owner_mailing_address(attrs)}
     except Exception as exc:  # noqa: BLE001
         failures.record("property", "arcgis_failed", f"{case_name[:40]} ({cty}): {exc}")
         return {"available": False, "gated": False, "county": cty, "error": str(exc)}
@@ -147,8 +191,10 @@ def resolve_property(case_name: str, county: str, *, fetch=None) -> dict:
 
 def radius_check(lat, lng, radius_m: int = maps.THREE_MILES_M, *, places_fetch=None,
                  smb_fetch=None) -> dict:
-    """The 3-mile-radius check around a resolved property point: Maps places within the
-    radius PLUS real no-website SMBs from OSM in the bounding box. Both already proven."""
+    """The 3-mile NEARBY-BUSINESS survey around a resolved property point: Maps places
+    within the radius PLUS real no-website SMBs from OSM in the bounding box. This is a
+    survey of nearby BUSINESSES — NOT comparable home-sale prices (that would need a
+    sold-comps API we don't have). Never oversold as a 'comps' price average."""
     from utah.product import leads
     out: dict = {"radius_m": radius_m, "places": [], "no_website_smbs": []}
     near = maps.nearby(lat, lng, radius_m, fetch=places_fetch)
@@ -169,8 +215,10 @@ def radius_check(lat, lng, radius_m: int = maps.THREE_MILES_M, *, places_fetch=N
 
 def enrich(case_name: str, county: str, *, fetch=None, geocode_fetch=None,
            places_fetch=None, smb_fetch=None) -> dict:
-    """Full enrichment for one decedent: resolve property → geocode (if needed) → 3-mile
-    radius. Returns the heir_contact payload (or an honest unresolved marker). Never fakes."""
+    """Full enrichment for one decedent: resolve the PROPERTY (address/parcel/owner/
+    assessed-value) → geocode → nearby-business survey. Returns the property payload (or an
+    honest unresolved marker). NOTE: this resolves the property, NOT the HEIR's contact —
+    heir mailing-address skip-trace is the separate probate-outreach last-mile. Never fakes."""
     prop = resolve_property(case_name, county, fetch=fetch)
     if not prop.get("available") or not prop.get("address"):
         return {"property": "unresolved", "county": county,
@@ -184,7 +232,9 @@ def enrich(case_name: str, county: str, *, fetch=None, geocode_fetch=None,
                "owner": prop.get("owner"), "arv": prop.get("arv"),
                "lat": lat, "lng": lng, "source": prop.get("source")}
     if lat is not None and lng is not None:
-        payload["comps"] = radius_check(lat, lng, places_fetch=places_fetch, smb_fetch=smb_fetch)
+        # 'nearby' (renamed from the misleading 'comps'): a nearby-BUSINESS survey, not a
+        # comparable-home-sale price average. Honesty fix, audit §3.2.
+        payload["nearby"] = radius_check(lat, lng, places_fetch=places_fetch, smb_fetch=smb_fetch)
     return payload
 
 

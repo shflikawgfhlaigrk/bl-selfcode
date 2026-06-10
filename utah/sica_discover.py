@@ -29,6 +29,20 @@ log = logging.getLogger("utah.sica_discover")
 FINDINGS_DIR = Path(os.environ.get("UTAH_FINDINGS_DIR", str(runtime.UTAH_HOME / "findings")))
 DISCOVERIES_LOG = runtime.RUN_DIR / "discoveries.jsonl"
 USED_PATH = runtime.RUN_DIR / "discoveries-used.json"
+#: Edge-trigger sentinel: a filed repair touches this so the EDGE-TRIGGERED selfcode job
+#: (launchd WatchPaths) fires one cycle when there's real work — no 24/7 KeepAlive loop
+#: (B12b). Only ``file_task`` touches it (the cycle's own discovery does not), so the job
+#: never self-retriggers.
+TRIGGER_PATH = runtime.RUN_DIR / "selfcode.trigger"
+
+
+def _touch_trigger() -> None:
+    """Bump the edge-trigger sentinel so a filed repair wakes the self-coder. Best-effort."""
+    try:
+        TRIGGER_PATH.parent.mkdir(parents=True, exist_ok=True)
+        TRIGGER_PATH.write_text(str(time.time()))
+    except Exception:  # noqa: BLE001 — the queue record already landed; the trigger is a nicety
+        pass
 BROWSER_DOMAINS = ("frontend", "research")
 
 _BRIEF_ASK = (
@@ -189,6 +203,8 @@ def file_task(domain: str, task: str, *, log_path: Path | None = None,
     rec = {"ts": time.time(), "domain": domain, "brief_path": "",
            "suggested_task": task, "source": "filed"}
     _append_record(rec, log_path=log_path)
+    if log_path is None:        # real (not a test fixture) → edge-trigger a selfcode cycle
+        _touch_trigger()
     log.info("file_task: queued self-code task (%s): %r", domain, task[:70])
     return {"filed": True, "rec": rec}
 

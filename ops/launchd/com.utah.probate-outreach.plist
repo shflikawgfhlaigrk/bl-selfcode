@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  com.utah.probate-outreach — probate DIRECT-MAIL last-mile (audit §1.2).
+
+  Once a day, pull enriched probate rows that resolved an owner MAILING address and
+  generate a physical letter to the owner/estate (CAN-SPAM governs email, not paper). With
+  a print-mail provider wired (~/.utah/secrets/lob.json) it auto-sends; without one it
+  writes ready-to-mail letters to ~/.utah/run/probate_letters/ for Michael to print + mail.
+  Suppression (never the same estate twice) commits ONLY on a real send. Skips on a red
+  substrate. SMB outreach NEVER enters here — separate track from com.utah.outreach.
+
+  Install:
+    cp ops/launchd/com.utah.probate-outreach.plist ~/Library/LaunchAgents/
+    launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.utah.probate-outreach.plist
+  Force-run now:  launchctl kickstart -k gui/$(id -u)/com.utah.probate-outreach
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.utah.probate-outreach</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/michaelbarber/.utah/venv/bin/python</string>
+    <string>-c</string>
+    <string>import logging; logging.basicConfig(level=logging.INFO); from utah.product.probate_outreach import run_scheduled; print(run_scheduled())</string>
+  </array>
+  <key>WorkingDirectory</key>
+  <string>/Users/michaelbarber/.utah</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PYTHONPATH</key>
+    <string>/Users/michaelbarber/Desktop/ProjectUtah</string>
+    <key>PYTHONUNBUFFERED</key>
+    <string>1</string>
+    <key>PATH</key>
+    <string>/Users/michaelbarber/.utah/venv/bin:/opt/homebrew/bin:/usr/local/bin:/Users/michaelbarber/.local/bin:/usr/bin:/bin</string>
+  </dict>
+  <key>StartCalendarInterval</key>
+  <dict><key>Hour</key><integer>11</integer><key>Minute</key><integer>30</integer></dict>
+  <key>RunAtLoad</key>
+  <false/>
+  <key>StandardOutPath</key>
+  <string>/Users/michaelbarber/.utah/logs/probate-outreach.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/michaelbarber/.utah/logs/probate-outreach.err</string>
+</dict>
+</plist>

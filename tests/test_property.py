@@ -71,10 +71,10 @@ def test_enrich_full_pipeline_injected():
     out = prop.enrich("JOY JOWERS", "testco", fetch=arcgis, geocode_fetch=geo,
                       places_fetch=places, smb_fetch=smbs)
     assert out["address"] == "9 Oak St" and out["lat"] == 32.7      # geocode fallback worked
-    assert "Nearby Shop" in out["comps"]["no_website_smbs"]
+    assert "Nearby Shop" in out["nearby"]["no_website_smbs"]
 
 
 def test_enrich_unresolved_is_honest_marker():
     failures.set_store(FakeFailureStore())
     out = prop.enrich("JOY JOWERS", "testco")                  # no source → unresolved
-    assert out["property"] == "unresolved" and "comps" not in out
+    assert out["property"] == "unresolved" and "nearby" not in out

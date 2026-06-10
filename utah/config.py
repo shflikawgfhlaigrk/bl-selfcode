@@ -83,6 +83,13 @@ def canspam_configured() -> bool:
 
 
 # --- Outreach cadence doctrine (Michael, 2026-06-09) ------------------------
+#: Structural no-fabrication proof (audit TIER3): after the brain answers, verify each
+#: salient numeric claim traces to a span in the CONTEXT. ADVISORY by default (records an
+#: ``unsupported_claim`` audit event + an attribution score); set strict to DOWNGRADE an
+#: answer with an unsupported number to "I don't know." — no-fab proven, not just prompted.
+BRAIN_ATTRIBUTION_STRICT: bool = os.environ.get("UTAH_ATTRIBUTION_STRICT", "0") == "1"
+
+
 #: Cold outreach SENDS only inside the local-clock business window, enforced in the
 #: SEND PATH (not just the cron schedule) so a manual kickstart or a misconfigured
 #: plist can NEVER text/email a prospect at 5am again. ``START`` inclusive, ``END``
@@ -270,6 +277,11 @@ STT_HANG_TIMEOUT_S: float = float(os.environ.get("UTAH_STT_HANG_TIMEOUT", "8.0")
 #: Seconds to wait for the STT worker to load its model on boot (MLX compiles on the
 #: first transcribe). An overrun means a wedged worker → respawn.
 STT_WORKER_BOOT_S: float = float(os.environ.get("UTAH_STT_WORKER_BOOT", "30.0"))
+#: B15: a DEAF-but-alive voice loop (mic device delivering pure zeros while the process
+#: runs) is restarted by the supervisor after the mic has been silent (zeros) this long —
+#: reopening the audio stream recovers a wedged CoreAudio handle. Longer than the 30s
+#: mic_silent ALERT so Michael is paged first, then it self-heals if still deaf.
+VOICE_DEAF_RESTART_S: float = float(os.environ.get("UTAH_VOICE_DEAF_RESTART", "75.0"))
 #: Piper TTS voice model (the .json config sits next to it).
 PIPER_MODEL: str = os.environ.get(
     "UTAH_PIPER", os.path.expanduser("~/.utah/models/piper/en_GB-cori-high.onnx")

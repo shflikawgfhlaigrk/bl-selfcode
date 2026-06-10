@@ -161,7 +161,10 @@ def read_status(*, path=os.fspath(STATUS_PATH)) -> dict | None:
 #: in-process governor and could co-spike load — the AceOS-killer load storm.)
 _HEAVY_CRON_CAPS: frozenset = frozenset({
     "leads", "leads_maps", "probate", "probate_enrich",
-    "consolidate", "codeindex", "research", "selfcode",
+    "consolidate", "codeindex", "research",
+    # NOT "selfcode": the self-coder has its OWN load-defer (SELFCODE_MAX_LOAD_PER_CORE)
+    # and is edge-triggered + single-instance, so the foundation cron-mutex would only
+    # double-gate it and couple it to the scrapers.
 })
 
 _cron_slot_fh = None  # holds the cross-process flock for THIS process's lifetime

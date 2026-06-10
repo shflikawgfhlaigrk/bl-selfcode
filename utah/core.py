@@ -212,6 +212,26 @@ def _memory_grounds(text: str, hits: list) -> bool:
     return memory.entity_grounds(text, best.content) is not False
 
 
+def _vet_attribution(question: str, answer: str, context: str) -> str:
+    """Structural no-fab check on a brain answer (audit TIER3). Returns the answer (advisory
+    default) or a refusal (strict mode) when a numeric claim isn't supported by CONTEXT.
+    Records an audit event on an unsupported claim either way. Never raises."""
+    try:
+        from utah import attribution
+
+        vetted, report = attribution.vet_answer(
+            answer, context, strict=config.BRAIN_ATTRIBUTION_STRICT)
+        if not report.supported:
+            failures.record(
+                "brain", "unsupported_claim",
+                f"{question[:50]}: numbers not in context {report.unsupported_numbers} "
+                f"(strict={config.BRAIN_ATTRIBUTION_STRICT})")
+        return vetted
+    except Exception as exc:  # noqa: BLE001 — the check must never break a reply
+        log.debug("attribution check skipped: %s", exc)
+        return answer
+
+
 def _stream_brain_buffered(
     text: str, context: str, *, want_thinking: bool = True
 ) -> Iterator[tuple[str, str]]:
@@ -334,6 +354,12 @@ def tell(text: str, *, persist: bool = True) -> Reply:
             source=ReplySource.UNAVAILABLE,
             hits=hits,
         )
+
+    # 4.5 ATTRIBUTION PROOF: verify the answer's salient numbers trace to CONTEXT. Advisory
+    #     by default (records an unsupported-claim audit event); strict mode downgrades an
+    #     unsupported answer to a refusal — no-fab as a proven per-answer property, not just
+    #     a prompted intention. Refusals/empty answers are trivially supported.
+    reply_text = _vet_attribution(text, reply_text, context)
 
     # 5. REMEMBER (best-effort): store the exchange so future recall compounds.
     #    Refusals ("I don't know…", verbose or not) carry nothing durable → skip.

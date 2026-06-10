@@ -20,10 +20,19 @@ log = logging.getLogger("utah.revenue_heal")
 
 #: producer -> (ledger table, the module Ace must fix, max idle HOURS before it's an outage).
 #: leads runs daily and must always produce; probate is lumpier (county filings) → generous.
+#: ``sent`` is the OUTCOME producer (B12): it watches CONVERSION (real emails/texts sent),
+#: not just generation — the post-mortem's "measure outcomes, not activity" put in the
+#: machine. A scraper that fills the lead pile while NOTHING is sent is the exact failure
+#: that left Ace at $0; this trips on it and files a repair against the SENDER.
 PRODUCERS: dict[str, tuple[str, str, float]] = {
     "leads":   ("leads",   "utah/product/leads.py",   30.0),
     "probate": ("probate", "utah/product/probate.py", 72.0),
+    "sent":    ("mail_ledger", "utah/product/outreach.py", 26.0),
 }
+
+#: The outcome window (hours): within a normal business day the sender must have sent at
+#: least one real message. 26h tolerates one quiet overnight without false-tripping.
+OUTCOME_WINDOW_H: float = 26.0
 
 
 def _hours_since_last(table: str) -> float | None:
@@ -44,6 +53,19 @@ def _hours_since_last(table: str) -> float | None:
 
 def _repair_task(name: str, module: str, idle_h: float) -> str:
     when = f"in {idle_h:.0f}h" if idle_h else "on its last run"
+    if name == "sent":
+        # The OUTCOME repair (B12): money isn't FLOWING, regardless of how full the lead
+        # pile is. Point the coder at the SEND last-mile, not a scraper.
+        return (
+            f"REVENUE OUTCOME OUTAGE: NO real outreach has been SENT {when} (0 rows in "
+            f"`mail_ledger`). Leads may be piling up, but $0 is moving — the exact failure "
+            f"that left Ace dead. Diagnose why the sender stopped: an exhausted EMAILABLE "
+            f"pool (add email enrichment so phone-only leads become reachable), a send path "
+            f"silently gating, the business-hours window, or a crash in `{module}`. Fix it so "
+            f"compliant outreach actually goes out every business hour. Add a regression test "
+            f"that fails when a scheduled run sends zero with a non-empty contactable pool. "
+            f"Never fake a send — make the real send happen."
+        )
     return (
         f"REVENUE OUTAGE: `{module}` has produced NO new {name} {when} — the producer has "
         f"gone dark. It MUST generate {name} on every scheduled run. Diagnose the REAL reason "
@@ -52,6 +74,56 @@ def _repair_task(name: str, module: str, idle_h: float) -> str:
         f"in tests/ that fails on the no-yield path. Never fabricate rows — fix the real "
         f"generator so it produces genuine data again."
     )
+
+
+def _count_since(table: str, hours: float) -> int | None:
+    """Rows in *table* newer than *hours* ago; None if unreachable (cannot assess →
+    never falsely report '$0'). *table* is a fixed literal here, never user input."""
+    import psycopg
+
+    try:
+        with psycopg.connect(config.DB_DSN, autocommit=True, connect_timeout=8) as conn:
+            row = conn.execute(
+                f"select count(*) from {table} "  # noqa: S608 — table is a fixed literal
+                f"where ts > now() - make_interval(hours => %s)",
+                (hours,),
+            ).fetchone()
+        return int(row[0]) if row and row[0] is not None else 0
+    except Exception as exc:  # noqa: BLE001 — missing table / DB down → unassessable
+        log.debug("revenue_heal: cannot count %s: %s", table, exc)
+        return None
+
+
+def outcome_gate(window_h: float | None = None) -> dict:
+    """THE OUTCOME GATE (B12 / post-mortem rule #1). Reports whether the BUSINESS is
+    producing real outcomes — money flowing — not whether the machine is busy. ``ok`` is
+    True only when at least one real send (``mail_ledger``) OR sale (``sales``, once Stripe
+    is wired) landed in the window. While ``ok`` is False the system is NOT "done", no
+    matter how green the substrate or how many self-coding cycles ran. This is the gate the
+    post-mortem demanded that was never put in the machine — now it is, queryable by the
+    deck and the autonomy loop. Read-only; never fabricates."""
+    window_h = OUTCOME_WINDOW_H if window_h is None else window_h
+    sends = _count_since("mail_ledger", window_h)
+    sales = _count_since("sales", window_h)          # table may not exist yet → None
+    if sends is None and sales is None:
+        return {"ok": False, "assessable": False, "sends": None, "sales": None,
+                "window_h": window_h, "reason": "cannot read revenue ledgers (DB unreachable)"}
+    s_send = sends or 0
+    s_sale = sales or 0
+    ok = s_send > 0 or s_sale > 0
+    return {
+        "ok": ok, "assessable": True, "sends": s_send, "sales": s_sale,
+        "window_h": window_h,
+        "reason": ("revenue flowing" if ok else
+                   f"NO outcome in {window_h:.0f}h — {s_send} sends, {s_sale} sales: "
+                   f"the system is NOT done while $0 is moving"),
+    }
+
+
+def is_revenue_green() -> bool:
+    """True iff a real revenue outcome landed inside the window — the one-line gate the
+    deck/autonomy consult so a $0 system is never reported as 'green'."""
+    return bool(outcome_gate().get("ok"))
 
 
 def scan(*, age_fn: Callable[[str], float | None] | None = None,
@@ -99,4 +171,5 @@ def check_producer(name: str, result: dict, *, file_fn=None, record_fn=None) -> 
     return {"healed": True, "filed": bool(filed.get("filed")), "rec": filed.get("rec")}
 
 
-__all__ = ["PRODUCERS", "scan", "check_producer"]
+__all__ = ["PRODUCERS", "OUTCOME_WINDOW_H", "scan", "check_producer",
+           "outcome_gate", "is_revenue_green"]

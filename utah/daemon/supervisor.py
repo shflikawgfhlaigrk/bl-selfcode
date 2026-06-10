@@ -83,6 +83,33 @@ def http_probe(url: str, timeout: float = 2.0) -> Probe:
     return _p
 
 
+def voice_audio_probe(deaf_after_s: float | None = None) -> Probe:
+    """Audio-liveness probe for the voice child (B15). A deaf-but-ALIVE loop — the mic
+    device delivering pure zeros while the process keeps running — passes a liveness check
+    but is useless. This probe reads the loop's voice-state heartbeat and reports the loop
+    WEDGED (probe False → kill + restart) when the mic has been deaf past the threshold, so
+    reopening the audio stream recovers a wedged CoreAudio handle. Healthy when there's no
+    heartbeat yet (startup; grace + liveness handle that), when audio is flowing, or when
+    the loop is only intentionally muted (echo guard). A frozen heartbeat on a live process
+    (the monitor thread wedged) is also treated as wedged."""
+    from utah import config
+    from utah.voice import state as voice_state
+
+    threshold = config.VOICE_DEAF_RESTART_S if deaf_after_s is None else deaf_after_s
+
+    def _p() -> bool:
+        st = voice_state.read()
+        if not st or "ts" not in st:
+            return True                                   # no heartbeat yet — not our call
+        age = time.time() - float(st["ts"])
+        if age > threshold:
+            return False                                  # heartbeat frozen → monitor wedged
+        if not st.get("deaf"):
+            return True                                   # mic alive (zeros never sustained)
+        return float(st.get("mic_quiet_s", 0.0)) < threshold
+    return _p
+
+
 def _daemon_drain() -> None:
     ctl.call_sync("shutdown", timeout=3.0)
 
@@ -334,7 +361,8 @@ def _voice_spec() -> ChildSpec:
             )
     except Exception:  # noqa: BLE001
         log.warning("voice: bundle setup failed — using sys.executable", exc_info=True)
-    return ChildSpec("voice", argv, env=env)
+    # B15: a real audio-liveness probe — a deaf-but-alive loop is restarted, not left deaf.
+    return ChildSpec("voice", argv, env=env, probe=voice_audio_probe())
 
 
 def main() -> int:

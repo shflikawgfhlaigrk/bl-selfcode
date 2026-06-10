@@ -183,6 +183,15 @@ def _remember_owner_facts() -> None:
         log.debug("remember_owner_facts: %s", exc)
 
 
+def _safe_outcome(gate_fn) -> dict:
+    """Read the revenue outcome gate; never let a DB hiccup abort the operator sweep."""
+    try:
+        return gate_fn()
+    except Exception as exc:  # noqa: BLE001
+        log.debug("operator outcome-gate read failed: %s", exc)
+        return {"ok": False, "assessable": False, "reason": f"outcome gate error: {exc}"}
+
+
 def run(
     *,
     substrate_fn=None,
@@ -201,12 +210,17 @@ def run(
 
     _remember_owner_facts()
 
+    from utah import revenue_heal
+
     payload: dict[str, Any] = {
         "ts": time.time(),
         "substrate": substrate_fn(),
         "tailserve": tailserve_fn(),
         "integrations": integrations_fn(),
         "revenue": revenue_fn(),     # producer gone dark -> Ace files a self-code repair
+        # THE OUTCOME GATE (B12): surfaced every sweep so a $0 system is visibly NOT green,
+        # no matter how healthy the substrate is. The post-mortem's rule #1, in the machine.
+        "outcome": _safe_outcome(revenue_heal.outcome_gate),
         "failures": sweep_failures(),
         "canspam_ready": config.canspam_configured(),
     }
