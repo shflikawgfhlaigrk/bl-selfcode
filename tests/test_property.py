@@ -78,3 +78,51 @@ def test_enrich_unresolved_is_honest_marker():
     failures.set_store(FakeFailureStore())
     out = prop.enrich("JOY JOWERS", "testco")                  # no source → unresolved
     assert out["property"] == "unresolved" and "nearby" not in out
+
+
+def test_owner_mailing_address_generic_address_block():
+    """Bulloch-style tax layers carry the owner mailing block as ADDRESS1/2/3 +
+    CITY/STATE/ZIP (no MAIL*/OWNER* prefix) — live-verified 2026-06-09: PARRONDO's
+    mailing addr '202 HIGHLAND ROAD, STATESBORO GA 30458' differs from the situs."""
+    attrs = {"ADDRESS1": " ", "ADDRESS2": "202 HIGHLAND ROAD", "ADDRESS3": " ",
+             "CITY": "STATESBORO", "STATE": "GA", "ZIP": "30458",
+             "FULL_ADDRE": "2255 OLD RIGGS MILL RD"}
+    mail = prop._owner_mailing_address(attrs)
+    assert mail["street"] == "202 HIGHLAND ROAD"
+    assert mail["zip"] == "30458"
+    assert "STATESBORO" in mail["full"]
+
+
+def test_owner_mailing_address_prefers_explicit_mail_fields():
+    attrs = {"MAILADDR": "PO BOX 9", "MAILCITY": "MACON", "ADDRESS2": "1 Other St"}
+    mail = prop._owner_mailing_address(attrs)
+    assert mail["street"] == "PO BOX 9"
+
+
+def test_enrich_payload_carries_owner_mail_and_situs_fallback():
+    """enrich() must pass owner_mail through to heir_contact (the missing key that
+    left 33 resolved rows letter-blocked), and when the county layer has no mailing
+    block it must offer the geocoded SITUS as an explicit to-property fallback."""
+    def fake_fetch(url, where):
+        return {"features": [{"attributes": {"Owner": "DOE JOHN", "PhisicalAddress": "1 Main St",
+                                              "MAILADDR": "PO BOX 1", "MAILCITY": "PINE MOUNTAIN",
+                                              "MAILSTATE": "GA", "MAILZIP": "31822"},
+                              "geometry": {"x": -85.0, "y": 32.8}}]}
+    out = prop.enrich("JOHN DOE", "harris", fetch=fake_fetch,
+                              places_fetch=lambda *a, **k: {"places": []},
+                              smb_fetch=lambda *a, **k: [])
+    assert out["owner_mail"]["street"] == "PO BOX 1"
+
+    def fake_fetch_no_mail(url, where):
+        return {"features": [{"attributes": {"Owner": "DOE JOHN", "PhisicalAddress": "1 Main St"},
+                              "geometry": {"x": -85.0, "y": 32.8}}]}
+    def fake_geo(addr):
+        return {"results": [{"geometry": {"location": {"lat": 32.8, "lng": -85.0}},
+                              "formatted_address": "1 Main St, Hamilton, GA 31811, USA"}]}
+    out2 = prop.enrich("JOHN DOE", "harris", fetch=fake_fetch_no_mail,
+                               geocode_fetch=fake_geo,
+                               places_fetch=lambda *a, **k: {"places": []},
+                               smb_fetch=lambda *a, **k: [])
+    assert out2["owner_mail"] == {}
+    assert out2["situs_mail"]["to_property"] is True
+    assert "1 Main St" in out2["situs_mail"]["full"]

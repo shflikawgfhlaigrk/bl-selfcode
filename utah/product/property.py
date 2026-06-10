@@ -123,13 +123,24 @@ def _pick(attrs: dict, hints: tuple[str, ...]) -> str:
 def _owner_mailing_address(attrs: dict) -> dict:
     """Assemble the owner's mailing address from a parcel record (best-effort across county
     field-name conventions). Returns ``{}`` when no mailing street is present — never faked.
-    A street alone is enough to skip-trace; city/state/zip fill in when the layer has them."""
+    A street alone is enough to skip-trace; city/state/zip fill in when the layer has them.
+
+    Two conventions live-verified: explicit MAIL*/OWNER* fields (Harris-style), and the
+    bare ADDRESS1/2/3 + CITY/STATE/ZIP tax-roll block (Bulloch-style; 2026-06-09 PARRONDO:
+    mailing '202 HIGHLAND ROAD, STATESBORO GA 30458' != situs '2255 OLD RIGGS MILL RD')."""
     street = _pick(attrs, _MAIL_STREET_HINTS)
     if not street:
+        # Generic tax-roll block: ADDRESS1..3 are the owner's mailing lines (the situs
+        # lives in dedicated fields like FULL_ADDRE/ADDRESS on these layers).
+        lines = [str(attrs.get(k) or "").strip() for k in ("ADDRESS1", "ADDRESS2", "ADDRESS3")]
+        lines = [ln for ln in lines if ln]
+        if lines:
+            street = lines[-1] if len(lines) == 1 else " ".join(lines)
+    if not street:
         return {}
-    city = _pick(attrs, _MAIL_CITY_HINTS)
-    state = _pick(attrs, _MAIL_STATE_HINTS)
-    zipc = _pick(attrs, _MAIL_ZIP_HINTS)
+    city = _pick(attrs, _MAIL_CITY_HINTS) or str(attrs.get("CITY") or "").strip()
+    state = _pick(attrs, _MAIL_STATE_HINTS) or str(attrs.get("STATE") or "").strip()
+    zipc = _pick(attrs, _MAIL_ZIP_HINTS) or str(attrs.get("ZIP") or "").strip()
     line2 = " ".join(p for p in (city, state, zipc) if p).strip()
     return {"street": street, "city": city, "state": state, "zip": zipc,
             "full": (f"{street}, {line2}" if line2 else street)}
@@ -224,13 +235,23 @@ def enrich(case_name: str, county: str, *, fetch=None, geocode_fetch=None,
         return {"property": "unresolved", "county": county,
                 "reason": prop.get("source", prop.get("error", "gated"))}
     lat, lng = prop.get("lat"), prop.get("lng")
+    geo: dict = {}
     if lat is None or lng is None:
         geo = maps.geocode(f"{prop['address']}, {county} County, GA", fetch=geocode_fetch)
         if geo.get("available") and geo.get("lat") is not None:
             lat, lng = geo["lat"], geo["lng"]
     payload = {"address": prop.get("address"), "parcel": prop.get("parcel"),
                "owner": prop.get("owner"), "arv": prop.get("arv"),
-               "lat": lat, "lng": lng, "source": prop.get("source")}
+               "lat": lat, "lng": lng, "source": prop.get("source"),
+               # The probate direct-mail target (was the missing key that left every
+               # resolved row letter-blocked): the owner's MAILING address when the
+               # layer has one, else the geocoded SITUS as an explicit to-property
+               # fallback (a county-recorded address, addressed to the owner/estate).
+               "owner_mail": prop.get("owner_mail") or {}}
+    if not payload["owner_mail"]:
+        formatted = geo.get("formatted") or f"{prop['address']}, {county} County, GA"
+        payload["situs_mail"] = {"street": prop.get("address"), "city": "", "state": "GA",
+                                 "zip": "", "full": formatted, "to_property": True}
     if lat is not None and lng is not None:
         # 'nearby' (renamed from the misleading 'comps'): a nearby-BUSINESS survey, not a
         # comparable-home-sale price average. Honesty fix, audit §3.2.
@@ -251,14 +272,28 @@ def enrich_ledger(limit: int = 25, *, ledger=None, fetch=None, geocode_fetch=Non
 
     lg = ledger or Ledger()
     with psycopg.connect(config.DB_DSN, autocommit=True) as conn:
+        # Two classes of work, neither re-ground forever: unresolved rows NOT tried in
+        # the last 7 days (the old query re-scanned the same dead rows hourly, starving
+        # everything and logging resolved=0 — which read as "fully gated"), plus
+        # resolved rows missing the direct-mail target (owner_mail/situs_mail) — the
+        # backfill for rows enriched before the mail key existed (2026-06-09).
         rows = conn.execute(
-            "SELECT case_name, county FROM probate WHERE NOT (heir_contact ? 'address') "
+            "SELECT case_name, county FROM probate "
+            "WHERE (NOT (heir_contact ? 'address') "
+            "       AND coalesce((heir_contact->>'tried_at')::timestamptz, "
+            "                    'epoch'::timestamptz) < now() - interval '7 days') "
+            "   OR (heir_contact ? 'address' AND NOT heir_contact ? 'owner_mail' "
+            "       AND NOT heir_contact ? 'situs_mail') "
             "LIMIT %s", (limit,)).fetchall()
     resolved = gated = 0
     for case_name, county in rows:
         try:
             payload = enrich(case_name, county, fetch=fetch, geocode_fetch=geocode_fetch,
                              places_fetch=places_fetch, smb_fetch=smb_fetch)
+            if payload.get("property") == "unresolved":
+                # stamp the attempt so a dead row rests 7 days instead of hogging the run
+                import datetime as _dt
+                payload["tried_at"] = _dt.datetime.now(_dt.timezone.utc).isoformat()
             lg.update_probate(case_name, county, heir_contact=payload, arv=payload.get("arv"))
             resolved += 1 if payload.get("address") else 0
             gated += 0 if payload.get("address") else 1

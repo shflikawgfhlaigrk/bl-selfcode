@@ -289,8 +289,8 @@ class Ledger:
         with self._conn() as c:
             rows = c.execute(
                 "SELECT case_name, county, heir_contact, arv FROM probate "
-                "WHERE heir_contact->'owner_mail'->>'street' IS NOT NULL "
-                "AND heir_contact->'owner_mail'->>'street' <> '' "
+                "WHERE (coalesce(heir_contact->'owner_mail'->>'street', '') <> '' "
+                "    OR coalesce(heir_contact->'situs_mail'->>'street', '') <> '') "
                 "AND NOT EXISTS (SELECT 1 FROM outreach_ledger o "
                 "  WHERE o.recipient = probate.case_name AND o.campaign = %s) "
                 "ORDER BY ts DESC LIMIT %s",

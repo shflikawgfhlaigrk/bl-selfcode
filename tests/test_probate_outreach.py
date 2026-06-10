@@ -89,3 +89,37 @@ def test_run_scheduled_skips_on_red_substrate():
     r = probate_outreach.run_scheduled(ledger=object(),
                                        foundation_gate=lambda cap: {"status": "substrate_red"})
     assert r.get("status") == "substrate_red"
+
+
+def test_compose_letter_falls_back_to_situs_mail():
+    """Houston-style layers have no owner mailing block — the geocoded SITUS (a
+    county-recorded address, addressed to the owner/estate) is the explicit
+    to-property fallback so the estate still gets its letter."""
+    case = {"case_name": "JOE LOUIS RAY", "arv": 150800,
+            "heir_contact": {"owner": "RAY JOE LOUIS",
+                             "situs_mail": {"street": "217 WEXFORD CIR", "state": "GA",
+                                            "full": "217 Wexford Cir, Warner Robins, GA 31088, USA",
+                                            "to_property": True}}}
+    letter = probate_outreach.compose_letter(case)
+    assert "217 Wexford Cir" in letter["to"]
+    assert "Ray Joe Louis" in letter["body"]
+    assert "678-876-1170" in letter["body"]
+
+
+def test_queue_accepts_situs_mail_cases(tmp_path, monkeypatch):
+    monkeypatch.setattr(probate_outreach, "LETTERS_DIR", tmp_path)
+    monkeypatch.setattr(probate_outreach, "MAIL_SERVICE_CREDS", tmp_path / "lob.json")
+
+    class Led:
+        def is_contacted(self, r, c):
+            return False
+
+        def log_outreach(self, r, c, ch):
+            return True
+
+    case = {"case_name": "JOE LOUIS RAY",
+            "heir_contact": {"situs_mail": {"street": "217 WEXFORD CIR",
+                                            "full": "217 Wexford Cir, GA", "to_property": True}}}
+    res = probate_outreach.queue(Led(), [case])
+    assert res["queued"] == 1 and res["no_addr"] == 0
+    assert (tmp_path / "joe-louis-ray.txt").exists()

@@ -39,7 +39,9 @@ def compose_letter(case: dict, footer_address: str | None = None) -> dict:
     real pitch to buy. Returns ``{to, body}``; ``to`` is the resolved owner mailing address.
     Never fabricates an address — caller only passes cases that HAVE one."""
     hc = case.get("heir_contact") or {}
-    mail = hc.get("owner_mail") or {}
+    # owner MAILING address when the county layer has one; else the geocoded SITUS
+    # (county-recorded, addressed to the owner/estate at the property) — never invented.
+    mail = hc.get("owner_mail") or hc.get("situs_mail") or {}
     owner = (hc.get("owner") or case.get("owner") or "").strip()
     addressee = owner.title() if owner else "Property Owner"
     estate = (case.get("case_name") or "").strip()
@@ -99,7 +101,8 @@ def queue(ledger, cases: list[dict], *, can_send: bool = False, send_fn=None) ->
     sent = queued = suppressed = no_addr = 0
     letters: list[str] = []
     for case in cases:
-        mail = (case.get("heir_contact") or {}).get("owner_mail") or {}
+        hc = case.get("heir_contact") or {}
+        mail = hc.get("owner_mail") or hc.get("situs_mail") or {}
         if not mail.get("street"):
             no_addr += 1
             continue
