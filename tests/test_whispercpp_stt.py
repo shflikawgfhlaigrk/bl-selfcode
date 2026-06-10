@@ -77,3 +77,24 @@ def test_default_engine_falls_back_when_unprovisioned(monkeypatch):
     monkeypatch.setattr(stt.config, "WHISPERCPP_BIN", "/nope/whisper-server")
     eng = stt._build_default_stt()
     assert not isinstance(eng, stt.WhisperCppSTT)   # MLX subprocess or moonshine
+
+
+def test_clean_transcript_kills_non_speech_annotations():
+    """Silence must never become a question (live 2026-06-10: Ace answered
+    '[BLANK_AUDIO]' as if Michael said it)."""
+    assert stt.clean_transcript("[BLANK_AUDIO]") == ""
+    assert stt.clean_transcript(" (wind blowing) ") == ""
+    assert stt.clean_transcript("[Music]") == ""
+    assert stt.clean_transcript("[ Silence ]") == ""
+    assert stt.clean_transcript("hello ace [BLANK_AUDIO]") == "hello ace"
+    assert stt.clean_transcript("what's the engine status?") == "what's the engine status?"
+    assert stt.clean_transcript("") == ""
+
+
+def test_best_model_prefers_small_en(tmp_path, monkeypatch):
+    root = tmp_path / "whisper"
+    root.mkdir()
+    (root / "ggml-base.en-q5_1.bin").write_bytes(b"b")
+    (root / "ggml-small.en-q5_1.bin").write_bytes(b"s")
+    monkeypatch.setattr(stt.config, "WHISPERCPP_MODEL", str(root / "ggml-small.en-q5_1.bin"))
+    assert "small" in stt._best_whispercpp_model()

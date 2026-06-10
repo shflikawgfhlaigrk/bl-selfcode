@@ -290,7 +290,7 @@ STT_WORKER_BOOT_S: float = float(os.environ.get("UTAH_STT_WORKER_BOOT", "30.0"))
 #: once, one local HTTP call per utterance with a hard timeout.
 WHISPERCPP_BIN: str = os.environ.get("UTAH_WHISPERCPP_BIN", "/opt/homebrew/bin/whisper-server")
 WHISPERCPP_MODEL: str = os.path.expanduser(os.environ.get(
-    "UTAH_WHISPERCPP_MODEL", "~/.utah/models/whisper/ggml-base.en-q5_1.bin"))
+    "UTAH_WHISPERCPP_MODEL", "~/.utah/models/whisper/ggml-small.en-q5_1.bin"))
 WHISPERCPP_PORT: int = int(os.environ.get("UTAH_WHISPERCPP_PORT", "8090"))
 #: B15: a DEAF-but-alive voice loop (mic device delivering pure zeros while the process
 #: runs) is restarted by the supervisor after the mic has been silent (zeros) this long —

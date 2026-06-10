@@ -172,6 +172,26 @@ class SubprocessSTT:
                 return ""
 
 
+_NON_SPEECH = ("blank_audio", "blank audio", "silence", "inaudible", "music",
+               "wind blowing", "applause", "laughter", "noise", "typing", "clicking")
+
+
+def clean_transcript(text: str) -> str:
+    """Strip whisper.cpp's non-speech annotations — '[BLANK_AUDIO]', '(wind blowing)',
+    '[Music]' … — so silence NEVER becomes a question (live 2026-06-10: Ace answered
+    '[BLANK_AUDIO]' as if Michael had said it). Bracketed/parenthesised segments are
+    annotations, not speech; if nothing real remains, there was no utterance."""
+    import re
+
+    if not text:
+        return ""
+    out = re.sub(r"[\[\(][^\]\)]{0,60}[\]\)]", " ", text)
+    out = re.sub(r"\s+", " ", out).strip()
+    if not re.search(r"[A-Za-z0-9]", out):
+        return ""                      # only annotations/punctuation = no utterance
+    return out
+
+
 class WhisperCppSTT:
     """whisper.cpp server STT — the post-MLX core (Michael 2026-06-10: the recurring
     voice-failure class was ALL MLX/Metal-Python deadlocks under load; 'delete and redo'
@@ -272,7 +292,7 @@ class WhisperCppSTT:
                 raw = self._post(f"http://127.0.0.1:{self._port}/inference", wav_path,
                                  config.STT_HANG_TIMEOUT_S)
                 try:
-                    return (json.loads(raw).get("text") or "").strip()
+                    return clean_transcript((json.loads(raw).get("text") or "").strip())
                 except Exception:  # noqa: BLE001 — junk body = no transcript, not a crash
                     return ""
             except Exception as exc:  # noqa: BLE001 — wedge/timeout/refused
@@ -286,6 +306,20 @@ class WhisperCppSTT:
 _stt: STT | None = None
 
 
+def _best_whispercpp_model() -> str | None:
+    """The configured model if present, else the best ggml on disk (small.en beats
+    base.en — quality parity with the retired MLX small.en path)."""
+    cands = [os.path.expanduser(config.WHISPERCPP_MODEL)]
+    root = os.path.expanduser("~/.utah/models/whisper")
+    for name in ("ggml-small.en-q5_1.bin", "ggml-small.en.bin",
+                 "ggml-base.en-q5_1.bin", "ggml-base.en.bin"):
+        cands.append(os.path.join(root, name))
+    for c in cands:
+        if os.path.exists(c):
+            return c
+    return None
+
+
 def _build_default_stt() -> STT:
     """Default = MLX Whisper small.en (accurate) run in a KILLABLE worker process so
     a Metal-GPU deadlock can't deafen the mic (:class:`SubprocessSTT`). The bare
@@ -293,9 +327,10 @@ def _build_default_stt() -> STT:
     it never hangs but mis-hears real speech ("What's going on?" -> "Blun.")."""
     if config.STT_ENGINE == "moonshine":
         return MoonshineSTT()
-    if config.STT_ENGINE in ("whisper", "whispercpp") and os.path.exists(config.WHISPERCPP_BIN) \
-            and os.path.exists(os.path.expanduser(config.WHISPERCPP_MODEL)):
-        return WhisperCppSTT()
+    if config.STT_ENGINE in ("whisper", "whispercpp") and os.path.exists(config.WHISPERCPP_BIN):
+        model = _best_whispercpp_model()
+        if model:
+            return WhisperCppSTT(model=model)
     if importlib.util.find_spec("mlx_whisper") is not None:
         return SubprocessSTT()
     log.warning("MLX Whisper not installed — falling back to Moonshine STT")
