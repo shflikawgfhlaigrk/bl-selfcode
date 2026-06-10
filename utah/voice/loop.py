@@ -332,6 +332,9 @@ def run() -> None:
                                 vstate["last_transcript"] = text[:120]
                             if not text and not segment_armed:
                                 return
+                            if text and not _ECHO.allow(text):
+                                log.info("voice: echo-dropped duplicate transcript")
+                                return
                             result = agent.handle_utterance(
                                 text or "",
                                 audio_wake=segment_armed,
@@ -412,6 +415,35 @@ def run() -> None:
                     "grant Microphone permission to %s", exc, _sys.executable,
                 )
             time.sleep(min(2 * fail_n, 30))
+
+
+class EchoGate:
+    """Drop an utterance IDENTICAL to the one just processed (TTL-bounded).
+
+    2026-06-10: STT thrashing under machine load emitted the same transcript twice —
+    two brain calls, two stored turns, doubled replies in Michael's chat (the
+    'hallucination' he flagged). A human repeating themselves beyond the TTL still
+    gets through; the echo inside it never does. Pure (unit-tested)."""
+
+    def __init__(self, ttl_s: float = 20.0):
+        self.ttl = ttl_s
+        self.last: str | None = None
+        self.at = 0.0
+
+    def allow(self, text: str, now: float | None = None) -> bool:
+        import time as _t
+
+        now = _t.monotonic() if now is None else now
+        t = (text or "").strip().lower()
+        if not t:
+            return True
+        if t == self.last and (now - self.at) < self.ttl:
+            return False
+        self.last, self.at = t, now
+        return True
+
+
+_ECHO = EchoGate()
 
 
 def main() -> int:
