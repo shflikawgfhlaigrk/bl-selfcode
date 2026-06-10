@@ -172,6 +172,117 @@ class SubprocessSTT:
                 return ""
 
 
+class WhisperCppSTT:
+    """whisper.cpp server STT — the post-MLX core (Michael 2026-06-10: the recurring
+    voice-failure class was ALL MLX/Metal-Python deadlocks under load; 'delete and redo'
+    the failing layer). The server (C++ Metal) is OWNED here: spawned once, model loaded
+    once, killed on wedge; each utterance is ONE local HTTP call with a hard timeout.
+    Same load-aware respawn cooldown as the MLX worker — a wedged server backs off
+    instead of amplifying a load storm. Never raises; "" on any failure."""
+
+    def __init__(self, bin_path: str | None = None, model: str | None = None,
+                 port: int | None = None) -> None:
+        self._bin = bin_path or config.WHISPERCPP_BIN
+        self._model = os.path.expanduser(model or config.WHISPERCPP_MODEL)
+        self._port = int(port or config.WHISPERCPP_PORT)
+        self._proc: subprocess.Popen | None = None
+        self._lock = threading.Lock()
+        self._cooldown_until = 0.0
+
+    # the same circuit-breaker contract as SubprocessSTT
+    def _overloaded(self) -> bool:
+        try:
+            return os.getloadavg()[0] / (os.cpu_count() or 1) > config.STT_RESPAWN_MAX_LOAD
+        except Exception:  # noqa: BLE001
+            return False
+
+    def _arm_cooldown(self) -> float:
+        cd = (config.STT_RESPAWN_COOLDOWN_S
+              * (config.STT_RESPAWN_OVERLOAD_MULT if self._overloaded() else 1.0))
+        self._cooldown_until = time.monotonic() + cd
+        return cd
+
+    def _alive(self) -> bool:
+        return self._proc is not None and self._proc.poll() is None
+
+    def _spawn(self) -> None:
+        self._proc = subprocess.Popen(
+            [self._bin, "-m", self._model, "--host", "127.0.0.1",
+             "--port", str(self._port), "-t", "4"],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+    def _kill(self) -> None:
+        if self._proc is not None:
+            try:
+                self._proc.kill()
+                self._proc.wait(timeout=2)
+            except Exception:  # noqa: BLE001
+                pass
+            self._proc = None
+
+    def _ready(self, timeout: float | None = None) -> bool:
+        """Poll until the server accepts TCP (model loaded) — bounded by boot budget."""
+        import socket
+
+        deadline = time.monotonic() + (timeout or config.STT_WORKER_BOOT_S)
+        while time.monotonic() < deadline:
+            try:
+                with socket.create_connection(("127.0.0.1", self._port), timeout=1):
+                    return True
+            except OSError:
+                time.sleep(0.3)
+        return False
+
+    @staticmethod
+    def _post(url: str, wav_path: str, timeout: float) -> str:
+        """One multipart POST of the wav to the server. Injectable for tests."""
+        import urllib.request
+        import uuid
+
+        boundary = uuid.uuid4().hex
+        with open(wav_path, "rb") as f:
+            payload = f.read()
+        body = (
+            (f"--{boundary}\r\n"
+             f'Content-Disposition: form-data; name="file"; filename="a.wav"\r\n'
+             f"Content-Type: audio/wav\r\n\r\n").encode()
+            + payload
+            + (f"\r\n--{boundary}\r\n"
+               f'Content-Disposition: form-data; name="response_format"\r\n\r\n'
+               f"json\r\n--{boundary}--\r\n").encode()
+        )
+        req = urllib.request.Request(
+            url, data=body,
+            headers={"Content-Type": f"multipart/form-data; boundary={boundary}"})
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return r.read().decode("utf-8", "replace")
+
+    def transcribe(self, wav_path: str) -> str:
+        with self._lock:
+            # In the post-failure cooldown: don't even try (a wedged server stays
+            # wedged; the point is to stop feeding it work and load).
+            if time.monotonic() < self._cooldown_until:
+                return ""
+            try:
+                if not self._alive():
+                    self._kill()
+                    self._spawn()
+                    if not self._ready():
+                        raise TimeoutError("whisper-server failed to become ready")
+                raw = self._post(f"http://127.0.0.1:{self._port}/inference", wav_path,
+                                 config.STT_HANG_TIMEOUT_S)
+                try:
+                    return (json.loads(raw).get("text") or "").strip()
+                except Exception:  # noqa: BLE001 — junk body = no transcript, not a crash
+                    return ""
+            except Exception as exc:  # noqa: BLE001 — wedge/timeout/refused
+                cd = self._arm_cooldown()
+                log.warning("whisper.cpp STT error (%s) — killing server, backing off %.0fs",
+                            exc, cd)
+                self._kill()
+                return ""
+
+
 _stt: STT | None = None
 
 
@@ -182,6 +293,9 @@ def _build_default_stt() -> STT:
     it never hangs but mis-hears real speech ("What's going on?" -> "Blun.")."""
     if config.STT_ENGINE == "moonshine":
         return MoonshineSTT()
+    if config.STT_ENGINE in ("whisper", "whispercpp") and os.path.exists(config.WHISPERCPP_BIN) \
+            and os.path.exists(os.path.expanduser(config.WHISPERCPP_MODEL)):
+        return WhisperCppSTT()
     if importlib.util.find_spec("mlx_whisper") is not None:
         return SubprocessSTT()
     log.warning("MLX Whisper not installed — falling back to Moonshine STT")

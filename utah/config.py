@@ -284,6 +284,14 @@ STT_RESPAWN_MAX_LOAD: float = float(os.environ.get("UTAH_STT_RESPAWN_MAX_LOAD", 
 #: Seconds to wait for the STT worker to load its model on boot (MLX compiles on the
 #: first transcribe). An overrun means a wedged worker → respawn.
 STT_WORKER_BOOT_S: float = float(os.environ.get("UTAH_STT_WORKER_BOOT", "30.0"))
+#: whisper.cpp server STT — the post-MLX core (2026-06-10: MLX/Metal-Python deadlocks
+#: under load were the entire recurring voice-failure class). When the binary + a ggml
+#: model exist, the default engine is the whisper.cpp server: C++ Metal, model loaded
+#: once, one local HTTP call per utterance with a hard timeout.
+WHISPERCPP_BIN: str = os.environ.get("UTAH_WHISPERCPP_BIN", "/opt/homebrew/bin/whisper-server")
+WHISPERCPP_MODEL: str = os.path.expanduser(os.environ.get(
+    "UTAH_WHISPERCPP_MODEL", "~/.utah/models/whisper/ggml-base.en-q5_1.bin"))
+WHISPERCPP_PORT: int = int(os.environ.get("UTAH_WHISPERCPP_PORT", "8090"))
 #: B15: a DEAF-but-alive voice loop (mic device delivering pure zeros while the process
 #: runs) is restarted by the supervisor after the mic has been silent (zeros) this long —
 #: reopening the audio stream recovers a wedged CoreAudio handle. Longer than the 30s
