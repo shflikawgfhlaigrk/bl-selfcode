@@ -139,6 +139,13 @@ def run_scheduled(ledger=None, *, horizon_min: int = HORIZON_MIN,
         except Exception as exc:  # noqa: BLE001 — one bad fire never blocks the rest
             out["errors"] += 1
             failures.record("trading", "grade_failed", f"fire {fire['id']}: {exc}")
+    # think-on-fire rides the same cron: Ace's grounded read on newly graded fires
+    # (bounded brain calls; best-effort — commentary never blocks grading).
+    try:
+        from utah.product import trade_lore
+        out["assessments"] = trade_lore.run_assessments(ledger)
+    except Exception as exc:  # noqa: BLE001
+        log.debug("think-on-fire skipped: %s", exc)
     return out
 
 

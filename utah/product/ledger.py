@@ -108,6 +108,17 @@ ALTER TABLE fires ADD COLUMN IF NOT EXISTS symbol text;  -- which bar stream gra
 ALTER TABLE fires ADD COLUMN IF NOT EXISTS stop numeric;
 ALTER TABLE fires ADD COLUMN IF NOT EXISTS target numeric;
 ALTER TABLE fires ADD COLUMN IF NOT EXISTS rationale text;
+ALTER TABLE fires ADD COLUMN IF NOT EXISTS assessment text;  -- Ace's think-on-fire read
+CREATE TABLE IF NOT EXISTS trade_lore (
+  id bigserial PRIMARY KEY,
+  ts timestamptz NOT NULL,
+  engine text NOT NULL,
+  kind text,                                   -- OPEN / CLOSE / SIGNAL_CROSSED / ...
+  content text NOT NULL,                       -- Ace's historical read (2-3 sentences)
+  confidence real,
+  ts_recorded timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (engine, ts, kind)                    -- one-time migration is re-runnable
+);
 """
 
 
@@ -435,6 +446,66 @@ class Ledger:
         if updated:
             self._emit("trading", {"id": int(fire_id), "outcome": outcome, "pnl": pnl})
         return updated
+
+    def fires_missing_assessment(self, limit: int = 3) -> list[dict]:
+        """Newest GRADED, gradable fires with no think-on-fire read yet — the
+        commentary worklist (bounded: each read is a real brain call)."""
+        with self._conn() as c:
+            rows = c.execute(
+                "SELECT id, engine, direction, entry::float8, outcome, pnl::float8, "
+                "symbol, ts FROM fires WHERE outcome IS NOT NULL "
+                "AND outcome != 'ungradable' AND assessment IS NULL AND synthetic = false "
+                "ORDER BY ts DESC LIMIT %s", (int(limit),),
+            ).fetchall()
+        return [{"id": r[0], "engine": r[1], "direction": r[2], "entry": r[3],
+                 "outcome": r[4], "pnl": r[5], "symbol": r[6], "ts": r[7]} for r in rows]
+
+    def set_fire_assessment(self, fire_id, text) -> bool:
+        """Attach Ace's read exactly once (a written assessment is never overwritten)."""
+        with self._conn() as c:
+            cur = c.execute(
+                "UPDATE fires SET assessment=%s WHERE id=%s AND assessment IS NULL",
+                (text, int(fire_id)),
+            )
+            return (cur.rowcount or 0) > 0
+
+    def engine_scorecard(self, engine) -> dict:
+        """One engine's REAL graded record — the numbers Ace grounds its read in."""
+        with self._conn() as c:
+            row = c.execute(
+                "SELECT count(*), count(*) FILTER (WHERE pnl > 0), "
+                "coalesce(sum(pnl), 0)::float8 FROM fires "
+                "WHERE engine=%s AND outcome IS NOT NULL AND outcome != 'ungradable'",
+                (engine,),
+            ).fetchone()
+        n, wins, net = int(row[0]), int(row[1]), float(row[2])
+        return {"graded": n, "wins": wins,
+                "win_rate": round(wins / n, 3) if n else None, "net_pnl": round(net, 2)}
+
+    def lore_for(self, engine, limit: int = 5) -> list[dict]:
+        """Recent migrated commentary for *engine* (falls back to any engine) — the
+        historical voice the live read is grounded in."""
+        with self._conn() as c:
+            rows = c.execute(
+                "SELECT ts, engine, kind, content FROM trade_lore WHERE engine=%s "
+                "ORDER BY ts DESC LIMIT %s", (engine, int(limit)),
+            ).fetchall()
+            if not rows:
+                rows = c.execute(
+                    "SELECT ts, engine, kind, content FROM trade_lore "
+                    "ORDER BY ts DESC LIMIT %s", (int(limit),),
+                ).fetchall()
+        return [{"ts": r[0], "engine": r[1], "kind": r[2], "content": r[3]} for r in rows]
+
+    def add_lore(self, ts, engine, kind, content, confidence=None) -> bool:
+        """Insert one historical commentary row; False if already migrated (dedup key)."""
+        with self._conn() as c:
+            cur = c.execute(
+                "INSERT INTO trade_lore (ts, engine, kind, content, confidence) "
+                "VALUES (%s,%s,%s,%s,%s) ON CONFLICT (engine, ts, kind) DO NOTHING",
+                (ts, engine, kind, content, confidence),
+            )
+            return (cur.rowcount or 0) > 0
 
     def record_mail(self, recipient, subject, status="sent", channel="email") -> bool:
         """Record an email attempt; True if new (False = this message already sent).
