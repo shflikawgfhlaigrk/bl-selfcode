@@ -89,6 +89,20 @@ def _to_money(v) -> int | None:
     return n if n > 0 else None
 
 
+def _ssl_context():
+    """A certifi-backed SSL context: under launchd the interpreter's default CA lookup
+    proved environment-dependent (Hall Co GIS verified fine interactively but raised
+    CERTIFICATE_VERIFY_FAILED in the com.utah.enrich cron, 2026-06-10). certifi pins the
+    bundle so verification is deterministic in every context — never disabled."""
+    import ssl
+
+    try:
+        import certifi
+        return ssl.create_default_context(cafile=certifi.where())
+    except Exception:  # noqa: BLE001 — certifi missing: fall back to interpreter default
+        return None
+
+
 def _arcgis_query(url: str, where: str, fetch=None, timeout: int = 20) -> dict:
     """One ArcGIS FeatureServer query → parsed JSON (injectable for tests)."""
     if fetch is not None:
@@ -97,7 +111,7 @@ def _arcgis_query(url: str, where: str, fetch=None, timeout: int = 20) -> dict:
         "where": where, "outFields": "*", "f": "json",
         "returnGeometry": "true", "resultRecordCount": "5"})
     req = urllib.request.Request(full, headers={"User-Agent": "Utah/1.0 property"})
-    with urllib.request.urlopen(req, timeout=timeout) as r:
+    with urllib.request.urlopen(req, timeout=timeout, context=_ssl_context()) as r:
         return json.loads(r.read().decode("utf-8", "replace"))
 
 
