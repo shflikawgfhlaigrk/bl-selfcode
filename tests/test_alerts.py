@@ -130,7 +130,7 @@ def test_trading_run_pages_on_real_fire():
     s = _capture(); alerts.set_sender(s)
 
     class _Ledger:
-        def record_fire(self, engine, direction, entry=None, synthetic=False):
+        def record_fire(self, engine, direction, entry=None, synthetic=False, **kw):
             return 42
     closes = [float(i) for i in range(25)] + [999.0]       # last close breaks the prior high
     r = trading.run(_Ledger(), feed_fn=lambda: closes)
@@ -155,3 +155,57 @@ def test_courier_push_routes_to_sender():
                         push_send=lambda m, **k: (sent.update({"m": m, **k}), {"sent": True})[1])
     assert r["via"] == "push" and r["sent"] is True
     assert sent["m"] == "ping" and sent["title"] == "Hi" and sent["priority"] == 1
+
+
+# ── storm-proofing (2026-06-10 "why the fuck do i have hundreds of trade
+# notifications"): durable dedup, trade TTL, hourly page budget ────────────────
+
+def test_dedup_survives_a_process_restart(tmp_path):
+    """The storm root cause: in-memory dedup wiped on every wcfeed restart →
+    every active signal re-paged. The map is now file-backed: a 'restarted'
+    module (fresh in-memory state, same file) still suppresses."""
+    alerts.set_seen_path(tmp_path / "seen.json")
+    s = _capture()
+    assert alerts.trade_fire("breakout", "long", 100.0, symbol="US.SPY", sender=s)["sent"]
+    # simulate the restart: drop ALL in-memory state, keep the file
+    alerts._reset_seen_for_tests()
+    r = alerts.trade_fire("breakout", "long", 101.0, symbol="US.SPY", sender=s)
+    assert r["gated"] is True and r["reason"] == "deduped"
+    assert len(s.calls) == 1
+
+
+def test_trade_uses_its_own_longer_ttl(monkeypatch, tmp_path):
+    """trade pages dedup on TRADE_ALERT_DEDUP_SECONDS (2h default), not the 30-min
+    stream TTL — one page per signal episode per engine+symbol+direction."""
+    alerts.set_seen_path(tmp_path / "seen.json")
+    monkeypatch.setattr(config, "ALERT_DEDUP_SECONDS", 0)      # stream TTL: no dedup
+    monkeypatch.setattr(config, "TRADE_ALERT_DEDUP_SECONDS", 3600)
+    s = _capture()
+    assert alerts.trade_fire("meanrev", "short", 50.0, symbol="US.GLD", sender=s)["sent"]
+    r = alerts.trade_fire("meanrev", "short", 51.0, symbol="US.GLD", sender=s)
+    assert r["reason"] == "deduped"                            # trade TTL still holds
+    assert len(s.calls) == 1
+
+
+def test_trade_budget_caps_pages_per_hour_but_distinct_keys_until_then(monkeypatch, tmp_path):
+    """36 distinct engine+symbol+direction keys can each pass dedup — the per-hour
+    budget is the hard phone protector. Capped fires return gated:trade_budget."""
+    alerts.set_seen_path(tmp_path / "seen.json")
+    monkeypatch.setattr(config, "TRADE_ALERTS_PER_HOUR", 3)
+    s = _capture()
+    syms = ["US.SPY", "US.QQQ", "US.GLD", "US.IWM", "US.XLE"]
+    results = [alerts.trade_fire("breakout", "long", 1.0, symbol=sym, sender=s)
+               for sym in syms]
+    assert [r["sent"] for r in results] == [True, True, True, False, False]
+    assert all(r["reason"] == "trade_budget" for r in results[3:])
+    assert len(s.calls) == 3
+
+
+def test_trade_budget_never_starves_critical(monkeypatch, tmp_path):
+    """The budget is TRADE-stream only: a critical page goes out even when trade
+    pages are capped."""
+    alerts.set_seen_path(tmp_path / "seen.json")
+    monkeypatch.setattr(config, "TRADE_ALERTS_PER_HOUR", 0)
+    s = _capture()
+    assert alerts.trade_fire("breakout", "long", 1.0, symbol="US.SPY", sender=s)["sent"] is False
+    assert alerts.critical("watchdog", "daemon down", sender=s)["sent"] is True

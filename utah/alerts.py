@@ -11,14 +11,17 @@ storm suppression and quiet hours. The four streams Michael chose:
                      (prio -1), silent on the phone, RESPECTS quiet hours.
 
 Every function is a thin, NEVER-raising wrapper over the pushover transport. Dedup is
-in-memory (per-process): the long-lived daemon de-dupes critical/trade storms; the
-once-a-day cron paths key dedup on the date. The actual push goes through an injectable
-sender (:func:`set_sender`) so the whole suite runs with zero network and zero real
-pushes — captured at spawn-time for the threaded critical path so a test teardown can
-never let a late thread reach the real transport.
+FILE-BACKED (~/.utah/run/alerts_seen.json): process-memory-only dedup re-paged every
+active signal on every wcfeed restart (the 2026-06-10 "hundreds of trade notifications").
+The trade stream additionally carries its own longer TTL and a hard per-hour page budget.
+The actual push goes through an injectable sender (:func:`set_sender`) so the whole
+suite runs with zero network and zero real pushes — captured at spawn-time for the
+threaded critical path so a test teardown can never let a late thread reach the real
+transport.
 """
 from __future__ import annotations
 
+import json
 import logging
 import threading
 import time as _time
@@ -28,9 +31,78 @@ from utah import config
 
 log = logging.getLogger("utah.alerts")
 
-_SEEN: dict[str, float] = {}   # in-memory dedup: key -> last-sent epoch seconds
+_SEEN: dict[str, float] = {}   # dedup: key -> last-sent epoch seconds (file-backed)
+_SEEN_LOADED = False           # lazy one-time load of the persisted dedup state
 _SENDER = None                 # injectable real-push seam (tests pin a fake)
 _LOCK = threading.Lock()
+
+
+_SEEN_PATH = None              # injectable override (tests isolate to a tmp file)
+
+
+def set_seen_path(p) -> None:
+    """Point the durable dedup file somewhere else (tests). ``None`` = the live path."""
+    global _SEEN_PATH
+    _SEEN_PATH = p
+
+
+def _seen_path():
+    return _SEEN_PATH or (config.UTAH_HOME / "run" / "alerts_seen.json")
+
+
+def _load_seen_locked() -> None:
+    """One-time lazy load of the persisted dedup map. Held under _LOCK."""
+    global _SEEN_LOADED
+    if _SEEN_LOADED:
+        return
+    _SEEN_LOADED = True
+    try:
+        with open(_seen_path(), encoding="utf-8") as f:
+            disk = json.load(f)
+        now = _time.time()
+        # only carry entries young enough to matter for any TTL in use (24h cap)
+        _SEEN.update({k: float(v) for k, v in disk.items()
+                      if isinstance(v, (int, float)) and now - float(v) < 86400})
+    except Exception:  # noqa: BLE001 — no file / corrupt file = fresh start
+        pass
+
+
+def _save_seen_locked() -> None:
+    """Write-behind persistence of the dedup map (atomic rename). Held under _LOCK."""
+    try:
+        p = _seen_path()
+        p.parent.mkdir(parents=True, exist_ok=True)
+        tmp = p.with_suffix(".json.tmp")
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(_SEEN, f)
+        tmp.replace(p)
+    except Exception:  # noqa: BLE001 — persistence is best-effort, never blocks a page
+        pass
+
+
+def _reset_seen_for_tests() -> None:
+    """Drop in-memory + loaded state so each test starts from its own tmp file."""
+    global _SEEN_LOADED
+    with _LOCK:
+        _SEEN.clear()
+        _SENT_LOG.clear()
+        _SEEN_LOADED = False
+
+
+_SENT_LOG: list[float] = []    # trade-stream budget window: epoch seconds of sends
+
+
+def _trade_budget_ok() -> bool:
+    """Hard cap on trade pages per rolling hour. Fires are ALWAYS ledgered and on the
+    deck regardless — the budget only protects the phone. Held under _LOCK."""
+    now = _time.time()
+    with _LOCK:
+        cutoff = now - 3600
+        _SENT_LOG[:] = [t for t in _SENT_LOG if t > cutoff]
+        if len(_SENT_LOG) >= config.TRADE_ALERTS_PER_HOUR:
+            return False
+        _SENT_LOG.append(now)
+    return True
 
 
 def set_sender(fn) -> None:
@@ -59,16 +131,18 @@ def in_quiet_hours(now: datetime | None = None) -> bool:
 
 
 def _dedup_ok(key: str | None, ttl: int) -> bool:
-    """True if *key* has not fired within *ttl* seconds; records the hit. ``None`` key
-    always passes (no dedup)."""
+    """True if *key* has not fired within *ttl* seconds; records the hit durably so a
+    process restart can never re-page a live storm. ``None`` key always passes."""
     if not key:
         return True
     now = _time.time()
     with _LOCK:
+        _load_seen_locked()
         last = _SEEN.get(key, 0.0)
         if now - last < ttl:
             return False
         _SEEN[key] = now
+        _save_seen_locked()
     return True
 
 
@@ -102,6 +176,10 @@ def _send(stream: str, message: str, *, title: str, target: str | None = None,
             return {"sent": False, "gated": True, "reason": "quiet_hours"}
         if not _dedup_ok(dedup_key, dedup_ttl or config.ALERT_DEDUP_SECONDS):
             return {"sent": False, "gated": True, "reason": "deduped"}
+        # trade pages additionally burn a per-hour budget — AFTER dedup, so only
+        # would-be-real pages consume it; capped fires stay ledgered + on the deck.
+        if stream == "trade" and not _trade_budget_ok():
+            return {"sent": False, "gated": True, "reason": "trade_budget"}
         push = sender if sender is not None else _SENDER
         if push is None:
             from utah.integrations import pushover
@@ -156,9 +234,12 @@ def trade_fire(engine: str, direction: str, entry, *, fire_id=None,
                symbol: str | None = None,
                target: float | None = None, stop: float | None = None,
                rationale: str | None = None, sender=None) -> dict:
-    """Page an engine fire. DEDUP is engine+symbol+direction with the stream TTL —
-    NEVER per fire_id (unique every time): 271 fires/hr paged Michael's phone 271
-    times on 2026-06-10. One page per signal episode, not per bar."""
+    """Page an engine fire. DEDUP is engine+symbol+direction with the TRADE TTL (2h
+    default, not the 30-min stream TTL) — NEVER per fire_id (unique every time): 271
+    fires/hr paged Michael's phone 271 times on 2026-06-10. On top of dedup, a hard
+    per-hour budget (TRADE_ALERTS_PER_HOUR) protects the phone from many DISTINCT
+    keys storming at once (2 engines x 9 symbols x 2 directions = 36 keys); capped
+    fires still land in the ledger and on the deck."""
     msg = f"{str(engine).upper()} {str(direction).upper()} @ {entry}"
     if stop is not None:
         msg += f"  stop {stop}"
@@ -170,6 +251,7 @@ def trade_fire(engine: str, direction: str, entry, *, fire_id=None,
         msg += f"  (fire #{fire_id})"
     return _send("trade", msg, title="📈 Utah trade fire",
                  dedup_key=f"trade:{engine}:{symbol or '?'}:{direction}",
+                 dedup_ttl=config.TRADE_ALERT_DEDUP_SECONDS,
                  sender=sender)
 
 

@@ -44,7 +44,12 @@ def _restore_boundaries():
     # phone — even though tests run against the real ~/.utah/secrets. Also clear the
     # in-memory dedup so a prior test's alert can't suppress a later test's.
     alerts_mod.set_sender(_alerts_off)
-    alerts_mod._SEEN.clear()
+    # Isolate the FILE-BACKED dedup to a per-test tmp file so tests never read or
+    # write the live ~/.utah/run/alerts_seen.json (and never see each other's state).
+    import tempfile, os as _os
+    _seen_tmp = tempfile.mkdtemp(prefix="utah-alerts-seen-")
+    alerts_mod.set_seen_path(__import__("pathlib").Path(_seen_tmp) / "alerts_seen.json")
+    alerts_mod._reset_seen_for_tests()
     # Pin a fake memory backend for EVERY test so no test ever reads, writes, or resets
     # the real Postgres memory (that pollution added rows to prod; a stray reset once
     # wiped it). Tests that need a configured store override via the `mem`/`fake_store`
@@ -70,7 +75,8 @@ def _restore_boundaries():
     sica_mod.set_archive_backend(None)
     failures_mod.set_store(None)
     alerts_mod.set_sender(None)
-    alerts_mod._SEEN.clear()
+    alerts_mod.set_seen_path(None)
+    alerts_mod._reset_seen_for_tests()
 
 
 @pytest.fixture

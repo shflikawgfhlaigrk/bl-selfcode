@@ -308,9 +308,15 @@ WAKE_MODEL: str = os.environ.get(
     os.path.expanduser("~/.utah/models/wake/hey_ace_v3.onnx"),
 )
 #: Confidence to arm command capture. ONNX arms only — STT/text still resolves the command.
-WAKE_THRESHOLD: float = float(os.environ.get("UTAH_WAKE_THRESHOLD", "0.55"))
+WAKE_THRESHOLD: float = float(os.environ.get("UTAH_WAKE_THRESHOLD", "0.82"))
 #: Seconds after an audio wake hit to capture the command utterance (STT runs once).
 WAKE_ARM_S: float = float(os.environ.get("UTAH_WAKE_ARM_S", "8.0"))
+#: Force-capture window after openWakeWord fires (bypasses Silero on noisy mics).
+VOICE_FORCE_CAPTURE: bool = os.environ.get("UTAH_VOICE_FORCE_CAPTURE", "1") == "1"
+VOICE_FORCE_CAPTURE_S: float = float(os.environ.get("UTAH_VOICE_FORCE_CAPTURE_S", "5.5"))
+VOICE_FORCE_CAPTURE_DELAY: float = float(os.environ.get("UTAH_VOICE_FORCE_CAPTURE_DELAY", "0.5"))
+#: Skip armed segments whose RMS is below this (silence after false wake).
+VOICE_SILENCE_RMS: float = float(os.environ.get("UTAH_VOICE_SILENCE_RMS", "0.008"))
 #: VAD trailing-silence frames before STT (32 ms/frame). Lower = faster end-of-utterance.
 VAD_OFFSET: int = int(os.environ.get("UTAH_VAD_OFFSET", "12"))          # was 20 (~640 ms)
 #: End-of-*command* silence after an audio wake. Was 6 (~192 ms) — shorter than the
@@ -493,6 +499,13 @@ QUIET_HOURS_END: str = os.environ.get("UTAH_QUIET_END", "06:30")
 
 #: Per-key dedup window (seconds): storm suppression for repeated identical alerts.
 ALERT_DEDUP_SECONDS: int = int(os.environ.get("UTAH_ALERT_DEDUP", "1800"))
+
+#: Trade-stream page controls (2026-06-10 "hundreds of trade notifications"): a fire's
+#: engine+symbol+direction key re-pages at most every TRADE_ALERT_DEDUP_SECONDS, and the
+#: phone gets at most TRADE_ALERTS_PER_HOUR trade pages per rolling hour, period — capped
+#: fires still land in the ledger and on the deck's Engine Lab.
+TRADE_ALERT_DEDUP_SECONDS: int = int(os.environ.get("UTAH_TRADE_DEDUP", "7200"))
+TRADE_ALERTS_PER_HOUR: int = int(os.environ.get("UTAH_TRADE_ALERTS_PER_HOUR", "6"))
 
 #: Emergency (priority 2) re-alert cadence / give-up window, in seconds.
 PUSHOVER_EMERGENCY_RETRY: int = 60
