@@ -209,3 +209,17 @@ def test_ensure_gates_on_login_without_piling_tabs_or_killing(monkeypatch):
 def test_ensure_spawns_fresh_chrome_when_none_running(monkeypatch):
     c = _ensure_harness(monkeypatch, pids=[], reachable=False, wc_tab_open=False)
     assert c["result"] is True and c["spawn"] == 1 and c["kill"] == []
+
+
+def test_spawn_disables_chrome_tab_pausing(monkeypatch):
+    """Chrome throttles/discards background tabs — which silently pauses the realtime WC
+    feed (available:True, symbols:0, chart frozen) whenever the window is occluded. The
+    launch must pin the feed tab awake."""
+    argv = {}
+    monkeypatch.setattr("subprocess.Popen",
+                        lambda args, **kw: argv.setdefault("args", list(args)))
+    assert wc_feed._spawn_chrome() is True
+    for flag in ("--disable-background-timer-throttling",
+                 "--disable-backgrounding-occluded-windows",
+                 "--disable-renderer-backgrounding"):
+        assert flag in argv["args"]

@@ -341,6 +341,19 @@ def _open_wc_tab() -> bool:
     return False
 
 
+#: Chrome quietly PAUSES occluded/background tabs (timer throttling, renderer backgrounding,
+#: Memory Saver tab discard) — on the WC tab that freezes the realtime feed while the page
+#: still looks "open" (the live signature: cycles report available:True but symbols:0, and
+#: WC shows a paused chart). The feed tab must never sleep just because the window is behind
+#: Michael's other windows.
+CHROME_NO_THROTTLE_FLAGS = (
+    "--disable-background-timer-throttling",
+    "--disable-backgrounding-occluded-windows",
+    "--disable-renderer-backgrounding",
+    "--disable-features=HighEfficiencyModeAvailable,MemorySaverModeAggressiveness",
+)
+
+
 def _spawn_chrome() -> bool:
     """Fresh chrome-wc with the CDP flag. Callers must ensure no chrome owns the profile."""
     import subprocess
@@ -349,7 +362,7 @@ def _spawn_chrome() -> bool:
         subprocess.Popen(
             [CHROME, f"--remote-debugging-port={CDP_PORT}", "--remote-allow-origins=*",
              f"--user-data-dir={WC_PROFILE}", "--no-first-run", "--no-default-browser-check",
-             f"https://{WC_HOST}/"],
+             *CHROME_NO_THROTTLE_FLAGS, f"https://{WC_HOST}/"],
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         return True
     except Exception as exc:  # noqa: BLE001
