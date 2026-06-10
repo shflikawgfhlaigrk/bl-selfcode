@@ -123,3 +123,89 @@ def test_run_no_fire_before_enough_bars(monkeypatch):
     ticks = {"X": [(0, 100.0), (1, 101.0), (2, 99.0)]}   # only 2 closed bars, lookback 5
     r = wc_feed.run(ledger=object(), bar_seconds=1, lookback=5, collect_fn=lambda s: ticks)
     assert r["ready"] == 0 and r["fires"] == 0           # warms up, never fakes a signal
+
+
+# ---- chrome-wc lifecycle: Utah owns its OWN CDP port and NEVER piles up tabs ----------------
+# Root cause of the 2026-06-10 outage: old Ace's leftover chrome held 127.0.0.1:9222, Utah's
+# chrome could only bind [::1]:9222, the IPv4-only probe saw the wrong (empty) chrome forever,
+# and every cycle's flag-less relaunch just opened ANOTHER WC tab (21 piled up, zero data).
+
+
+def test_cdp_port_is_utahs_own_not_old_aces_9222():
+    assert wc_feed.CDP_PORT == 9223        # old Ace owns :9222; sharing it = probe hits its chrome
+
+
+def test_wc_page_falls_back_to_ipv6_loopback(monkeypatch):
+    """Chrome binds [::1] when something squats the IPv4 loopback — the probe must try both."""
+    import io
+    import json as _json
+    page = {"type": "page", "url": f"https://{wc_feed.WC_HOST}/",
+            "webSocketDebuggerUrl": "ws://[::1]:9223/devtools/page/X"}
+
+    def fake_urlopen(url, timeout=4):
+        if "127.0.0.1" in str(url):
+            raise OSError("connection refused")
+        return io.StringIO(_json.dumps([page]))
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+    assert wc_feed._wc_page() == page
+
+
+def _ensure_harness(monkeypatch, *, pids, reachable, wc_tab_open, feed_after=True):
+    """Run ensure_chrome_wc in a fully-stubbed world; return the call record."""
+    calls = {"spawn": 0, "kill": [], "open_tab": 0, "feed_polls": 0}
+    monkeypatch.setattr(wc_feed.os.path, "isdir", lambda p: True)
+    monkeypatch.setattr(wc_feed, "_migrate_wc_profile_once", lambda: None)
+    monkeypatch.setattr(wc_feed, "_wc_chrome_pids", lambda: list(pids))
+    monkeypatch.setattr(wc_feed, "_cdp_reachable", lambda: reachable)
+    monkeypatch.setattr(wc_feed, "_wc_any_page",
+                        lambda: {"url": f"https://{wc_feed.WC_HOST}/login"} if wc_tab_open else None)
+
+    def fake_feed():
+        calls["feed_polls"] += 1
+        return feed_after and calls["feed_polls"] > 1      # False on the first check, then live
+    monkeypatch.setattr(wc_feed, "feed_available", fake_feed)
+
+    def fake_open_tab():
+        calls["open_tab"] += 1
+        return True
+    monkeypatch.setattr(wc_feed, "_open_wc_tab", fake_open_tab)
+    monkeypatch.setattr(wc_feed, "_kill_wc_chrome", lambda p: calls["kill"].append(list(p)))
+
+    def fake_spawn():
+        calls["spawn"] += 1
+        return True
+    monkeypatch.setattr(wc_feed, "_spawn_chrome", fake_spawn)
+    monkeypatch.setattr(wc_feed, "_await_feed", lambda seconds=30.0: wc_feed.feed_available())
+    calls["result"] = wc_feed.ensure_chrome_wc()
+    return calls
+
+
+def test_ensure_never_spawns_a_second_chrome_for_a_missing_tab(monkeypatch):
+    """Profile chrome alive + CDP healthy + WC tab closed → reopen the tab VIA CDP.
+    A second Popen against a live profile ignores the debug flags and just piles tabs."""
+    c = _ensure_harness(monkeypatch, pids=[123], reachable=True, wc_tab_open=False)
+    assert c["result"] is True and c["open_tab"] == 1
+    assert c["spawn"] == 0 and c["kill"] == []
+
+
+def test_ensure_restarts_wedged_chrome_instead_of_tab_spam(monkeypatch):
+    """Profile chrome alive but NOT reachable on our CDP port (lost the bind/wedged) →
+    restart OUR chrome with the flag; never a flag-less relaunch."""
+    c = _ensure_harness(monkeypatch, pids=[123, 456], reachable=False, wc_tab_open=False)
+    assert c["result"] is True and c["kill"] == [[123, 456]] and c["spawn"] == 1
+    assert c["open_tab"] == 0
+
+
+def test_ensure_gates_on_login_without_piling_tabs_or_killing(monkeypatch):
+    """WC tab exists but is logged out → Michael's one-time login; the loop must NOT open
+    more tabs, spawn chromes, or churn-restart while waiting."""
+    c = _ensure_harness(monkeypatch, pids=[123], reachable=True, wc_tab_open=True,
+                        feed_after=False)
+    assert c["result"] is False
+    assert c["spawn"] == 0 and c["open_tab"] == 0 and c["kill"] == []
+
+
+def test_ensure_spawns_fresh_chrome_when_none_running(monkeypatch):
+    c = _ensure_harness(monkeypatch, pids=[], reachable=False, wc_tab_open=False)
+    assert c["result"] is True and c["spawn"] == 1 and c["kill"] == []

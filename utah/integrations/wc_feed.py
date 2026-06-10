@@ -25,7 +25,13 @@ import urllib.request
 
 log = logging.getLogger("utah.integrations.wc_feed")
 
-CDP_PORT = int(os.environ.get("UTAH_WC_CDP_PORT", "9222"))
+#: Utah's OWN CDP port. NOT 9222: old Ace's bridge (and its leftover chromes) own :9222, and
+#: a port shared across profiles means the probe can reach the WRONG chrome — proven live
+#: 2026-06-10 (old-Ace chrome held IPv4 :9222 with zero tabs; Utah's logged-in chrome could
+#: only bind [::1]; the loop relaunched flag-less Chrome every cycle = 21 piled-up WC tabs).
+CDP_PORT = int(os.environ.get("UTAH_WC_CDP_PORT", "9223"))
+#: Chrome binds whichever loopback is free — probe both (IPv4 first, then IPv6).
+CDP_HOSTS = ("127.0.0.1", "[::1]")
 WC_HOST = "app.wealthcharts.com"
 CHROME = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
 #: The WC Chrome profile lives under ~/.utah now (binding rule M: the runtime never reads
@@ -156,14 +162,32 @@ def ingest(state: dict, symbol: str, ticks, *, bar_seconds: int = BAR_SECONDS,
     return s["closes"]
 
 
+def _cdp_pages() -> list | None:
+    """The CDP target list from whichever loopback our chrome bound, or None when no chrome
+    answers on Utah's port at all (= chrome down, portless, or wedged)."""
+    for host in CDP_HOSTS:
+        try:
+            return json.load(urllib.request.urlopen(
+                f"http://{host}:{CDP_PORT}/json", timeout=4))
+        except Exception as exc:  # noqa: BLE001 — CDP down = feed unavailable, not an error
+            log.debug("wc_feed: CDP not reachable on %s:%d (%s)", host, CDP_PORT, exc)
+    return None
+
+
+def _cdp_reachable() -> bool:
+    return _cdp_pages() is not None
+
+
+def _wc_any_page() -> dict | None:
+    """ANY WealthCharts page (login wall included) — the don't-pile-tabs check."""
+    pages = _cdp_pages() or []
+    return next((p for p in pages
+                 if WC_HOST in (p.get("url") or "") and p.get("type") == "page"), None)
+
+
 def _wc_page() -> dict | None:
     """The logged-in WC dashboard CDP target, or None if WC isn't reachable / on /login."""
-    try:
-        pages = json.load(urllib.request.urlopen(
-            f"http://127.0.0.1:{CDP_PORT}/json", timeout=4))
-    except Exception as exc:  # noqa: BLE001 — CDP down = feed unavailable, not an error
-        log.debug("wc_feed: CDP not reachable on :%d (%s)", CDP_PORT, exc)
-        return None
+    pages = _cdp_pages() or []
     return next((p for p in pages
                  if WC_HOST in (p.get("url") or "")
                  and p.get("type") == "page"
@@ -248,18 +272,78 @@ def run(ledger, *, seconds: float = 30.0, bar_seconds: int = BAR_SECONDS, lookba
             "fires": fires, "ready": ready}
 
 
-def ensure_chrome_wc() -> bool:
-    """Launch the logged-in ``chrome-wc`` profile with the CDP debug port if WC isn't already
-    reachable — Ace bringing up his own market access. Headful (WC's realtime feed needs a real
-    render). Returns True once a logged-in WC page is reachable. Never raises."""
-    if feed_available():
-        return True
-    _migrate_wc_profile_once()   # one-time ~/.ace/chrome-wc → ~/.utah/chrome-wc (preserve login)
-    if not os.path.isdir(WC_PROFILE):
-        log.warning("wc_feed: no chrome-wc profile at %s — Michael's WC login required", WC_PROFILE)
-        return False
+def _wc_chrome_pids() -> list[int]:
+    """PIDs of the MAIN Chrome process(es) running against WC_PROFILE (Helpers excluded).
+    Empty list = no chrome owns the profile, so a fresh launch is safe. Never raises."""
     import subprocess
+
+    try:
+        out = subprocess.run(["pgrep", "-f", f"--user-data-dir={WC_PROFILE}"],
+                             capture_output=True, text=True, timeout=10).stdout
+    except Exception:  # noqa: BLE001 — can't enumerate = treat as none running
+        return []
+    pids = []
+    for tok in out.split():
+        try:
+            pid = int(tok)
+            cmd = subprocess.run(["ps", "-p", tok, "-o", "command="],
+                                 capture_output=True, text=True, timeout=10).stdout
+        except Exception:  # noqa: BLE001
+            continue
+        if "MacOS/Google Chrome" in cmd and "Helper" not in cmd:
+            pids.append(pid)
+    return pids
+
+
+def _pid_alive(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except Exception:  # noqa: BLE001 — e.g. EPERM = something's there
+        return True
+
+
+def _kill_wc_chrome(pids) -> None:
+    """TERM (then KILL) our wedged chrome-wc so a flagged relaunch can own the CDP port.
+    Only ever called on PIDs that are chrome-wc mains. Never raises."""
+    import signal
     import time as _time
+
+    for pid in pids:
+        try:
+            os.kill(pid, signal.SIGTERM)
+        except Exception:  # noqa: BLE001 — already gone
+            pass
+    deadline = _time.monotonic() + 8
+    while _time.monotonic() < deadline and any(_pid_alive(p) for p in pids):
+        _time.sleep(0.5)
+    for pid in pids:
+        if _pid_alive(pid):
+            try:
+                os.kill(pid, signal.SIGKILL)
+            except Exception:  # noqa: BLE001
+                pass
+
+
+def _open_wc_tab() -> bool:
+    """Reopen the WC dashboard as a tab in the ALREADY-RUNNING chrome via CDP — never a
+    second Popen (a flag-less relaunch is exactly the tab-spam bug). Never raises."""
+    for host in CDP_HOSTS:
+        try:
+            req = urllib.request.Request(
+                f"http://{host}:{CDP_PORT}/json/new?https://{WC_HOST}/", method="PUT")
+            urllib.request.urlopen(req, timeout=4)
+            return True
+        except Exception:  # noqa: BLE001
+            continue
+    return False
+
+
+def _spawn_chrome() -> bool:
+    """Fresh chrome-wc with the CDP flag. Callers must ensure no chrome owns the profile."""
+    import subprocess
 
     try:
         subprocess.Popen(
@@ -267,14 +351,57 @@ def ensure_chrome_wc() -> bool:
              f"--user-data-dir={WC_PROFILE}", "--no-first-run", "--no-default-browser-check",
              f"https://{WC_HOST}/"],
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        return True
     except Exception as exc:  # noqa: BLE001
         log.warning("wc_feed: chrome-wc launch failed: %s", exc)
         return False
-    for _ in range(20):
-        _time.sleep(1.5)
+
+
+def _await_feed(seconds: float = 30.0) -> bool:
+    import time as _time
+
+    deadline = _time.monotonic() + seconds
+    while True:
         if feed_available():
-            log.info("wc_feed: chrome-wc up, WC feed reachable")
+            log.info("wc_feed: chrome-wc up, WC feed reachable on :%d", CDP_PORT)
             return True
+        if _time.monotonic() >= deadline:
+            return False
+        _time.sleep(1.5)
+
+
+def ensure_chrome_wc() -> bool:
+    """Bring up the logged-in ``chrome-wc`` profile on Utah's CDP port — Ace bringing up his
+    own market access. Headful (WC's realtime feed needs a real render). Converges instead of
+    churning: a live profile chrome is never Popen'd at again (Chrome would ignore the debug
+    flags and just open ANOTHER tab — the 2026-06-10 21-tab pileup). Healing paths:
+    tab closed → reopen via CDP; chrome wedged/portless → restart it; logged out → gate and
+    wait for Michael (his one-time login/2FA). Never raises."""
+    if feed_available():
+        return True
+    _migrate_wc_profile_once()   # one-time ~/.ace/chrome-wc → ~/.utah/chrome-wc (preserve login)
+    if not os.path.isdir(WC_PROFILE):
+        log.warning("wc_feed: no chrome-wc profile at %s — Michael's WC login required", WC_PROFILE)
+        return False
+    pids = _wc_chrome_pids()
+    if pids:
+        if _cdp_reachable():
+            if _wc_any_page() is None:
+                # chrome healthy on our port, WC tab simply closed → reopen IN-PLACE.
+                if _open_wc_tab() and _await_feed(10):
+                    return True
+            # WC tab exists but no live feed = login wall / 2FA. Piling tabs or restart
+            # churn can't fix a logged-out session — gate honestly and wait for Michael.
+            log.warning("wc_feed: chrome-wc up but no logged-in WC page (login/2FA may be needed)")
+            return False
+        # chrome owns the profile but doesn't answer on OUR port (lost the bind / wedged):
+        # only a restart WITH the flag can reattach it.
+        log.warning("wc_feed: chrome-wc %s unreachable on CDP :%d — restarting it", pids, CDP_PORT)
+        _kill_wc_chrome(pids)
+    if not _spawn_chrome():
+        return False
+    if _await_feed(30):
+        return True
     log.warning("wc_feed: chrome-wc launched but WC not reachable (login/2FA may be needed)")
     return False
 
