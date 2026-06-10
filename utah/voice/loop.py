@@ -22,6 +22,7 @@ import time
 import wave
 
 from utah.voice import agent, oww, state, stt, tts, vad
+from utah.voice.liveness import MicLiveness
 
 log = logging.getLogger("utah.voice.loop")
 
@@ -115,7 +116,12 @@ def run() -> None:
 
     q: "queue.Queue[bytes]" = queue.Queue()
     processing = threading.Event()
-    level = {"max": 0.0, "last_loud": time.monotonic(), "alerted": False, "last_record": 0.0}
+    level = {"max": 0.0}
+    # Device liveness, measured on the RAW (pre-DSP) signal — the HPF strips the
+    # sub-120Hz floor a quiet room still has, so post-filter "zeros" cannot tell a
+    # healthy-but-quiet device from a dead one (2026-06-09 investigation).
+    liveness = MicLiveness(threshold=TRUE_SILENCE, alert_after_s=SILENCE_ALERT_S,
+                           cooldown_s=MIC_SILENT_COOLDOWN_S)
     vstate = {"status": "starting", "listening": False, "speaking": False,
               "segments": 0, "last_transcript": None, "last_wake": None}
     armed_until = 0.0
@@ -166,8 +172,11 @@ def run() -> None:
 
     def _cb(indata, frames, t, status):  # noqa: ANN001
         if processing.is_set() or tts.is_anything_playing():
+            liveness.feed_muted()   # intentionally muted — not deaf
             return
-        pcm = bytes(indata)
+        raw = bytes(indata)
+        liveness.feed_frame(_rms(raw))   # liveness = RAW-signal question
+        pcm = raw
         if _HPF_ON:
             pcm = _apply_hpf(pcm)   # strip sub-120Hz desk/rumble FIRST
         if _AGC_ON:
@@ -175,9 +184,6 @@ def run() -> None:
         r = _rms(pcm)
         if r > level["max"]:
             level["max"] = r
-        if r > TRUE_SILENCE:
-            level["last_loud"] = time.monotonic()
-            level["alerted"] = False
         q.put(pcm)
 
     def _monitor():
@@ -188,33 +194,50 @@ def run() -> None:
             # muted mic as "deaf" → false mic_silent. (The real deaf cause — a hung afplay
             # holding the play-lock — is now bounded by AFPLAY_TIMEOUT_S in tts._afplay.)
             if processing.is_set() or tts.is_anything_playing():
-                level["last_loud"] = time.monotonic()
+                liveness.feed_muted()
                 vstate["deaf"] = False           # intentionally muted, not deaf
                 vstate["mic_quiet_s"] = 0.0
                 state.write(**vstate)
                 continue
             mx = level["max"]; level["max"] = 0.0
             log.debug("voice: audio level (max rms / %ds) = %.4f", MONITOR_S, mx)
-            quiet_for = time.monotonic() - level["last_loud"]
-            now = time.monotonic()
-            # Publish a DEAF heartbeat (B15): the device delivering pure zeros (< TRUE_SILENCE)
-            # this long means the mic is dead, not the room being quiet (a real room reads
-            # above TRUE_SILENCE). The supervisor's audio-liveness probe restarts the loop on
-            # this — reopening the stream recovers a wedged CoreAudio handle.
+            # Publish a DEAF heartbeat (B15): RAW-measured — the device delivering nothing,
+            # never a quiet room post-filter. The supervisor's audio-liveness probe restarts
+            # the loop past VOICE_DEAF_RESTART_S; reopening the stream recovers a wedged
+            # CoreAudio handle.
+            quiet_for = liveness.quiet_for_s
             vstate["deaf"] = quiet_for > SILENCE_ALERT_S
             vstate["mic_quiet_s"] = round(quiet_for, 1)
             state.write(**vstate)
-            cooled = (now - level["last_record"]) > MIC_SILENT_COOLDOWN_S
-            if quiet_for > SILENCE_ALERT_S and not level["alerted"] and cooled:
-                level["alerted"] = True
-                level["last_record"] = now
+            for ev in liveness.poll():
+                if ev["event"] == "recovered":
+                    # Episode DURATION is the diagnosis discriminator: seconds = playback/
+                    # CoreAudio glitch; minutes = another app or the lock held the device.
+                    log.warning("voice: mic RECOVERED after %.0fs of device zeros",
+                                ev["deaf_for_s"])
+                    failures.record(
+                        "voice", "mic_recovered",
+                        f"mic recovered after {ev['deaf_for_s']:.0f}s of device-level zeros "
+                        "(episode evidence for the mic_silent diagnosis: seconds=transient "
+                        "glitch, minutes=another app/lock held the input device).",
+                    )
+                    continue
+                dev = "?"
+                try:
+                    import sounddevice as sd
+                    dev = str(sd.query_devices(kind="input").get("name", "?"))
+                except Exception:  # noqa: BLE001 — diagnostics must not kill the monitor
+                    pass
                 failures.record(
                     "voice", "mic_silent",
-                    f"mic delivering pure silence (zeros) for {int(quiet_for)}s — audio device "
-                    "unavailable; grant Microphone permission to the Utah daemon python in "
-                    "System Settings > Privacy & Security > Microphone (TCC).",
+                    f"mic delivering DEVICE-LEVEL zeros for {ev['quiet_for_s']:.0f}s "
+                    f"(max raw rms {ev['max_raw_rms']:.6f}, post-filter max {mx:.4f}, "
+                    f"input device: {dev}) — raw-measured, so this is a real device "
+                    "outage (TCC grant, device switch, or another process holding the "
+                    "mic), not a quiet room.",
                 )
-                log.warning("voice: TRUE silence (zeros) for %ds — recorded mic_silent", int(quiet_for))
+                log.warning("voice: DEVICE zeros for %.0fs (raw-measured) — recorded mic_silent",
+                            ev["quiet_for_s"])
 
     threading.Thread(target=_monitor, daemon=True).start()
 
