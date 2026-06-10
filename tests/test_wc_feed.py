@@ -269,6 +269,20 @@ def test_barstream_trims_its_buffer_to_the_forming_bar():
     assert len(bs.buf["X"]) <= 1                        # only the forming bucket retained
 
 
+def test_silent_watch_pages_michael_once_not_every_flush():
+    """A hooked-but-silent feed (WC login wall renders at the ROOT url, so the /login
+    gate can't see it — proven live 2026-06-10) must PAGE Michael once, not loop
+    silently and not spam: fires on the Nth consecutive empty flush, re-arms only
+    after ticks flow again."""
+    w = wc_feed.SilentWatch(threshold=4)
+    assert [w.note(0), w.note(0), w.note(0)] == [False, False, False]
+    assert w.note(0) is True                  # 4th consecutive empty -> page now
+    assert w.note(0) is False                 # already paged -> no spam
+    assert w.note(3) is False                 # ticks again -> re-armed
+    assert [w.note(0)] * 1 == [False] and w.note(0) is False and w.note(0) is False
+    assert w.note(0) is True                  # silent again for threshold -> page again
+
+
 def test_spawn_disables_chrome_tab_pausing(monkeypatch):
     """Chrome throttles/discards background tabs — which silently pauses the realtime WC
     feed (available:True, symbols:0, chart frozen) whenever the window is occluded. The

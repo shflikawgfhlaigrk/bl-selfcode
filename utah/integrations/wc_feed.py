@@ -416,10 +416,11 @@ class BarStream:
     def flush(self) -> dict:
         from utah.product import trading
 
-        fires = evaluated = ready = 0
+        fires = evaluated = ready = ticked = 0
         for symbol, ticks in list(self.buf.items()):
             if not ticks:
                 continue
+            ticked += 1
             prev_key = self.state.get(symbol, {}).get("last_key", -1)
             closes = ingest(self.state, symbol, ticks, bar_seconds=self.bar_seconds,
                             max_bars=self.max_bars)
@@ -441,9 +442,33 @@ class BarStream:
                 fires += 1
                 log.info("wc_feed FIRE: %s %s @ %.2f (%d bars)", symbol,
                          sig["direction"], closes[-1], len(closes))
-        return {"symbols": len(self.buf), "evaluated": evaluated, "fires": fires,
-                "ready": ready,
+        return {"symbols": len(self.buf), "ticked": ticked, "evaluated": evaluated,
+                "fires": fires, "ready": ready,
                 "bars": {s: len(v.get("closes", [])) for s, v in self.state.items()}}
+
+
+class SilentWatch:
+    """Fire-once detector for a hooked-but-silent feed. WC renders its LOGIN WALL at the
+    root URL (proven live 2026-06-10: page title 'WealthCharts', body = Email/Password
+    form, zero frames) so the /login URL gate can't see a dead session — the only honest
+    signal is N consecutive empty flushes. ``note(ticks)`` returns True exactly once per
+    silence episode; ticks flowing re-arms it."""
+
+    def __init__(self, threshold: int = 4):
+        self.threshold = threshold
+        self.empty = 0
+        self.paged = False
+
+    def note(self, symbols_with_ticks: int) -> bool:
+        if symbols_with_ticks > 0:
+            self.empty = 0
+            self.paged = False
+            return False
+        self.empty += 1
+        if self.empty >= self.threshold and not self.paged:
+            self.paged = True
+            return True
+        return False
 
 
 def stream(ledger, *, interval: float = 30.0, bar_seconds: int = BAR_SECONDS,
@@ -459,6 +484,7 @@ def stream(ledger, *, interval: float = 30.0, bar_seconds: int = BAR_SECONDS,
         return
     bs = BarStream(ledger, bar_seconds=bar_seconds, lookback=lookback,
                    engine=engine, state=state)
+    watch = SilentWatch()
 
     async def _run():
         import websockets
@@ -480,8 +506,20 @@ def stream(ledger, *, interval: float = 30.0, bar_seconds: int = BAR_SECONDS,
                         if cd:
                             bs.feed(cd["symbol"], cd["epoch"], cd["close"])
                 if _time.monotonic() - last >= interval:
-                    log.info("wcfeed flush: %s", bs.flush())
+                    r = bs.flush()
+                    log.info("wcfeed flush: %s", r)
                     last = _time.monotonic()
+                    if watch.note(r.get("ticked", 0)):
+                        # hooked but SILENT = almost always the WC login wall (renders at
+                        # the root URL, invisible to the /login gate) — page Michael.
+                        from utah import alerts, failures
+                        failures.record("trading", "feed_silent",
+                                        "WC hook live but no ticks — log into the corner "
+                                        "WC window (session likely expired)")
+                        alerts.critical_async("wcfeed",
+                                              "WC feed silent — log into the corner "
+                                              "WealthCharts window (session expired)",
+                                              key="wcfeed/silent")
 
     try:
         asyncio.run(_run())
@@ -559,7 +597,7 @@ def main() -> int:
         _time.sleep(2.0)
 
 
-__all__ = ["parse_candle", "closed_bars", "ohlc_bars", "ingest", "feed_available", "BarStream", "stream",
+__all__ = ["parse_candle", "closed_bars", "ohlc_bars", "ingest", "feed_available", "BarStream", "stream", "SilentWatch",
            "collect_ticks", "run", "ensure_chrome_wc", "main", "CDP_PORT", "WC_HOST",
            "BAR_SECONDS"]
 
