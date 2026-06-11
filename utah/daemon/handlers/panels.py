@@ -79,7 +79,7 @@ async def _panel_pool(ctx: Context) -> dict:
 
 async def _panel_governor(ctx: Context) -> dict:
     gov = ctx.governor.snapshot()
-    with ctx.governor.admission():
+    with ctx.governor.read_admission():
         sysd = await ctx.pool.run(_sys_detail)
     return {"panel": "governor", **gov, **sysd}
 
@@ -97,7 +97,7 @@ async def _panel_spine(ctx: Context) -> dict:
 
 
 async def _panel_ledger(ctx: Context, *, panel: str, domain: str) -> dict:
-    with ctx.governor.admission():
+    with ctx.governor.read_admission():
         rows = await ctx.pool.run(_ledger_recent, domain, 50)
     return {"panel": panel, "rows": rows}
 
@@ -119,13 +119,13 @@ async def _panel_engines(ctx: Context) -> dict:
 
 
 async def _panel_audit(ctx: Context) -> dict:
-    with ctx.governor.admission():
+    with ctx.governor.read_admission():
         rows = await ctx.pool.run(_audit_detail, 50)
     return {"panel": "audit", "rows": rows}
 
 
 async def _panel_memory(ctx: Context) -> dict:
-    with ctx.governor.admission():
+    with ctx.governor.read_admission():
         detail = await ctx.pool.run(_memory_detail)
     return {"panel": "memory", **detail}
 
@@ -139,7 +139,7 @@ async def _panel_voice(ctx: Context) -> dict:
 async def _panel_tasks(ctx: Context) -> dict:
     from utah.product import tasks
 
-    with ctx.governor.admission():
+    with ctx.governor.read_admission():
         rows = await ctx.pool.run(lambda: tasks.list_tasks("open", 50))
     return {"panel": "tasks", "rows": rows}
 
@@ -147,7 +147,7 @@ async def _panel_tasks(ctx: Context) -> dict:
 async def _panel_trackers(ctx: Context) -> dict:
     from utah.product import trackers
 
-    with ctx.governor.admission():
+    with ctx.governor.read_admission():
         rows = await ctx.pool.run(lambda: trackers.recent("journal", 30))
     return {"panel": "trackers", "rows": rows}
 
@@ -155,7 +155,7 @@ async def _panel_trackers(ctx: Context) -> dict:
 async def _panel_watchdog(ctx: Context) -> dict:
     from utah import watchdog
 
-    with ctx.governor.admission():
+    with ctx.governor.read_admission():
         detail = await ctx.pool.run(watchdog.check)
     return {"panel": "watchdog", **detail}
 
@@ -175,12 +175,24 @@ async def _panel_trading(ctx: Context) -> dict:
             ticks = lg.live_ticks()
         except Exception:  # noqa: BLE001 — surface may predate the wc_live table
             ticks = []
-        from collections import Counter
-        by_engine = Counter((r.get("engine") or "?") for r in rows)
-        return {"panel": "trading", **trading.lab_state(fires, by_engine=dict(by_engine)),
-                "rows": rows, "ticks": ticks}
+        # Real per-engine truth: GROUP BY totals + graded scorecard, not a count
+        # over the 30-row recents window (18 'fires' beside a 2,044 ledger total).
+        try:
+            totals = lg.fires_by_engine()
+            by_engine = {k: v["total"] for k, v in totals.items()}
+            score = {n: lg.engine_scorecard(n) for n in trading.implemented_engines()}
+        except Exception:  # noqa: BLE001 — minimal ledgers fall back to the window
+            from collections import Counter
+            totals, score = {}, {}
+            by_engine = dict(Counter((r.get("engine") or "?") for r in rows))
+        state = trading.lab_state(fires, by_engine=by_engine)
+        for e in state["engines"]:
+            e.update(score.get(e["name"], {}))
+            e["fires_24h"] = totals.get(e["name"], {}).get("last_24h", 0)
+        return {"panel": "trading", **state, "rows": rows, "recent_window": 30,
+                "ticks": ticks}
 
-    with ctx.governor.admission():
+    with ctx.governor.read_admission():
         return await ctx.pool.run(_lab)
 
 
@@ -212,14 +224,14 @@ async def _panel_marketer(ctx: Context) -> dict:
             "note": "email_spotlight LIVE (mail.send); IG/TikTok gated on creds",
         }
 
-    with ctx.governor.admission():
+    with ctx.governor.read_admission():
         return await ctx.pool.run(_mk)
 
 
 async def _panel_research(ctx: Context) -> dict:
     from utah import memory
 
-    with ctx.governor.admission():
+    with ctx.governor.read_admission():
         rows = await ctx.pool.run(lambda: memory.get_backend().list_memories(20, 0))
     return {
         "panel": "research",
@@ -299,7 +311,7 @@ async def _panel_browser(ctx: Context) -> dict:
 async def _panel_selfcode_cycles(ctx: Context) -> dict:
     from utah.product import selfcode_web
 
-    with ctx.governor.admission():
+    with ctx.governor.read_admission():
         rows = await ctx.pool.run(lambda: selfcode_web.recent_cycles(30))
         stats = await ctx.pool.run(selfcode_web.cycle_stats)
     return {
@@ -313,7 +325,7 @@ async def _panel_selfcode_cycles(ctx: Context) -> dict:
 async def _panel_selfcode_goals(ctx: Context) -> dict:
     from utah.product import selfcode_web
 
-    with ctx.governor.admission():
+    with ctx.governor.read_admission():
         goals = await ctx.pool.run(selfcode_web.goals)
     return {
         "panel": "selfcode_goals",

@@ -13,7 +13,7 @@ shed/admit behaviour around it.
 import pytest
 
 from utah.daemon import daemon as daemon_mod
-from utah.daemon.governor import Governor
+from utah.daemon.governor import READ_MAX_LOAD_PER_CORE, Governor
 from utah.daemon.rpc import OVERLOADED, RpcError
 
 
@@ -68,3 +68,36 @@ def test_admission_contextmanager_releases_inflight(monkeypatch):
     with gov.admission():
         assert gov._inflight == 1
     assert gov._inflight == 0
+
+
+def test_read_admission_survives_heavy_shed(monkeypatch):
+    # The deck blanked whenever EXTERNAL load crossed 1.5/core: cheap LIMIT-N
+    # panel reads were governed like brain turns, so 4,666 real leads rendered
+    # as "no producer wired". Reads must still be admitted while heavy work sheds.
+    gov = Governor(ncpu=18, max_load_per_core=1.5, max_inflight=64)
+    _fixed_load(monkeypatch, 54.0)  # 3.0/core — the observed storm
+    with pytest.raises(RpcError):
+        gov.admit()  # heavy work sheds...
+    with gov.read_admission():  # ...cheap reads do not
+        assert gov._inflight == 1
+    assert gov._inflight == 0
+
+
+def test_read_admission_sheds_in_true_storm(monkeypatch):
+    gov = Governor(ncpu=18, max_load_per_core=1.5, max_inflight=64)
+    _fixed_load(monkeypatch, 18 * (READ_MAX_LOAD_PER_CORE + 1.0))
+    with pytest.raises(RpcError) as ei:
+        with gov.read_admission():
+            pass
+    assert ei.value.code == OVERLOADED
+
+
+def test_read_admission_respects_inflight_cap(monkeypatch):
+    # A stuck Postgres must not pile reads onto the pool: the cap still applies.
+    gov = Governor(ncpu=18, max_load_per_core=1.5, max_inflight=2)
+    _fixed_load(monkeypatch, 1.0)
+    gov._inflight = 2
+    with pytest.raises(RpcError) as ei:
+        with gov.read_admission():
+            pass
+    assert ei.value.code == OVERLOADED

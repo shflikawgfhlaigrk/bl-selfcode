@@ -45,6 +45,14 @@
     <string>1</string>
     <key>PATH</key>
     <string>/Users/michaelbarber/.utah/venv/bin:/opt/homebrew/bin:/usr/local/bin:/Users/michaelbarber/.local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    <!-- Voice tuning — supervisor also injects these into the UtahVoice child; kept here
+         so a plist-only reload still picks up threshold changes. -->
+    <key>UTAH_WAKE_THRESHOLD</key>
+    <string>0.82</string>
+    <key>UTAH_VOICE_FORCE_CAPTURE_DELAY</key>
+    <string>0.5</string>
+    <key>UTAH_VOICE_FORCE_CAPTURE_S</key>
+    <string>5.5</string>
   </dict>
 
   <key>RunAtLoad</key>
@@ -54,7 +62,7 @@
   <key>ThrottleInterval</key>
   <integer>10</integer>
   <key>ProcessType</key>
-  <string>Background</string>
+  <string>Interactive</string>
 
   <key>StandardOutPath</key>
   <string>/Users/michaelbarber/.utah/logs/launchd-sup.out.log</string>

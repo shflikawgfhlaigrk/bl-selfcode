@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import logging
 import os
+import time
 from pathlib import Path
 
 import anyio
@@ -20,9 +21,23 @@ from utah import UtahError, failures
 from utah.daemon import frame, rpc
 from utah.daemon.dispatch import Dispatcher
 from utah.daemon.peercred import PeerAuthError, authorize
-from utah.daemon.rpc import INTERNAL_ERROR, UNAVAILABLE, RpcError
+from utah.daemon.rpc import INTERNAL_ERROR, OVERLOADED, UNAVAILABLE, RpcError
 
 log = logging.getLogger("utah.daemon.server")
+
+_shed_last: dict[str, float] = {}
+
+
+def _note_shed(method: str, exc: RpcError) -> None:
+    """Sheds were invisible: a full load storm produced 96k blank deck polls and
+    ZERO log lines, so the AUDIT panel said "clean" while every tab went dark.
+    Record once per minute per method — visible without becoming its own storm."""
+    now = time.monotonic()
+    if now - _shed_last.get(method, 0.0) < 60.0:
+        return
+    _shed_last[method] = now
+    log.warning("governor shed %s: %s", method, exc)
+    failures.record("daemon", "shed", f"{method}: {exc}")
 
 
 class ControlServer:
@@ -173,6 +188,8 @@ class ControlServer:
         try:
             result = await self._dispatcher.dispatch(req)
         except RpcError as exc:
+            if exc.code == OVERLOADED:
+                _note_shed(req.method, exc)
             return None if req.is_notification else rpc.err(req.id, exc.code, str(exc), exc.data)
         except UtahError as exc:  # a live dependency (memory/brain/embed) is down
             log.warning("handler dependency unavailable: %s", exc)

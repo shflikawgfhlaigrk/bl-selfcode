@@ -58,7 +58,7 @@ def test_run_fires_on_a_real_closed_bar_breakout(monkeypatch):
     fired: list = []
 
     class FakeLedger:
-        def record_fire(self, engine, direction, entry=None, synthetic=False, symbol=None):
+        def record_fire(self, engine, direction, entry=None, synthetic=False, symbol=None, *, stop=None, target=None, rationale=None):
             fired.append((direction, synthetic)); return 1
 
     # 7 ticks across 7 distinct 1s bars; the 7th (forming) is excluded -> 6 closed bars:
@@ -90,7 +90,7 @@ def test_run_persists_closed_bars_and_fire_symbol(monkeypatch):
         def record_bars(self, symbol, rows, bar_seconds=15):
             persisted.append((symbol, list(rows), bar_seconds)); return len(rows)
 
-        def record_fire(self, engine, direction, entry=None, synthetic=False, symbol=None):
+        def record_fire(self, engine, direction, entry=None, synthetic=False, symbol=None, *, stop=None, target=None, rationale=None):
             fired.append((direction, synthetic, symbol)); return 1
 
     lg, state = FakeLedger(), {}
@@ -215,8 +215,9 @@ class _FireLedger:
     def __init__(self):
         self.fired, self.persisted = [], []
 
-    def record_fire(self, engine, direction, entry=None, synthetic=False, symbol=None):
+    def record_fire(self, engine, direction, entry=None, synthetic=False, symbol=None, *, stop=None, target=None, rationale=None):
         self.fired.append((engine, direction, entry, synthetic, symbol))
+        self.provenance = {"stop": stop, "target": target, "rationale": rationale}
         return 1
 
     def record_bars(self, symbol, rows, bar_seconds=15):
@@ -462,3 +463,75 @@ def test_warm_boot_cold_store_is_a_cold_start():
 
     state, sig = wc_feed.warm_from_ledger(_DeadLedger())
     assert state == {} and sig == {}
+
+
+def _feed_through_breakout(bs):
+    """6 closed bars ending in a breakout (110 over the prior-5 high), bar 6 forming."""
+    for ep, px in [(0, 100.0), (1, 101.0), (2, 102.0), (3, 101.0), (4, 103.0),
+                   (5, 110.0), (6, 111.0)]:
+        bs.feed("CM.NQM6", ep, px)
+
+
+def _walk_signal_drop_then_new_edge(bs):
+    """Post-fire walk: signal persists (no edge), drops to None, then a fresh
+    breakout edge appears — the exact re-arm path that produced the live storm."""
+    bs.feed("CM.NQM6", 7, 105.0)
+    bs.flush()                      # bar6 closes 111: still long — no edge
+    bs.feed("CM.NQM6", 8, 104.0)
+    bs.flush()                      # bar7 closes 105: signal drops to None (re-arms)
+    bs.feed("CM.NQM6", 9, 130.0)
+    bs.feed("CM.NQM6", 10, 131.0)
+    return bs.flush()               # bar9 closes 130: fresh long edge
+
+
+def test_hook_fire_carries_provenance_and_cooldown_suppresses_rearm():
+    """The LIVE hook path (BarStream.flush) bypassed trading.run's suppression
+    contract and re-created the fire storm: 1,556 fires/24h, every row with NULL
+    stop/target/rationale. Hook fires must carry provenance, and a re-armed edge
+    inside the cooldown window must be suppressed."""
+
+    class _CooldownLedger(_FireLedger):
+        def fire_state(self, engine):  # per-engine, like the real ledger
+            mine = [f for f in self.fired if f[0] == engine]
+            return {"open": False, "last_fire_age_s": 1.0 if mine else None}
+
+    lg = _CooldownLedger()
+    bs = wc_feed.BarStream(lg, bar_seconds=1, lookback=5)
+    _feed_through_breakout(bs)
+    r = bs.flush()
+    first = len(lg.fired)
+    assert r["fires"] == first >= 1                   # each engine's FIRST fire admits
+    assert lg.provenance["stop"] is not None and lg.provenance["target"] is not None
+    assert "breakout" in lg.provenance["rationale"]
+
+    r2 = _walk_signal_drop_then_new_edge(bs)
+    assert r2["fires"] == 0 and len(lg.fired) == first  # cooldown held the line
+
+
+def test_hook_refires_once_cooldown_has_aged_out():
+    class _AgedLedger(_FireLedger):
+        def fire_state(self, engine):  # per-engine, like the real ledger
+            mine = [f for f in self.fired if f[0] == engine]
+            return {"open": False, "last_fire_age_s": 9999.0 if mine else None}
+
+    lg = _AgedLedger()
+    bs = wc_feed.BarStream(lg, bar_seconds=1, lookback=5)
+    _feed_through_breakout(bs)
+    bs.flush()
+    breakout_first = [f for f in lg.fired if f[0] == "breakout"]
+    assert len(breakout_first) == 1
+
+    r2 = _walk_signal_drop_then_new_edge(bs)
+    breakout_all = [f for f in lg.fired if f[0] == "breakout"]
+    assert r2["fires"] >= 1 and len(breakout_all) == 2  # flat + aged out → re-arm is real
+
+
+def test_hook_fire_suppressed_while_position_open():
+    class _OpenLedger(_FireLedger):
+        def fire_state(self, engine):
+            return {"open": True, "last_fire_age_s": 9999.0}
+
+    lg = _OpenLedger()
+    bs = wc_feed.BarStream(lg, bar_seconds=1, lookback=5)
+    _feed_through_breakout(bs)
+    assert bs.flush()["fires"] == 0 and lg.fired == []

@@ -493,7 +493,7 @@
 <div id="menu" class="menu" onclick="if(event.target===this)toggleMenu()">
   <div class="menu-box">
     <div class="menu-h">◆ LABS &amp; CONSOLES</div>
-    <button class="menu-item" onclick="openLab()"><b>⚡ Trading Engine Lab</b><span>8 engines · paper/sim · LIVE WealthCharts feed</span></button>
+    <button class="menu-item" onclick="openLab()"><b>⚡ Trading Engine Lab</b><span id="menu-lab-sub">engine roster · paper/sim · WealthCharts feed</span></button>
     <button class="menu-item" onclick="openTerminal()"><b>⌨️ Self-Code Console</b><span>genuine / commands · /code · /findings · /do · /ask · propose-only</span></button>
     <button class="menu-item" onclick="openConsole('selfcode','🤖 SELF-CODING BAY')"><b>🤖 Self-Coding Bay</b><span>propose-only · isolated branch · suite-gated · never main</span></button>
     <button class="menu-item" onclick="openConsole('browser','🌐 BROWSER')"><b>🌐 Browser</b><span>headless Chrome · JS-rendered fetch</span></button>
@@ -647,7 +647,11 @@ async function poll(){
     LAST={};return;
   }
   LAST={s,m,st};
-  setStateBadge($("spine-state"),"ONLINE","ok");
+  /* degraded = daemon shed a read under load and we're showing the last good
+     snapshot. Real data, busy machine — say so instead of pretending DORMANT. */
+  DEGRADED=(st&&st.degraded)||{}; if(m&&m.degraded)DEGRADED.memory=m.degraded;
+  const busy=Object.keys(DEGRADED).length>0;
+  setStateBadge($("spine-state"),busy?"ONLINE — UNDER LOAD":"ONLINE",busy?"warn":"ok");
   // header metrics
   $("h-load").textContent=s.governor.load_per_core;
   $("h-bus").textContent=s.bus.published;
@@ -655,16 +659,19 @@ async function poll(){
   $("t-bus").textContent=s.bus.published;
   if(m&&m.live!=null) $("h-mem").textContent=m.live;
   // ---- SYSTEM SPINE rows (real fields only; gated where no producer) ----
+  /* lab/feed gate truth comes from the live snapshot — the GATED markers were
+     hardcoded when the feed was still down and lied after it went live */
+  const labLive=((st&&st.lab)||{}).feed==="live";
   const g=s.governor, p=s.pool, b=s.bus;
   const sys=[
     {nm:"Local Core Daemon", drill:"daemon", big:fmtUp(s.uptime_s), sub:"unix · ~/.utah/run · v"+s.version, st:"UPTIME", led:"ok"},
     {nm:"Event Bus", drill:"bus", big:b.published, sub:b.subscribers+" subs · "+b.dropped+" dropped", st:"PUBLISHED", led:"ok"},
     {nm:"Worker Pool", drill:"pool", big:p.borrowed+"/"+p.limit, sub:p.available+" available", st:"BORROWED", led:p.borrowed>0?"warn":"ok"},
     {nm:"Governor", drill:"governor", big:g.load_per_core, sub:"load1 "+g.load1+" · "+g.ncpu+" cores", st:"LOAD/CORE", led:g.load_per_core>1.2?"warn":"ok"},
-    {nm:"Memory Forge", drill:"memory", big:(m&&m.live!=null)?m.live:"—", sub:m?("total "+m.total+" · "+m.entities+" ents"):"recall · consolidation", st:"LIVE FACTS", led:m?"ok":"off"},
+    {nm:"Memory Forge", drill:"memory", big:(m&&m.live!=null)?m.live:"—", sub:m?("total "+m.total+" · "+m.entities+" ents"+(m.degraded?" · under load":"")):"recall · consolidation", st:"LIVE FACTS", led:m?(m.degraded?"warn":"ok"):"off"},
     {nm:"Voice Loop", drill:"voice", big:(voice.status||"—").toUpperCase(), sub:voice.segments!=null?(voice.segments+" segs · wake-armed"):"vad · stt · brain · tts", st:"PIPELINE", led:vlive?"ok":(voice.status?"warn":"off")},
     {nm:"Risk Firewall", drill:"risk", big:"GATED", sub:"trade kernel · pre-exec", st:"NO PRODUCER", led:"off", gated:true},
-    {nm:"Sync & Ingest", drill:"sync", big:"GATED", sub:"wealthcharts rx · cdp", st:"NO PRODUCER", led:"off", gated:true},
+    {nm:"Sync & Ingest", drill:"sync", big:labLive?"LIVE":"GATED", sub:"wealthcharts rx · cdp", st:labLive?"TICKING":"NO PRODUCER", led:labLive?"ok":"off", gated:!labLive},
   ];
   $("spine").innerHTML=sys.map(r=>{
     const state=r.gated?'gated':r.led;
@@ -686,13 +693,16 @@ function renderFns(s,m,st,voice){
   const up=s!=null;
   const audit=(st&&st.audit&&st.audit.length)||0;
   const lead=(st&&st.ledger&&st.ledger.leads)||0;
+  const lab=(st&&st.lab)||{};
+  const mls=document.getElementById("menu-lab-sub");
+  if(mls&&lab.engines) mls.textContent=lab.engines+" engines · paper/sim · "+(lab.feed==="live"?"LIVE WealthCharts feed":"feed gated");
   const fns=[
     {nm:"Voice Loop", sub:"wake · barge-in · TTS", st:voice.status?voice.status.toUpperCase():"DOWN", cls:(voice.status==="listening")?"":(voice.status?"warn":"off"), click:"drill('voice')"},
     {nm:"Agent Mesh", sub:up?(s.pool.borrowed+" running · "+s.pool.available+" ready"):"worker pool", st:up?(s.pool.borrowed>0?"RUNNING":"READY"):"DOWN", cls:up?"":"off", click:"drill('agents')"},
-    {nm:"Memory Holograph", sub:m?(m.entities+" entities · graph"):"pgvector · hnsw", st:m?"INDEXED":"DOWN", cls:m?"":"off", click:"drill('memory')"},
+    {nm:"Memory Holograph", sub:m?(m.entities+" entities · graph"):"pgvector · hnsw", st:m?(m.degraded?"BUSY":"INDEXED"):"DOWN", cls:m?(m.degraded?"warn":""):"off", click:"drill('memory')"},
     {nm:"Black Box Ledger", sub:audit+" audit events", st:up?"RECORDING":"DOWN", cls:up?"":"off", click:"drill('audit')"},
     {nm:"Sensor Array", sub:up?(s.bus.subscribers+" subscribers"):"world-model bus", st:up?"RX":"DOWN", cls:up?"":"off", click:"drill('sensor')"},
-    {nm:"Trading Engine Lab", sub:"paper / sim · fires "+((st&&st.ledger&&st.ledger.fires)||0), st:"GATED", cls:"dim", gated:true, click:"openLab()"},
+    {nm:"Trading Engine Lab", sub:(lab.feed==="live"?(lab.live_engines+" of "+lab.engines+" live · "):"paper / sim · ")+"fires "+((st&&st.ledger&&st.ledger.fires)||0), st:lab.feed==="live"?"LIVE":"GATED", cls:lab.feed==="live"?"":"dim", gated:lab.feed!=="live", click:"openLab()"},
     {nm:"Risk / Threat Kernel", sub:"pre-exec gate", st:"GATED", cls:"dim", gated:true, click:"drill('risk')"},
     {nm:"Self-Coding Bay", sub:"bounded autonomy", st:"LOCKED · APPROVAL", cls:"dim", gated:true, click:"openConsole('selfcode','🤖 SELF-CODING BAY')"},
   ];
@@ -740,9 +750,15 @@ const TAB_INTRO={
   system:"Your Mac's CPU and Utah's worker team, right now.",
   voice:"Utah's hands-free ears and mouth — all on-device."};
 let _tabRows={};   // remembers the rows behind the open tab so a click can resolve the full record
+let DEGRADED={};   // domain → shed reason from /state; tells empty-vs-busy apart honestly
+const LEDGER_TABS=new Set(["leads","probate","outreach","engines"]);
 function intro(tab){ return TAB_INTRO[tab]?`<div class="xp" style="margin-bottom:10px"><div class="xp-what" style="font-size:12px">${esc(TAB_INTRO[tab])}</div></div>`:""; }
 function itemRows(arr,tab){
-  if(!arr||!arr.length) return emptyBox("DORMANT — 0 ROWS (NO PRODUCER WIRED)");
+  if(!arr||!arr.length){
+    if(DEGRADED.ledger&&LEDGER_TABS.has(tab))
+      return emptyBox("BUSY — machine under load; the data exists and shows the moment a read gets through");
+    return emptyBox("DORMANT — 0 ROWS (NO PRODUCER WIRED)");
+  }
   _tabRows[tab]=arr;
   return arr.map((r,i)=>{
     const nm=r.name||r.case_name||r.recipient||r.title||("#"+(r.id||""));
@@ -1353,12 +1369,19 @@ async function drill(key){
 /* "GATED" header metric — explain, in plain words, exactly what is dormant and why */
 function drillGated(){
   closeMenu();
+  /* membership is LIVE: a feature leaves this list the moment its producer lands
+     (the lab + probate sat here hardcoded long after both went live) */
+  const lab=(LAST.st&&LAST.st.lab)||{};
+  const ledger=(LAST.st&&LAST.st.ledger)||{};
   const items=[
     {nm:"Risk Firewall",why:"trade safety gate — needs the risk kernel + live trades",drill:"risk"},
-    {nm:"Sync & Ingest",why:"market-data intake — needs the WealthCharts feed connected",drill:"sync"},
-    {nm:"Trading Engine Lab",why:"strategies run on paper until the price feed is live",drill:"trading"},
-    {nm:"Probate",why:"inherited-property cases — needs the county filing feed",drill:"probate"},
   ];
+  if(lab.feed!=="live"){
+    items.push({nm:"Sync & Ingest",why:"market-data intake — needs the WealthCharts feed connected",drill:"sync"});
+    items.push({nm:"Trading Engine Lab",why:"strategies run on paper until the price feed is live",drill:"trading"});
+  }
+  if(!(ledger.probate>0))
+    items.push({nm:"Probate",why:"inherited-property cases — needs the county filing feed",drill:"probate"});
   let h=xpBlock("gated",true);
   h+=sec(items.length+" FEATURES WAITING ON A DATA SOURCE — tap any to learn more");
   h+=items.map(it=>`<div class="item drillable" onclick="${it.drill==='trading'?"openLab()":"drill('"+it.drill+"')"}"><div class="h"><span class="nm">${esc(it.nm)}<span class="hint">TAP</span></span><span class="meta"${markerAttrs("GATED")}>GATED</span></div><div class="body" style="-webkit-line-clamp:2">${esc(it.why)}</div></div>`).join("");
@@ -1390,8 +1413,13 @@ function tickerHtml(ticks){
   return '<div class="drill-sec">LIVE TICKS — straight off the WealthCharts hook</div>'+
     '<div class="kpis" id="lab-ticker">'+ticks.map(t=>{
       const fresh=t.age_ms<2500;
-      return `<div class="kpi" style="min-width:120px"><b style="color:${fresh?'#7dc97f':'#c97d7d'}">${esc(t.price)}</b>`+
-             `<span>${esc(t.symbol)} · ${t.age_ms<1000?esc(t.age_ms)+' ms':esc((t.age_ms/1000).toFixed(1))+' s'} ago</span></div>`;
+      /* 1h+ silence on a symbol = its session is closed (US ETFs overnight), not a
+         broken pipe — gray "closed", not alarm-red, while futures tick ms-fresh */
+      const closed=t.age_ms>3600000;
+      const col=fresh?'#7dc97f':(closed?'#8a8a8a':'#c97d7d');
+      const age=closed?'closed (no session)':(t.age_ms<1000?t.age_ms+' ms ago':(t.age_ms/1000).toFixed(1)+' s ago');
+      return `<div class="kpi" style="min-width:120px"><b style="color:${col}">${esc(t.price)}</b>`+
+             `<span>${esc(t.symbol)} · ${esc(age)}</span></div>`;
     }).join("")+'</div>';
 }
 async function refreshTicker(){
@@ -1418,11 +1446,14 @@ async function openLab(){
        `<div class="kpi"><b>${esc((d.engines||[]).length)}</b><span>ENGINES</span></div>`+
        `<div class="kpi"><b>${esc((d.feed||"—").toUpperCase())}</b><span>WC FEED</span></div>`+
        `<div class="kpi"><b>${esc(d.fires||0)}</b><span>FIRES (LEDGER)</span></div></div>`;
-    h+='<div class="drill-sec">ENGINE ROSTER</div>';
-    h+=(d.engines||[]).map(e=>
-       `<div class="drill-row drillable" onclick="openEngine('${esc(e.name)}')"><span class="led ${e.state==='live'?'ok':''}"></span> `+
-       `<b>${esc(e.name)}</b><span class="hint">TAP</span><span class="drill-meta">${esc(e.kind)} · ${esc((e.state||'').toUpperCase())}${e.fires?` · ${esc(e.fires)} FIRES`:''}</span></div>`).join("");
-    h+='<div class="drill-sec">'+((d.rows||[]).length)+' FIRES</div>';
+    h+='<div class="drill-sec">ENGINE ROSTER — is each one making money? (tap for the full record)</div>';
+    h+=(d.engines||[]).map(e=>{
+       const score=e.graded?` · ${esc(e.graded)} graded · ${esc(Math.round((e.win_rate||0)*100))}% win · ${e.net_pnl>=0?'+':''}${esc(e.net_pnl)} pnl`:'';
+       const day=e.fires_24h?` · ${esc(e.fires_24h)} today`:'';
+       return `<div class="drill-row drillable" onclick="openEngine('${esc(e.name)}')"><span class="led ${e.state==='live'?'ok':''}"></span> `+
+       `<b>${esc(e.name)}</b><span class="hint">TAP</span><span class="drill-meta">${esc(e.kind)} · ${esc((e.state||'').toUpperCase())}${e.fires?` · ${esc(e.fires)} FIRES`:''}${day}${score}</span></div>`;
+    }).join("");
+    h+='<div class="drill-sec">LAST '+((d.rows||[]).length)+' FIRES (of '+esc(d.fires||0)+' total in the ledger)</div>';
     h+= (d.rows&&d.rows.length)
         ? d.rows.map(r=>`<div class="drill-row"><b>${esc(r.engine)}</b><span class="drill-meta">${esc(r.direction)} · ${esc(r.outcome||'open')} · ${esc(r.ts||'')}</span></div>`).join("")
         : emptyBox("DORMANT — 0 FIRES (NO PRODUCER WIRED · WC FEED LANDS TOMORROW)");

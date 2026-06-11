@@ -88,9 +88,17 @@ async def api_status(request):
 
 
 async def api_memory(request):
+    """Memory gauges; under a shed serves the last good counts labeled ``degraded``
+    so the deck shows BUSY (real data, machine under load) instead of DOWN."""
     try:
-        return JSONResponse(await ctl.call("memory_stats", timeout=5.0))
+        mem = await ctl.call("memory_stats", timeout=5.0)
+        if mem:
+            _last_good["memory"] = mem
+        return JSONResponse(mem)
     except Exception as exc:
+        cached = _last_good.get("memory")
+        if cached:
+            return JSONResponse({**cached, "degraded": str(exc)})
         return JSONResponse({"error": str(exc)}, status_code=503)
 
 
@@ -409,12 +417,28 @@ def _audit_rows() -> list[str]:
     ]
 
 
+#: route → last good payload. When the daemon sheds under load, the deck serves
+#: this (labeled ``degraded``) instead of {} — stale-but-real beats blank panels
+#: that read as "no producer wired" while 4,666 real rows sit in Postgres.
+_last_good: dict[str, dict] = {}
+
+
 async def _ledger_snapshot() -> dict:
-    """Live product-ledger snapshot (revenue domains) — real-or-empty, never fabricated."""
+    """Live product-ledger snapshot (revenue domains) — real-or-empty, never fabricated.
+    On shed/error: last good snapshot with a ``degraded`` reason, never silent {}."""
     try:
-        return await ctl.call("ledger_snapshot", {"limit": 8}, timeout=5.0)
-    except Exception:
-        return {}
+        snap = await ctl.call("ledger_snapshot", {"limit": 8}, timeout=5.0)
+    except Exception as exc:
+        cached = _last_good.get("ledger")
+        log.warning(
+            "ledger_snapshot unavailable (%s)%s",
+            exc,
+            " — serving last good snapshot" if cached else "",
+        )
+        return {**cached, "degraded": str(exc)} if cached else {}
+    if snap:
+        _last_good["ledger"] = snap
+    return snap
 
 
 async def deck_data(request):
@@ -436,18 +460,30 @@ async def deck_data(request):
         mem = await ctl.call("memory_stats", timeout=5.0)
         if mem:
             state["memory"] = mem
-    except Exception:
-        pass
+            _last_good["memory"] = mem
+    except Exception as exc:
+        cached = _last_good.get("memory")
+        log.warning(
+            "memory_stats unavailable (%s)%s",
+            exc,
+            " — serving last good counts" if cached else "",
+        )
+        if cached:
+            state["memory"] = cached
+            state.setdefault("degraded", {})["memory"] = str(exc)
     # AUDIT LEDGER panel — live from the durable failure log (off-loop; empty on error)
     state["audit"] = await run_in_threadpool(_audit_rows)
     # Revenue panels — live from the Postgres product ledger (real rows or empty).
     snap = await _ledger_snapshot()
     if snap:
+        if snap.get("degraded"):
+            state.setdefault("degraded", {})["ledger"] = snap["degraded"]
         state["leads"] = snap.get("leads", [])
         state["probate"] = snap.get("probate", [])
         state["outreach"] = snap.get("outreach", [])
         state["engines"] = snap.get("fires", [])      # 'trading'/'engines' panel = fires
         state["ledger"] = snap.get("counts", {})
+        state["lab"] = snap.get("lab", {})            # WC feed gate truth for the lab card
 
     if route in ("status", "state"):
         return JSONResponse(state)

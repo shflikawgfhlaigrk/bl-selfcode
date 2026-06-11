@@ -96,7 +96,7 @@ def _memory_stats_blocking() -> dict:
 
 async def memory_stats(ctx: Context, params: object) -> dict:
     """Live memory gauges for the dashboard (real counts, off-loop)."""
-    with ctx.governor.admission():
+    with ctx.governor.read_admission():
         return await ctx.pool.run(_memory_stats_blocking)
 
 
@@ -112,7 +112,7 @@ async def memory_list(ctx: Context, params: object) -> dict:
     p = _as_dict(params)
     limit = max(1, min(int(p.get("limit", 50)), 200))
     offset = max(0, int(p.get("offset", 0)))
-    with ctx.governor.admission():
+    with ctx.governor.read_admission():
         return {"rows": await ctx.pool.run(_memory_list_blocking, limit, offset)}
 
 
@@ -127,29 +127,38 @@ async def memory_entities(ctx: Context, params: object) -> dict:
     """The actual entities behind the gauge — deck drill-down (off-loop)."""
     p = _as_dict(params)
     limit = max(1, min(int(p.get("limit", 100)), 500))
-    with ctx.governor.admission():
+    with ctx.governor.read_admission():
         return {"entities": await ctx.pool.run(_entities_blocking, limit)}
 
 
 def _ledger_snapshot_blocking(limit: int) -> dict:
     """One read of the product ledger: counts + recent rows per revenue domain.
     The Postgres schema Ace's producers transition into (leads/probate/outreach/fires)."""
+    from utah.product import trading
     from utah.product.ledger import get_ledger
 
     lg = get_ledger()
+    # Lab gate truth rides the snapshot so the deck's main surface stops
+    # hardcoding GATED after the feed went live (the drill knew; the card lied).
+    live = trading.feed_available()
     return {
         "counts": lg.counts(),
         "leads": lg.recent("leads", limit),
         "probate": lg.recent("probate", limit),
         "outreach": lg.recent("outreach", limit),
         "fires": lg.recent("fires", limit),
+        "lab": {
+            "feed": "live" if live else "gated",
+            "live_engines": len(trading.implemented_engines()) if live else 0,
+            "engines": len(trading.ENGINES),
+        },
     }
 
 
 async def ledger_snapshot(ctx: Context, params: object) -> dict:
     """Live product-ledger snapshot for the deck's revenue panels (off-loop, governed)."""
     limit = max(1, min(int(_as_dict(params).get("limit", 8)), 100))
-    with ctx.governor.admission():
+    with ctx.governor.read_admission():
         return await ctx.pool.run(_ledger_snapshot_blocking, limit)
 
 

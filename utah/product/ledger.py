@@ -565,6 +565,18 @@ class Ledger:
             )
             return (cur.rowcount or 0) > 0
 
+    def fires_by_engine(self) -> dict:
+        """Real per-engine fire totals (all-time + last 24h). The lab roster was
+        counting a 30-row window and labeling it 'fires' — 18 shown beside a
+        ledger total of 2,044 read as a contradiction, not a window."""
+        with self._conn() as c:
+            rows = c.execute(
+                "SELECT engine, count(*), "
+                "count(*) FILTER (WHERE ts > now() - interval '24 hours') "
+                "FROM fires WHERE NOT synthetic GROUP BY engine"
+            ).fetchall()
+        return {r[0]: {"total": int(r[1]), "last_24h": int(r[2])} for r in rows}
+
     def engine_scorecard(self, engine) -> dict:
         """One engine's REAL graded record — the numbers Ace grounds its read in."""
         with self._conn() as c:

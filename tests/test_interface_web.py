@@ -76,3 +76,71 @@ def test_api_alias_serves_same_feed_and_unknown_routes_404(monkeypatch):
     missing = client.get("/definitely-not-a-route")
     assert missing.status_code == 404
     assert "unknown route" in missing.json()["error"]
+
+
+def test_shed_serves_last_good_snapshot_labeled_degraded(monkeypatch):
+    """A load-governor shed must NOT blank the deck: 4,666 real leads rendered as
+    'no producer wired' for a whole load storm. The bridge keeps the last good
+    snapshot and serves it labeled ``degraded`` so the deck can say BUSY."""
+    import asyncio
+
+    from utah.daemon.rpc import OVERLOADED, RpcError
+
+    calls = {"n": 0}
+
+    class FlakyCtl:
+        async def call(self, method, *a, **k):
+            calls["n"] += 1
+            if calls["n"] <= 1:
+                return {"counts": {"leads": 4666}, "leads": [{"name": "Atlas HVAC"}],
+                        "probate": [], "outreach": [], "fires": []}
+            raise RpcError(OVERLOADED, "shed: load 54.0 over 1.5×18 cores")
+
+    monkeypatch.setattr(web, "ctl", FlakyCtl())
+    monkeypatch.setattr(web, "_last_good", {})
+
+    good = asyncio.run(web._ledger_snapshot())
+    assert good["leads"][0]["name"] == "Atlas HVAC" and "degraded" not in good
+
+    shed = asyncio.run(web._ledger_snapshot())
+    assert shed["leads"][0]["name"] == "Atlas HVAC"   # stale-but-real, not {}
+    assert "shed" in shed["degraded"]
+
+
+def test_shed_with_no_cache_is_still_honest_empty(monkeypatch):
+    import asyncio
+
+    from utah.daemon.rpc import OVERLOADED, RpcError
+
+    class ShedCtl:
+        async def call(self, *a, **k):
+            raise RpcError(OVERLOADED, "shed: load 54.0 over 1.5×18 cores")
+
+    monkeypatch.setattr(web, "ctl", ShedCtl())
+    monkeypatch.setattr(web, "_last_good", {})
+    assert asyncio.run(web._ledger_snapshot()) == {}   # never fabricated
+
+
+def test_memory_endpoint_degrades_to_last_good_counts(monkeypatch):
+    from starlette.testclient import TestClient
+
+    class FlakyCtl:
+        def __init__(self):
+            self.n = 0
+
+        async def call(self, method, *a, **k):
+            self.n += 1
+            if self.n <= 1:
+                return {"total": 9755, "live": 9100, "entities": 4200}
+            raise RuntimeError("shed: load 54.0 over 1.5×18 cores")
+
+    monkeypatch.setattr(web, "ctl", FlakyCtl())
+    monkeypatch.setattr(web, "_last_good", {})
+    client = TestClient(web.build_app())
+
+    first = client.get("/memory")
+    assert first.status_code == 200 and first.json()["total"] == 9755
+
+    second = client.get("/memory")                     # shed → cached + degraded, not 503
+    assert second.status_code == 200
+    assert second.json()["total"] == 9755 and "shed" in second.json()["degraded"]

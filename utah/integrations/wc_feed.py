@@ -482,8 +482,24 @@ class BarStream:
                 prev = self._sig.get((eng, symbol))
                 self._sig[(eng, symbol)] = direction
                 if direction and direction != prev:
+                    # Same suppression contract as trading.run — one open position
+                    # per engine + flat-time cooldown. The live hook bypassed it
+                    # (edge-firing re-armed on every momentary signal drop) and
+                    # re-created the fire storm: 1,556 fires/24h, every row
+                    # provenance-less. Defensive getattr keeps minimal test
+                    # ledgers working (same pattern as trading.run).
+                    state = getattr(self.ledger, "fire_state",
+                                    lambda e: {"open": False, "last_fire_age_s": None})(eng)
+                    age = state.get("last_fire_age_s")
+                    if state.get("open") or (age is not None and age < trading.FIRE_COOLDOWN_S):
+                        log.info("wc_feed suppressed: %s %s %s (%s)", eng, symbol, direction,
+                                 "in_position" if state.get("open") else "cooldown")
+                        continue
+                    ctx = trading._fire_context(closes, sig, lookback=self.lookback)
                     self.ledger.record_fire(eng, direction, entry=closes[-1],
-                                            synthetic=False, symbol=symbol)
+                                            synthetic=False, symbol=symbol,
+                                            stop=ctx.get("stop"), target=ctx.get("target"),
+                                            rationale=ctx.get("rationale"))
                     fires += 1
                     log.info("wc_feed FIRE: %s %s %s @ %.2f (%d bars)", eng, symbol,
                              direction, closes[-1], len(closes))

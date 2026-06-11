@@ -7,6 +7,12 @@ load and a hard in-flight ceiling and sheds the call with ``OVERLOADED`` (a
 typed JSON-RPC error the caller can back off on) rather than piling onto an
 overloaded box. Cheap control calls (``ping``/``status``) bypass the gate, so
 the daemon stays answerable even while shedding heavy work.
+
+Reads are a third tier: deck/panel row reads are ~30ms LIMIT-N selects, but
+governing them at the heavy threshold blanked the whole deck whenever EXTERNAL
+load (other apps) crossed 1.5×cores — real data rendered as "no producer".
+``read_admission`` keeps the in-flight cap (a stuck Postgres still can't pile
+up pool threads) and sheds only in a genuine storm.
 """
 from __future__ import annotations
 
@@ -14,6 +20,11 @@ import contextlib
 import os
 
 from utah.daemon.rpc import OVERLOADED, RpcError
+
+#: Cheap-read shed threshold — on 18 cores this means load1 > 216. Heavy work
+#: sheds at 1.5×cores long before reads do; by the time reads shed, the box is
+#: in a storm where even a 30ms select can't be trusted to return promptly.
+READ_MAX_LOAD_PER_CORE = 12.0
 
 
 class Governor:
@@ -43,7 +54,7 @@ class Governor:
             "ncpu": self._ncpu,
         }
 
-    def admit(self) -> None:
+    def admit(self, *, max_load_per_core: float | None = None) -> None:
         """Admit one heavy call or raise :class:`RpcError` (``OVERLOADED``)."""
         if self._inflight >= self._max_inflight:
             raise RpcError(
@@ -51,11 +62,12 @@ class Governor:
                 f"shed: {self._inflight} in-flight >= cap {self._max_inflight}",
                 {"inflight": self._inflight},
             )
+        limit = self._max_load_per_core if max_load_per_core is None else max_load_per_core
         load1 = os.getloadavg()[0]
-        if load1 / self._ncpu > self._max_load_per_core:
+        if load1 / self._ncpu > limit:
             raise RpcError(
                 OVERLOADED,
-                f"shed: load {load1:.1f} over {self._max_load_per_core}×{self._ncpu} cores",
+                f"shed: load {load1:.1f} over {limit}×{self._ncpu} cores",
                 {"load1": round(load1, 2)},
             )
 
@@ -63,6 +75,16 @@ class Governor:
     def admission(self):
         """Admit + count one heavy call for its duration (always released)."""
         self.admit()
+        self._inflight += 1
+        try:
+            yield
+        finally:
+            self._inflight -= 1
+
+    @contextlib.contextmanager
+    def read_admission(self):
+        """Admit + count one cheap read; sheds only in a true load storm."""
+        self.admit(max_load_per_core=READ_MAX_LOAD_PER_CORE)
         self._inflight += 1
         try:
             yield
