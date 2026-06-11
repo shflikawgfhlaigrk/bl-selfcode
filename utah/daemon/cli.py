@@ -41,7 +41,7 @@ def _daemon_up(timeout: float = 1.0) -> bool:
     try:
         ctl.call_sync("ping", timeout=timeout)
         return True
-    except Exception:
+    except Exception:  # noqa: BLE001 — unreachable IS the signal a probe exists to report
         return False
 
 
@@ -79,8 +79,11 @@ def cmd_stop(_args) -> int:
     if _daemon_up():
         try:
             ctl.call_sync("shutdown", timeout=3.0)
-        except Exception:
-            pass
+        except Exception:  # noqa: BLE001 — daemon may die mid-call (that IS a stop);
+            pass          # verify below instead of asserting success blindly
+        if _daemon_up():
+            print("utah: shutdown failed — daemon still running")
+            return 1
         print("utah: daemon stopped")
         return 0
     print("utah: not running")

@@ -101,7 +101,10 @@ def sync_business_from_memory() -> str | None:
         from utah import memory
 
         memory.init()
-    except Exception:
+    except Exception as exc:  # noqa: BLE001
+        # A broken memory backend silently disabled CAN-SPAM address sync, which
+        # downstream gates ALL outreach email — worth a trace, not a bare None.
+        log.warning("memory unavailable for business-address sync: %s", exc)
         return None
     pat = re.compile(
         r"(\d+\s+[A-Za-z0-9\s.'-]+(?:Rd|Road|St|Street|Ave|Avenue|Dr|Drive|Blvd|Lane|Ln|Way)\.?)",

@@ -90,8 +90,8 @@ async def tell_stream(text: str, *, sock_path=CONTROL_SOCK, timeout: float = 180
             while True:
                 try:
                     _kind, payload = await frame.read_frame(stream)
-                except Exception:
-                    return
+                except Exception:  # noqa: BLE001 — stream closed (daemon restart / EOF):
+                    return        # the subscription simply ends; callers resubscribe
                 msg = _decode(payload)
                 if isinstance(msg, dict) and msg.get("method") == "tell_event":
                     ev = msg.get("params") or {}
