@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  com.utah.canary — continuous self-proof (every 10 minutes).
+
+  Runs utah.canary.run_scheduled(): real end-to-end probes of every live
+  surface (deck data plane, tick freshness in-session, chrome-wc login,
+  Sovereign Command Center, voice loop, mail creds). Failures land in the
+  failure ledger (deck AUDIT panel) and page once via the alert dedup.
+  Born 2026-06-11: everything fixed that night had been "proven live" once
+  and silently rotted — the canary makes proof a standing condition.
+
+  Install:
+    cp ops/launchd/com.utah.canary.plist ~/Library/LaunchAgents/
+    launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.utah.canary.plist
+  Force-run now:  launchctl kickstart gui/$(id -u)/com.utah.canary
+  Stop:           launchctl bootout  gui/$(id -u)/com.utah.canary
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.utah.canary</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/michaelbarber/.utah/venv/bin/python</string>
+    <string>-c</string>
+    <string>import logging; logging.basicConfig(level=logging.INFO); from utah.canary import run_scheduled; print(run_scheduled())</string>
+  </array>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PYTHONPATH</key>
+    <string>/Users/michaelbarber/Desktop/ProjectUtah</string>
+    <key>LANG</key>
+    <string>en_US.UTF-8</string>
+    <key>LC_ALL</key>
+    <string>en_US.UTF-8</string>
+  </dict>
+
+  <key>StartInterval</key>
+  <integer>600</integer>
+  <key>RunAtLoad</key>
+  <true/>
+
+  <key>StandardOutPath</key>
+  <string>/Users/michaelbarber/.utah/logs/canary.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/michaelbarber/.utah/logs/canary.err</string>
+</dict>
+</plist>
