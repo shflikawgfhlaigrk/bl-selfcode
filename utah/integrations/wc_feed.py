@@ -292,7 +292,12 @@ def _wc_chrome_pids() -> list[int]:
     import subprocess
 
     try:
-        out = subprocess.run(["pgrep", "-f", f"--user-data-dir={WC_PROFILE}"],
+        # "--" is load-bearing: the pattern starts with "-", and macOS pgrep
+        # parses it as an illegal OPTION (exit 2, empty stdout) → this returned
+        # [] while a healthy chrome-wc owned the profile → every converge cycle
+        # blind-spawned a ProcessSingleton-doomed chrome (85 in a row, 2026-06-11)
+        # and the tab-reopen/restart healing paths were dead code.
+        out = subprocess.run(["pgrep", "-f", "--", f"--user-data-dir={WC_PROFILE}"],
                              capture_output=True, text=True, timeout=10).stdout
     except Exception:  # noqa: BLE001 — can't enumerate = treat as none running
         return []

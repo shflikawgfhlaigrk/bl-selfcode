@@ -535,3 +535,28 @@ def test_hook_fire_suppressed_while_position_open():
     bs = wc_feed.BarStream(lg, bar_seconds=1, lookback=5)
     _feed_through_breakout(bs)
     assert bs.flush()["fires"] == 0 and lg.fired == []
+
+
+def test_wc_chrome_pids_pgrep_pattern_is_option_safe(monkeypatch):
+    """The pgrep pattern starts with '-': without the '--' end-of-options
+    separator macOS pgrep dies with 'illegal option' (exit 2, EMPTY stdout), so
+    _wc_chrome_pids reported 'no chrome' while a healthy chrome-wc owned the
+    profile — every converge cycle blind-spawned a ProcessSingleton-doomed
+    chrome (85 in a row, 2026-06-11) and the heal paths never ran."""
+    import subprocess as sp
+    from types import SimpleNamespace
+
+    seen = {}
+    real_run = sp.run
+
+    def fake_run(argv, **kw):
+        if argv and argv[0] == "pgrep":
+            seen["argv"] = argv
+            return SimpleNamespace(stdout="", returncode=1)
+        return real_run(argv, **kw)
+
+    monkeypatch.setattr(sp, "run", fake_run)
+    wc_feed._wc_chrome_pids()
+    argv = seen["argv"]
+    assert argv[argv.index("-f") + 1] == "--", \
+        "pgrep pattern beginning with '-' must follow the '--' separator"
