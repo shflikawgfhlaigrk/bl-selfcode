@@ -383,3 +383,82 @@ def test_barstream_tick_surface_failure_never_stalls_the_hook():
     bs = wc_feed.BarStream(_BadTickLedger(), bar_seconds=10, lookback=5)
     bs.feed("CM.NQM6", 100, 1.0)                      # no raise
     assert bs.buf["CM.NQM6"] == [(100, 1.0)]
+
+
+# ── fire-state persistence (Michael 2026-06-10: every restart re-recorded the
+# active roster as ~30 "new" fires; ledger IS the durable state) ──────────────
+
+class _WarmLedger(_FireLedger):
+    """Fake with the warm-boot read surface: 25 rising closes (a live breakout-long
+    at the end) stored under the record_bars ts convention ts=(k+1)*bar_seconds."""
+    BS = 15
+
+    def __init__(self, closes=None):
+        super().__init__()
+        self._closes = closes if closes is not None else [100.0 + i for i in range(25)]
+
+    def bar_symbols(self, hours=24):
+        return ["US.SPY"]
+
+    def recent_closes(self, symbol, limit):
+        return [((k + 1) * self.BS, c) for k, c in enumerate(self._closes)][-limit:]
+
+
+def test_warm_boot_rebuilds_state_and_already_on_signals_do_not_refire():
+    """Restart with a live breakout-long in the bars table: lookback is warm
+    immediately, and the FIRST flush records ZERO fires (the signal was already
+    on — not new). The old behavior re-fired the whole roster every restart."""
+    lg = _WarmLedger()
+    state, sig = wc_feed.warm_from_ledger(lg, bar_seconds=_WarmLedger.BS, lookback=20)
+    assert len(state["US.SPY"]["closes"]) == 25                  # lookback warm
+    assert state["US.SPY"]["last_key"] == 24                     # ts convention honored
+    assert sig[("breakout", "US.SPY")] == "long"                 # live signal restored
+    bs = wc_feed.BarStream(lg, bar_seconds=_WarmLedger.BS, lookback=20,
+                           state=state, sig=sig)
+    # next bar extends the same breakout (new high) — still the SAME episode
+    bs.feed("US.SPY", 25 * _WarmLedger.BS, 130.0)
+    bs.feed("US.SPY", 26 * _WarmLedger.BS, 131.0)                # closes bar 25
+    bs.flush()
+    assert [f for f in lg.fired if f[0] == "breakout"] == []     # no phantom re-fire
+
+
+def test_warm_boot_still_fires_on_a_genuine_flip():
+    """Persistence must not eat REAL signals: a direction flip after warm boot fires."""
+    lg = _WarmLedger()
+    state, sig = wc_feed.warm_from_ledger(lg, bar_seconds=_WarmLedger.BS, lookback=20)
+    bs = wc_feed.BarStream(lg, bar_seconds=_WarmLedger.BS, lookback=20,
+                           state=state, sig=sig)
+    # crash through the bottom of the range -> breakout flips long->short
+    bs.feed("US.SPY", 25 * _WarmLedger.BS, 80.0)
+    bs.feed("US.SPY", 26 * _WarmLedger.BS, 79.0)
+    bs.flush()
+    assert ("breakout", "short", 80.0, False, "US.SPY") in lg.fired
+
+
+def test_sig_is_caller_owned_across_rehooks():
+    """A hook drop builds a NEW BarStream — sharing the same sig dict must carry the
+    edge state over (a fresh dict made every signal look newborn = phantom fires)."""
+    lg = _WarmLedger()
+    state, sig = wc_feed.warm_from_ledger(lg, bar_seconds=_WarmLedger.BS, lookback=20)
+    bs1 = wc_feed.BarStream(lg, bar_seconds=_WarmLedger.BS, lookback=20,
+                            state=state, sig=sig)
+    bs1.feed("US.SPY", 25 * _WarmLedger.BS, 130.0)
+    bs1.feed("US.SPY", 26 * _WarmLedger.BS, 131.0)
+    bs1.flush()
+    # hook drops; the loop re-attaches with the SAME caller-owned dicts
+    bs2 = wc_feed.BarStream(lg, bar_seconds=_WarmLedger.BS, lookback=20,
+                            state=state, sig=sig)
+    bs2.feed("US.SPY", 27 * _WarmLedger.BS, 132.0)               # breakout continues
+    bs2.feed("US.SPY", 28 * _WarmLedger.BS, 133.0)
+    bs2.flush()
+    assert [f for f in lg.fired if f[0] == "breakout"] == []     # same episode, no re-fire
+
+
+def test_warm_boot_cold_store_is_a_cold_start():
+    """Ledger down at boot: warm_from_ledger returns empty state/sig, never raises."""
+    class _DeadLedger(_FireLedger):
+        def bar_symbols(self, hours=24):
+            raise RuntimeError("pg down")
+
+    state, sig = wc_feed.warm_from_ledger(_DeadLedger())
+    assert state == {} and sig == {}

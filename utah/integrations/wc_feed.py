@@ -415,7 +415,7 @@ class BarStream:
 
     def __init__(self, ledger, *, bar_seconds: int = BAR_SECONDS, lookback: int = 20,
                  engine: str = "breakout", state: dict | None = None,
-                 max_bars: int = MAX_BARS):
+                 max_bars: int = MAX_BARS, sig: dict | None = None):
         self.ledger = ledger
         self.bar_seconds = bar_seconds
         self.lookback = lookback
@@ -426,8 +426,11 @@ class BarStream:
         #: EDGE-firing state: last signal direction per (engine, symbol). An engine
         #: fires when its signal APPEARS or FLIPS — never again on every extended bar
         #: (level-firing produced 271 fires/hr on 2026-06-10 and paged the phone for
-        #: each one). A no-signal bar re-arms the edge.
-        self._sig: dict[tuple[str, str], str | None] = {}
+        #: each one). A no-signal bar re-arms the edge. CALLER-OWNED like ``state``
+        #: (pass the same dict across re-hooks/restarts): a fresh empty dict made
+        #: every signal look newborn — each hook drop or restart re-recorded the
+        #: whole active roster as "new" fires (~30 phantoms per restart, 2026-06-10).
+        self._sig: dict[tuple[str, str], str | None] = sig if sig is not None else {}
         #: forming-bucket key per symbol — lets feed() report the INSTANT a bar closes
         #: so the consumer flushes on bar-close, not on a wall timer ("none are coming
         #: in millisecond time", 2026-06-10).
@@ -513,11 +516,52 @@ class SilentWatch:
         return False
 
 
+def warm_from_ledger(ledger, *, bar_seconds: int = BAR_SECONDS, lookback: int = 20,
+                     max_bars: int = MAX_BARS) -> tuple[dict, dict]:
+    """Rebuild the feed's working state from the DURABLE bars table after a restart —
+    no state file, the ledger IS the state. Returns ``(state, sig)`` for BarStream:
+
+    - ``state``: each symbol's rolling closes + last_key, so the lookback is warm on
+      the first bar instead of re-accumulating for 5+ minutes, and already-persisted
+      bars are never re-judged.
+    - ``sig``: each engine's CURRENT signal direction recomputed from those closes,
+      so a signal that was already on before the restart does NOT re-fire (the
+      2026-06-10 ~30-phantom-fires-per-restart storm); a genuine flip still does.
+
+    Never raises — a cold store just means a cold start (state={}, sig={})."""
+    from utah.product import trading
+
+    state: dict = {}
+    sig: dict = {}
+    try:
+        symbols = ledger.bar_symbols()
+    except Exception:  # noqa: BLE001 — store down at boot = cold start, loop retries
+        return state, sig
+    for symbol in symbols:
+        try:
+            rows = ledger.recent_closes(symbol, max_bars)
+        except Exception:  # noqa: BLE001
+            continue
+        if not rows:
+            continue
+        closes = [c for _, c in rows]
+        # storage convention (record_bars): ts = (k+1)*bar_seconds → k = ts//bs - 1
+        last_key = int(rows[-1][0]) // bar_seconds - 1
+        state[symbol] = {"last_key": last_key, "closes": closes}
+        for eng in trading.implemented_engines():
+            s = trading.evaluate(closes, lookback=lookback, engine=eng)
+            sig[(eng, symbol)] = (s or {}).get("direction")
+    return state, sig
+
+
 def stream(ledger, *, interval: float = 30.0, bar_seconds: int = BAR_SECONDS,
-           lookback: int = 20, engine: str = "breakout", state: dict | None = None) -> None:
+           lookback: int = 20, engine: str = "breakout", state: dict | None = None,
+           sig: dict | None = None) -> None:
     """ONE persistent hook: attach to the live WC websocket ONCE and consume ticks until
     the connection itself drops — flushing closed bars every *interval* seconds without
-    ever detaching. Returns only when the hook is lost (caller re-establishes)."""
+    ever detaching. Returns only when the hook is lost (caller re-establishes).
+    ``state`` AND ``sig`` are caller-owned so neither bar history nor edge-firing
+    state resets across re-hooks (a reset sig re-fired the whole roster)."""
     import asyncio
     import time as _time
 
@@ -525,7 +569,7 @@ def stream(ledger, *, interval: float = 30.0, bar_seconds: int = BAR_SECONDS,
     if not page:
         return
     bs = BarStream(ledger, bar_seconds=bar_seconds, lookback=lookback,
-                   engine=engine, state=state)
+                   engine=engine, state=state, sig=sig)
     watch = SilentWatch()
 
     async def _run():
@@ -627,7 +671,13 @@ def main() -> int:
         ledger.init_schema()   # bars table + fires.symbol exist before the first persist
     except Exception as exc:  # noqa: BLE001 — store down at boot: record, loop will retry
         failures.record("trading", "bars_schema", str(exc))
-    state: dict = {}
+    # Rebuild bar history + edge-firing state from the DURABLE bars table so a restart
+    # neither re-fires the active roster (~30 phantoms/restart on 2026-06-10) nor
+    # spends 5+ minutes re-warming the lookback from zero.
+    state, sig = warm_from_ledger(bar_seconds=BAR_SECONDS, lookback=lookback,
+                                  ledger=ledger)
+    log.info("wcfeed warm boot: %d symbols, %d signal edges restored from the ledger",
+             len(state), sum(1 for v in sig.values() if v))
     while True:
         if not ensure_chrome_wc():
             failures.record("trading", "feed_gated",
@@ -635,15 +685,16 @@ def main() -> int:
             _time.sleep(interval)
             continue
         try:
-            # ONE persistent hook — returns only if the connection drops; bar state
-            # survives re-hooks so the lookback never restarts from zero.
-            stream(ledger, interval=interval, lookback=lookback, state=state)
+            # ONE persistent hook — returns only if the connection drops; bar AND
+            # edge state survive re-hooks so the lookback never restarts from zero
+            # and an unchanged signal never re-fires.
+            stream(ledger, interval=interval, lookback=lookback, state=state, sig=sig)
         except Exception as exc:  # noqa: BLE001 — never let one drop kill the loop
             log.warning("wcfeed stream failed: %s", exc)
         _time.sleep(2.0)
 
 
-__all__ = ["parse_candle", "normalize_epoch", "closed_bars", "ohlc_bars", "ingest", "feed_available", "BarStream", "stream", "SilentWatch",
+__all__ = ["parse_candle", "normalize_epoch", "closed_bars", "ohlc_bars", "ingest", "feed_available", "BarStream", "stream", "SilentWatch", "warm_from_ledger",
            "collect_ticks", "run", "ensure_chrome_wc", "main", "CDP_PORT", "WC_HOST",
            "BAR_SECONDS"]
 

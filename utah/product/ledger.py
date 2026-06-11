@@ -328,6 +328,17 @@ class Ledger:
         return [{"name": r[0], "kind": r[1], "region": r[2], "contact": r[3],
                  "source": r[4]} for r in rows]
 
+    def probate_all(self, limit: int = 5000) -> list[dict]:
+        """Every probate row, newest first — feeds the sellable lead-list export
+        (:mod:`utah.product.probate_export`). Raw shapes; the export labels values
+        honestly (assessed, never comps)."""
+        with self._conn() as c:
+            rows = c.execute(
+                "SELECT case_name, county, filed, heir_contact, arv, status "
+                "FROM probate ORDER BY ts DESC LIMIT %s", (limit,)).fetchall()
+        return [{"case_name": r[0], "county": r[1], "filed": r[2],
+                 "heir_contact": r[3], "arv": r[4], "status": r[5]} for r in rows]
+
     def probate_uncontacted_with_mail(self, limit: int = 20) -> list[dict]:
         """Probate rows whose enrichment resolved an owner MAILING address, not yet sent a
         direct-mail letter (suppressed by case_name in the probate campaign). The probate
@@ -465,6 +476,30 @@ class Ledger:
             ).fetchall()
         return [{"id": r[0], "engine": r[1], "direction": r[2], "entry": r[3],
                  "ts": r[4], "symbol": r[5]} for r in rows]
+
+    def bar_symbols(self, hours: int = 24) -> list[str]:
+        """Symbols with bars recorded in the last *hours* — the feed's warm-up roster
+        after a restart. Keyed on ts_recorded (arrival), immune to stamp skew."""
+        with self._conn() as c:
+            rows = c.execute(
+                "SELECT DISTINCT symbol FROM bars "
+                "WHERE ts_recorded > now() - (%s * interval '1 hour') ORDER BY symbol",
+                (int(hours),),
+            ).fetchall()
+        return [r[0] for r in rows]
+
+    def recent_closes(self, symbol, limit) -> list[tuple[float, float]]:
+        """The last *limit* bars as ``[(close_epoch_s, close), ...]`` chronological, in
+        ARRIVAL order (ts_recorded, id) — the true sequence even across the 2026-06-10
+        legacy rows whose ts carries the +1h exchange-wallclock skew. The feed's
+        restart warm-up reader: state is rebuilt from here, never from a state file."""
+        with self._conn() as c:
+            rows = c.execute(
+                "SELECT extract(epoch from ts)::float8, c::float8 FROM bars "
+                "WHERE symbol=%s ORDER BY ts_recorded DESC, id DESC LIMIT %s",
+                (symbol, int(limit)),
+            ).fetchall()
+        return [(r[0], r[1]) for r in reversed(rows)]
 
     def bars_before(self, symbol, ts, limit) -> list[float]:
         """The last *limit* bar closes at/before *ts*, chronological (the grader's
