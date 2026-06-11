@@ -637,7 +637,15 @@ async function poll(){
   const voice = (st&&st.voice)||{};
   const vlive = voice.status==="listening"||voice.listening===true;
   led("led-voice", voice.status==="down"||voice.status==null?"off":(vlive?"ok":"warn"));
-  $("mic").className="micbtn"+(vlive?" live":"");
+  /* while Ace is SPEAKING the mic chip becomes the kill switch — the one moment
+     Michael most needs a stop is mid-speech, when the mic itself is muted */
+  const speaking = voice.status==="speaking" || voice.speaking===true;
+  const mic=$("mic");
+  mic.className="micbtn"+(vlive?" live":"");
+  mic.textContent = speaking ? "◼" : "🎙";
+  mic.title = speaking ? "STOP — cut the voice now" : "voice loop";
+  mic.style.cursor = speaking ? "pointer" : "default";
+  mic.onclick = speaking ? ()=>fetch("/api/speak/stop",{method:"POST"}).catch(()=>{}) : null;
 
   if(!up){
     $("spine").innerHTML=emptyBox("CORE OFFLINE");
@@ -1119,7 +1127,11 @@ function ask(preset){
     t.timing.innerHTML=`<b>${ttf}s</b> first token · <b>${tot}s</b> total`+(state==="stopped"?" · ⏹ stopped":(state==="error"?" · ⚠ error":""));
     streamScroll();
   }
-  t.stop.onclick=()=>{ if(_es){_es.close();_es=null;} if(!gotAns&&!gotThink)setBadge(t,"unavailable"); finalize("stopped"); };
+  t.stop.onclick=()=>{ if(_es){_es.close();_es=null;}
+    /* also silence the SPEAKER: closing the SSE only stopped the text stream —
+       audio kept talking with no way to shut it up (kill switch, server-side) */
+    fetch("/api/speak/stop",{method:"POST"}).catch(()=>{});
+    if(!gotAns&&!gotThink)setBadge(t,"unavailable"); finalize("stopped"); };
   _es=new EventSource("/api/tell/stream?q="+encodeURIComponent(q));
   _es.addEventListener("source",e=>{ src=e.data; setBadge(t,src); if(src!=="brain"&&src!=="local")t.think.style.display="none"; });
   _es.addEventListener("grounding",e=>{ try{renderGrounding(t,JSON.parse(e.data));}catch(_){}} );

@@ -28,6 +28,7 @@ import queue
 import subprocess
 import tempfile
 import threading
+import time
 import wave
 from typing import Callable, Iterable
 
@@ -42,6 +43,42 @@ log = logging.getLogger("utah.voice.tts")
 # flock on a shared file: one voice at a time, machine-wide, across every process.
 _PLAY_LOCK = threading.Lock()
 _PLAY_LOCKFILE = str(runtime.RUN_DIR / "tts-play.lock")
+
+#: THE KILL SWITCH fence. TTS plays from more than one process (the voice loop speaks
+#: brain replies; the web bridge speaks chat re-speaks), so an in-memory flag can't
+#: reach them all: ``stop_speaking()`` touches this file, and every ``speak_stream``
+#: pipeline drops its remaining sentences the moment the fence is newer than its own
+#: start. mtime-fenced so yesterday's stop never mutes today's speech.
+STOP_FILE = runtime.RUN_DIR / "speech.stop"
+
+
+def _stop_requested(since: float) -> bool:
+    """True when a stop fence newer than *since* exists. Never raises."""
+    try:
+        return STOP_FILE.stat().st_mtime >= since
+    except OSError:
+        return False
+
+
+def stop_speaking() -> dict:
+    """Cut the voice NOW, machine-wide: kill the clip playing this instant and fence
+    off every queued sentence in every process's speak pipeline. Before this existed
+    nothing could stop Ace mid-answer short of killing processes by hand."""
+    try:
+        STOP_FILE.parent.mkdir(parents=True, exist_ok=True)
+        STOP_FILE.touch()
+        os.utime(STOP_FILE, None)
+    except OSError as exc:
+        log.warning("tts: stop fence write failed: %s", exc)
+        return {"stopped": False, "error": str(exc)}
+    killed = False
+    try:
+        killed = subprocess.run(["pkill", "-x", "afplay"],
+                                capture_output=True, timeout=5).returncode == 0
+    except Exception as exc:  # noqa: BLE001 — fence alone still stops the queue
+        log.warning("tts: pkill afplay failed: %s", exc)
+    log.info("tts: stop_speaking (clip killed: %s)", killed)
+    return {"stopped": True, "killed_clip": killed}
 
 
 @contextlib.contextmanager
@@ -130,6 +167,9 @@ def _afplay(path: str) -> None:
     the play-lock releases and the always-on mic recovers instead of going deaf."""
     try:
         subprocess.run(["afplay", path], check=True, timeout=AFPLAY_TIMEOUT_S)
+    except subprocess.CalledProcessError as exc:
+        # Killed mid-clip (stop_speaking's pkill) — an intended interrupt, not a failure.
+        log.info("tts: clip interrupted (afplay rc=%s)", exc.returncode)
     except subprocess.TimeoutExpired:
         log.warning("tts: afplay hung >%ss on %s — killed to free the play-lock (mic recovers)",
                     AFPLAY_TIMEOUT_S, path)
@@ -180,6 +220,7 @@ class PiperTTS:
         sent_q: "queue.Queue[str | None]" = queue.Queue()
         play_q: "queue.Queue[str | None]" = queue.Queue()
         spoken: list[str] = []
+        t0 = time.time()  # stop fences newer than this kill THIS stream's queue
 
         def _synth_loop() -> None:
             while True:
@@ -187,6 +228,8 @@ class PiperTTS:
                 if sentence is None:
                     play_q.put(None)          # FIFO: lands after every WAV path
                     return
+                if _stop_requested(t0):       # kill switch: drop, don't synthesize
+                    continue
                 fd, path = tempfile.mkstemp(suffix=".wav", prefix="utah_tts_")
                 os.close(fd)
                 try:
@@ -206,6 +249,8 @@ class PiperTTS:
                 if path is None:
                     return
                 try:
+                    if _stop_requested(t0):   # kill switch: drop, don't play
+                        continue
                     with _PLAY_LOCK, _system_play_lock():   # one voice at a time, machine-wide
                         self._player(path)    # macOS reference player
                 except Exception as exc:  # noqa: BLE001

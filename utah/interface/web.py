@@ -19,7 +19,8 @@ import uuid
 
 from starlette.applications import Starlette
 from starlette.concurrency import run_in_threadpool
-from starlette.responses import FileResponse, JSONResponse, RedirectResponse
+from starlette.responses import (FileResponse, HTMLResponse, JSONResponse,
+                                 RedirectResponse, Response)
 from starlette.routing import Mount, Route
 from starlette.staticfiles import StaticFiles
 from sse_starlette.sse import EventSourceResponse
@@ -41,8 +42,89 @@ async def _daemon_status() -> dict | None:
         return None
 
 
+#: PWA head tags injected into the live deck so the tailnet deck installs to the iPhone
+#: home screen as a real app icon (Michael 2026-06-10: "PWA"). Add-to-Home-Screen then
+#: opens Ace full-screen, standalone, no Safari chrome.
+_PWA_HEAD = (
+    '<link rel="manifest" href="/manifest.webmanifest"/>'
+    '<meta name="theme-color" content="#08080c"/>'
+    '<meta name="apple-mobile-web-app-capable" content="yes"/>'
+    '<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>'
+    '<meta name="apple-mobile-web-app-title" content="Ace"/>'
+    '<link rel="apple-touch-icon" href="/icon-180.png"/>'
+    "<script>if('serviceWorker' in navigator)"
+    "navigator.serviceWorker.register('/sw.js').catch(()=>{});</script>"
+)
+
+
 async def index(request):
-    return FileResponse(LIVE)  # honest deck: real data, dormant where no producer, never simulated
+    # Inject PWA tags into <head> at serve time (keeps live.html itself clean). Honest
+    # fallback: if the marker's missing, serve the file unchanged.
+    try:
+        html = LIVE.read_text(encoding="utf-8")
+        if "/manifest.webmanifest" not in html:
+            html = html.replace("<head>", "<head>" + _PWA_HEAD, 1)
+        return HTMLResponse(html)
+    except Exception:  # noqa: BLE001 — never let PWA injection break the deck
+        return FileResponse(LIVE)
+
+
+def _png_icon(size: int) -> bytes:
+    """A solid Black-Gold 'A' app icon, generated (no binary asset in the repo). Pure
+    PIL if present; else a tiny valid 1x1 PNG placeholder so the route never 500s."""
+    try:
+        from PIL import Image, ImageDraw, ImageFont
+        img = Image.new("RGB", (size, size), "#08080c")
+        d = ImageDraw.Draw(img)
+        d.rectangle([0, 0, size - 1, size - 1], outline="#c9a961", width=max(2, size // 40))
+        try:
+            font = ImageFont.truetype("/System/Library/Fonts/Supplemental/Georgia.ttf",
+                                      int(size * 0.62))
+        except Exception:  # noqa: BLE001
+            font = ImageFont.load_default()
+        d.text((size / 2, size / 2), "A", fill="#c9a961", anchor="mm", font=font)
+        import io
+        buf = io.BytesIO()
+        img.save(buf, "PNG")
+        return buf.getvalue()
+    except Exception:  # noqa: BLE001 — PIL absent: 1x1 gold pixel, still a valid icon
+        import base64
+        return base64.b64decode(
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR4nGNgYPgPAAEEAQDk"
+            "YgQ8AAAAAElFTkSuQmCC")
+
+
+async def manifest(request):
+    return JSONResponse({
+        "name": "Ace — Command Deck", "short_name": "Ace",
+        "start_url": "/", "display": "standalone",
+        "background_color": "#08080c", "theme_color": "#08080c",
+        "description": "Your AI operator — live command deck.",
+        "icons": [{"src": "/icon-192.png", "sizes": "192x192", "type": "image/png",
+                   "purpose": "any maskable"},
+                  {"src": "/icon-512.png", "sizes": "512x512", "type": "image/png",
+                   "purpose": "any maskable"}],
+    }, media_type="application/manifest+json")
+
+
+async def service_worker(request):
+    # Minimal SW: required for installability; network-first (the deck must show LIVE
+    # data, never a stale cache), with a graceful offline note.
+    sw = (
+        "self.addEventListener('install',e=>self.skipWaiting());"
+        "self.addEventListener('activate',e=>self.clients.claim());"
+        "self.addEventListener('fetch',e=>{e.respondWith("
+        "fetch(e.request).catch(()=>new Response("
+        "'<h1 style=\"font-family:sans-serif;background:#08080c;color:#c9a961;"
+        "padding:2rem\">Ace is offline — your Mac may be asleep.</h1>',"
+        "{headers:{'Content-Type':'text/html'}})));});"
+    )
+    return Response(sw, media_type="application/javascript")
+
+
+async def app_icon(request):
+    size = {"180": 180, "192": 192, "512": 512}.get(request.path_params.get("size"), 192)
+    return Response(_png_icon(size), media_type="image/png")
 
 
 async def sim(request):
@@ -174,6 +256,15 @@ async def api_speak(request):
         return JSONResponse({"error": "empty text"}, status_code=400)
     threading.Thread(target=_speak_answer, args=(text,), daemon=True).start()
     return JSONResponse({"speaking": True, "chars": len(text)})
+
+
+async def api_speak_stop(request):
+    """THE KILL SWITCH: stop Ace mid-sentence. Kills the clip playing right now and
+    fences off every queued sentence in every process's speak pipeline (voice loop
+    + this bridge). Wired to the chat box ◼ STOP; also callable from anything."""
+    from utah.voice import tts
+
+    return JSONResponse(await run_in_threadpool(tts.stop_speaking))
 
 
 # --- SELF-CODE page · chat-box "ask for an edit, he does it" -----------------
@@ -511,10 +602,14 @@ def build_app() -> Starlette:
         Route("/api/tell", api_tell, methods=["POST"]),
         Route("/api/tell/stream", api_tell_stream),
         Route("/api/speak", api_speak, methods=["POST"]),
+        Route("/api/speak/stop", api_speak_stop, methods=["POST"]),
         Route("/api/selfcode/edit", api_selfcode_edit, methods=["POST"]),
         Route("/api/selfcode/job/{job}", api_selfcode_job),
         Route("/api/console", api_console, methods=["POST"]),
         Route("/events", events),
+        Route("/manifest.webmanifest", manifest),
+        Route("/sw.js", service_worker),
+        Route("/icon-{size}.png", app_icon),
         Mount("/assets", StaticFiles(directory=str(DASH / "assets"))),
         Route("/{route:path}", deck_data),  # catch-all data routes (last)
     ]

@@ -379,9 +379,19 @@ async def panel_detail(ctx: Context, params: object) -> dict:
     return await handler(ctx)
 
 
+async def speak_stop(ctx: Context, params: object) -> dict:
+    """THE KILL SWITCH: stop Ace mid-sentence (kills the playing clip + fences every
+    queued sentence, machine-wide). Control-plane like ping — NEVER governed: the
+    one call that must work precisely when the box is melting down."""
+    from utah.voice import tts
+
+    return await ctx.pool.run(tts.stop_speaking)
+
+
 REGISTRY = {
     "ping": ping,
     "status": status,
+    "speak_stop": speak_stop,
     "tell": tell,
     "agent": agent,
     "memory_stats": memory_stats,

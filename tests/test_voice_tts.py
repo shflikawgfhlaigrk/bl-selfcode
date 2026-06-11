@@ -135,3 +135,59 @@ def test_speak_stream_survives_a_bad_synth_clip():
     full = tts.speak_stream(["Boom here. ", "But this one works."])
     assert len(played) == 1                       # only the good sentence played
     assert full == "Boom here. But this one works."   # spoken text still reports both
+
+
+# ----- THE KILL SWITCH: stop_speaking() must silence Ace mid-answer -----------
+
+def test_stop_speaking_writes_fence_and_reports(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    from utah.voice import tts as tts_mod
+
+    fence = tmp_path / "speech.stop"
+    monkeypatch.setattr(tts_mod, "STOP_FILE", fence)
+    # never pkill real audio from a test
+    monkeypatch.setattr(tts_mod.subprocess, "run",
+                        lambda *a, **k: SimpleNamespace(returncode=1))
+    res = tts_mod.stop_speaking()
+    assert res["stopped"] is True
+    assert fence.exists()
+
+
+def test_stop_mid_stream_drops_every_queued_sentence(tmp_path, monkeypatch):
+    """Before this, NOTHING could stop Ace once he started talking: the chat ◼ STOP
+    only closed the browser stream while afplay kept going. A stop arriving while
+    clip 1 plays must drop clips 2..n unplayed."""
+    from types import SimpleNamespace
+
+    from utah.voice import tts as tts_mod
+
+    fence = tmp_path / "speech.stop"
+    monkeypatch.setattr(tts_mod, "STOP_FILE", fence)
+    monkeypatch.setattr(tts_mod.subprocess, "run",
+                        lambda *a, **k: SimpleNamespace(returncode=0))
+    played = []
+
+    def player(path):
+        played.append(path)
+        tts_mod.stop_speaking()           # Michael hits stop during the first clip
+
+    PiperTTS(player=player).speak_stream(["One. Two. Three. Four."])
+    assert len(played) == 1               # the rest were fenced off, never played
+
+
+def test_stale_fence_does_not_mute_new_speech(tmp_path, monkeypatch):
+    """mtime-fenced: yesterday's stop must not silence today's answer."""
+    import os as os_mod
+    import time as time_mod
+
+    from utah.voice import tts as tts_mod
+
+    fence = tmp_path / "speech.stop"
+    fence.touch()
+    past = time_mod.time() - 60
+    os_mod.utime(fence, (past, past))
+    monkeypatch.setattr(tts_mod, "STOP_FILE", fence)
+    played = []
+    PiperTTS(player=played.append).speak_stream(["One. Two."])
+    assert len(played) == 2
