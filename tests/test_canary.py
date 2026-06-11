@@ -68,3 +68,55 @@ def test_probe_crash_is_a_failure_not_an_exception(monkeypatch):
     r = canary.run_scheduled({"x": boom})
     assert r["failed"] == ["x"]
     assert "probe crashed" in r["results"]["x"]["detail"]
+
+
+# ── drift detector (wired as a canary check) ─────────────────────────────────
+def test_drift_scan_contract_and_probe_crash_is_a_finding(monkeypatch):
+    from utah import drift
+
+    ok, detail = drift.scan()
+    assert isinstance(ok, bool) and isinstance(detail, str) and detail
+
+    def boom():
+        raise RuntimeError("probe broke")
+    monkeypatch.setattr(drift, "plist_drift", boom)
+    ok2, detail2 = drift.scan()
+    assert ok2 is False and "crashed" in detail2 and "probe broke" in detail2
+
+
+def test_drift_plist_mismatch_is_reported(tmp_path, monkeypatch):
+    from utah import drift
+
+    repo = tmp_path / "repo"; (repo / "ops" / "launchd").mkdir(parents=True)
+    agents = tmp_path / "agents"; agents.mkdir()
+    (repo / "ops" / "launchd" / "com.utah.x.plist").write_text("<plist>A</plist>")
+    (agents / "com.utah.x.plist").write_text("<plist>B</plist>")     # drifted
+    (repo / "ops" / "launchd" / "com.utah.y.plist").write_text("<p/>")  # not installed
+    monkeypatch.setattr(drift, "REPO", repo)
+    monkeypatch.setattr(drift, "AGENTS", agents)
+    out = drift.plist_drift()
+    assert any("differs from repo" in f for f in out)
+    assert any("NOT installed" in f for f in out)
+
+
+# ── environment fence: sustained foreign CPU hogs ────────────────────────────
+def test_hog_needs_two_consecutive_sightings(tmp_path, monkeypatch):
+    """One busy build is fine; a core camped across 2+ canary runs (the 20h
+    Claude Desktop pin that starved voice) must be called out."""
+    monkeypatch.setattr(canary, "_HOG_STATE", tmp_path / "hogs.json")
+    ps = lambda: [(111, 99.0, "/Apps/SomeApp"), (222, 5.0, "/bin/idle"),
+                  (333, 98.0, "/Users/x/.utah/UtahVoice")]   # utah excluded
+
+    ok1, d1 = canary.check_hogs(ps_fn=ps)
+    assert ok1 is True and "none sustained" in d1            # first sighting: armed
+
+    ok2, d2 = canary.check_hogs(ps_fn=ps)
+    assert ok2 is False and "pid 111" in d2                  # second: sustained
+    assert "333" not in d2                                   # utah's own never flagged
+
+
+def test_hog_clears_when_process_calms_down(tmp_path, monkeypatch):
+    monkeypatch.setattr(canary, "_HOG_STATE", tmp_path / "hogs.json")
+    canary.check_hogs(ps_fn=lambda: [(111, 99.0, "/Apps/SomeApp")])
+    ok, detail = canary.check_hogs(ps_fn=lambda: [(111, 3.0, "/Apps/SomeApp")])
+    assert ok is True

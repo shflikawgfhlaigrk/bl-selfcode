@@ -16,6 +16,8 @@ from __future__ import annotations
 import datetime
 import json
 import logging
+import os
+import pathlib
 import urllib.request
 
 from utah import failures
@@ -121,6 +123,58 @@ def check_mail() -> tuple[bool, str]:
     return False, "gmail.json missing/empty — brief + outreach are dark"
 
 
+def check_drift() -> tuple[bool, str]:
+    """Written-vs-running drift — every class here has caused a real outage."""
+    from utah import drift
+
+    return drift.scan()
+
+
+#: A foreign process gets two consecutive sightings (>=10 min apart) above this
+#: before it's called a hog — one busy build is fine; a pinned core for 20 hours
+#: (Claude Desktop, 2026-06-11) starved voice + shed the deck with no witness.
+HOG_CPU_PCT = 90.0
+_HOG_STATE = pathlib.Path(os.path.expanduser("~/.utah/run/canary-hogs.json"))
+
+
+def check_hogs(ps_fn=None) -> tuple[bool, str]:
+    """The environment fence: non-Utah processes camping a core, detected.
+
+    Detection only — renice/kill stays a human (or explicitly flagged) action."""
+    import subprocess
+
+    def _ps() -> list[tuple[int, float, str]]:
+        out = subprocess.run(["ps", "-axo", "pid=,pcpu=,comm="],
+                             capture_output=True, text=True, timeout=10).stdout
+        rows = []
+        for line in out.splitlines():
+            parts = line.split(None, 2)
+            if len(parts) == 3:
+                try:
+                    rows.append((int(parts[0]), float(parts[1]), parts[2]))
+                except ValueError:
+                    continue
+        return rows
+
+    hot = {str(pid): f"{comm.rsplit('/', 1)[-1]} {cpu:.0f}%"
+           for pid, cpu, comm in (ps_fn or _ps)()
+           if cpu >= HOG_CPU_PCT and "/.utah/" not in comm}
+    try:
+        prev = set(json.loads(_HOG_STATE.read_text())) if _HOG_STATE.exists() else set()
+    except (OSError, json.JSONDecodeError):
+        prev = set()
+    try:
+        _HOG_STATE.parent.mkdir(parents=True, exist_ok=True)
+        _HOG_STATE.write_text(json.dumps(sorted(hot)))
+    except OSError:
+        pass
+    sustained = sorted(prev & set(hot))
+    if sustained:
+        return False, "sustained CPU hogs (2+ canary runs): " + \
+            "; ".join(f"pid {p} ({hot[p]})" for p in sustained)
+    return True, f"{len(hot)} hot process(es), none sustained"
+
+
 CHECKS = {
     "deck": check_deck,
     "ticks": check_ticks,
@@ -128,6 +182,8 @@ CHECKS = {
     "sovereign": check_sovereign,
     "voice": check_voice,
     "mail": check_mail,
+    "drift": check_drift,
+    "hogs": check_hogs,
 }
 
 
