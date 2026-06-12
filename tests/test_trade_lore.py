@@ -33,6 +33,9 @@ class FakeLedger:
         self.lore.append((engine, ts, kind, content))
         return True
 
+    def lore_count(self):
+        return len(self.lore)
+
 
 FIRE = {"id": 9, "engine": "breakout", "direction": "short", "entry": 28980.25,
         "outcome": "timeout", "pnl": -4.75, "symbol": "CM.NQM6", "ts": None}
@@ -87,3 +90,52 @@ def test_migrate_legacy_dedups_and_survives_missing_db(tmp_path):
     assert r["migrated"] == 1 and r["skipped"] == 1                 # dedup held, junk filtered
     missing = trade_lore.migrate_legacy(lg, db_path=str(tmp_path / "nope.db"))
     assert "error" in missing and missing["migrated"] == 0
+
+
+def test_migrate_legacy_reconciles_source_dupes_against_target(tmp_path):
+    """Post-run reconciliation: the target count must equal the source's DISTINCT
+    dedup keys, and the gap to raw source rows must be exactly the skipped dupes —
+    a delta with no such explanation is a FAILED migration, not a silent pass."""
+    import sqlite3
+    db = tmp_path / "ace.db"
+    c = sqlite3.connect(db)
+    c.execute("CREATE TABLE engine_fire_commentary (fire_ts TEXT, engine TEXT, "
+              "fire_kind TEXT, commentary TEXT, confidence REAL)")
+    c.executemany("INSERT INTO engine_fire_commentary VALUES (?,?,?,?,?)",
+                  [("t1", "shadow", "OPEN", "a real commentary row over twenty chars", 0.6),
+                   ("t1", "shadow", "OPEN", "a real commentary row over twenty chars", 0.6),  # dup key
+                   ("t2", "breakout", "OPEN", "another real commentary over twenty chars", 0.7)])
+    c.commit(); c.close()
+    lg = FakeLedger()
+    r = trade_lore.migrate_legacy(lg, db_path=str(db))
+    rec = r["reconcile"]
+    assert rec["source_rows"] == 3 and rec["source_distinct"] == 2
+    assert rec["target_count"] == 2                    # PG holds exactly the distinct keys
+    assert rec["source_dupes"] == 1 and rec["skipped"] == 1
+    assert rec["ok"] is True                            # delta fully explained by source dupes
+
+
+def test_migrate_legacy_reconcile_flags_unexplained_shortfall(tmp_path):
+    """If the target ends up SHORT of the distinct source keys for a reason other than
+    source dupes (e.g. a row write silently failed), reconcile must report ok=False."""
+    import sqlite3
+    db = tmp_path / "ace.db"
+    c = sqlite3.connect(db)
+    c.execute("CREATE TABLE engine_fire_commentary (fire_ts TEXT, engine TEXT, "
+              "fire_kind TEXT, commentary TEXT, confidence REAL)")
+    c.executemany("INSERT INTO engine_fire_commentary VALUES (?,?,?,?,?)",
+                  [("t1", "shadow", "OPEN", "a real commentary row over twenty chars", 0.6),
+                   ("t2", "breakout", "OPEN", "another real commentary over twenty chars", 0.7)])
+    c.commit(); c.close()
+
+    class DropOneLedger(FakeLedger):
+        def add_lore(self, ts, engine, kind, content, confidence=None):
+            if engine == "breakout":
+                return False           # silently "not written" but NOT a dup key
+            return super().add_lore(ts, engine, kind, content, confidence)
+
+    r = trade_lore.migrate_legacy(DropOneLedger(), db_path=str(db))
+    rec = r["reconcile"]
+    assert rec["source_distinct"] == 2 and rec["target_count"] == 1
+    assert rec["source_dupes"] == 0          # no source dupes to explain the gap
+    assert rec["ok"] is False                # unexplained shortfall surfaced honestly

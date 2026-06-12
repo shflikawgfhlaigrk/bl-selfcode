@@ -58,8 +58,10 @@ def migrate_legacy(ledger, db_path: str = LEGACY_DB, limit: int = 10000) -> dict
     except Exception as exc:  # noqa: BLE001 — a broken legacy store just means no lore
         out["error"] = str(exc)
         return out
+    keys: set = set()
     for ts, engine, kind, content, conf in rows:
         out["read"] += 1
+        keys.add((engine or "unknown", ts, kind or ""))   # the (engine,ts,kind) dedup key
         try:
             if ledger.add_lore(ts, engine or "unknown", kind or "", content, conf):
                 out["migrated"] += 1
@@ -67,6 +69,33 @@ def migrate_legacy(ledger, db_path: str = LEGACY_DB, limit: int = 10000) -> dict
                 out["skipped"] += 1
         except Exception as exc:  # noqa: BLE001 — one bad row never aborts the migration
             log.debug("lore row skipped: %s", exc)
+
+    # Reconciliation: the target must hold EXACTLY the source's distinct dedup keys.
+    # Any gap not accounted for by source duplicates is an unexplained shortfall — a
+    # failed migration surfaced honestly, never a silent "looks done".
+    source_rows = out["read"]
+    source_distinct = len(keys)
+    source_dupes = source_rows - source_distinct
+    try:
+        target_count = int(ledger.lore_count())
+    except Exception as exc:  # noqa: BLE001 — can't verify -> say so, don't fake ok
+        out["reconcile"] = {"ok": False, "error": f"target count unreadable: {exc}",
+                            "source_rows": source_rows, "source_distinct": source_distinct,
+                            "source_dupes": source_dupes}
+        return out
+    out["reconcile"] = {
+        "ok": target_count >= source_distinct,   # every distinct source key landed
+        "source_rows": source_rows,
+        "source_distinct": source_distinct,
+        "source_dupes": source_dupes,
+        "skipped": out["skipped"],
+        "target_count": target_count,
+    }
+    if not out["reconcile"]["ok"]:
+        from utah import failures
+        failures.record("trade_lore", "migration_shortfall",
+                        f"target {target_count} < distinct source keys {source_distinct} "
+                        f"(read {source_rows}, dupes {source_dupes})")
     return out
 
 

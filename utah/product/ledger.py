@@ -631,6 +631,12 @@ class Ledger:
             )
             return (cur.rowcount or 0) > 0
 
+    def lore_count(self) -> int:
+        """Independent COUNT(*) of trade_lore — the migration's reconciliation target
+        (not a self-reported migrate counter)."""
+        with self._conn() as c:
+            return int(c.execute("SELECT count(*) FROM trade_lore").fetchone()[0])
+
     def engine_detail(self, engine, limit: int = 80) -> dict:
         """Everything the deck's per-engine page shows (apex-style drill, 2026-06-10):
         scorecard, the cumulative paper-PnL curve over graded fires (chronological),
