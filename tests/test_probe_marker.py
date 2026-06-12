@@ -87,6 +87,28 @@ def test_defines_module_level_version_string():
     assert "__version__" in assigned
 
 
+def test_defines_module_level_all_list():
+    """``__all__`` must be a list assigned at module level in the source file —
+    not injected into a cached module object at runtime. It must be empty:
+    the inertness contract (``test_module_is_inert``) means there are no
+    public names to export, so any entry would advertise a name that does
+    not exist."""
+    sys.modules.pop("utah._probe_marker", None)
+    mod = importlib.import_module("utah._probe_marker")
+    assert isinstance(mod.__all__, list)
+    assert mod.__all__ == []
+
+    tree = ast.parse(Path(mod.__file__).read_text(encoding="utf-8"))
+    assigned = {
+        target.id
+        for node in tree.body
+        if isinstance(node, ast.Assign)
+        for target in node.targets
+        if isinstance(target, ast.Name)
+    }
+    assert "__all__" in assigned
+
+
 def test_exposes_a_constant_when_imported_via_importlib():
     """The module must expose a callable or constant once importlib loads it.
     Its inertness contract (``test_module_is_inert``) forbids public callables,
