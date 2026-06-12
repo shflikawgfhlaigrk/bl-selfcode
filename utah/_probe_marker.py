@@ -11,8 +11,11 @@ exercised on a live repo without touching functional modules.
 Keep it import-safe and side-effect-free. Do not delete it as junk: its whole
 job is to exist as a stable, documented place for diff-capture probes to land.
 
-The only statement permitted besides this docstring is the inert
-``__version__`` string constant below (asserted by tests/test_probe_marker.py).
+The only statements permitted besides this docstring are the inert
+``__version__`` string constant and the empty ``__all__`` list below
+(asserted by tests/test_probe_marker.py).
 """
 
 __version__ = "1.0.0"
+
+__all__ = []
