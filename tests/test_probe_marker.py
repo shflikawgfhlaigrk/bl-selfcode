@@ -98,6 +98,27 @@ def test_defines_module_level_version_string():
     assert "__version__" in assigned
 
 
+def test_defines_module_level_author_string():
+    """``__author__`` must be a nonempty string assigned at module level in
+    the source file — not injected into a cached module object at runtime.
+    Being dunder-prefixed it stays within the inertness contract
+    (``test_module_is_inert`` only forbids public names)."""
+    sys.modules.pop("utah._probe_marker", None)
+    mod = importlib.import_module("utah._probe_marker")
+    assert isinstance(mod.__author__, str)
+    assert mod.__author__.strip()
+
+    tree = ast.parse(Path(mod.__file__).read_text(encoding="utf-8"))
+    assigned = {
+        target.id
+        for node in tree.body
+        if isinstance(node, ast.Assign)
+        for target in node.targets
+        if isinstance(target, ast.Name)
+    }
+    assert "__author__" in assigned
+
+
 def test_defines_module_level_all_list():
     """``__all__`` must be a list assigned at module level in the source file —
     not injected into a cached module object at runtime. It must be empty:
