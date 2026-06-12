@@ -9,11 +9,22 @@ from __future__ import annotations
 
 import ast
 import importlib
+import sys
 from pathlib import Path
 
 MARKER_LINE = (
     "Diff-capture probe marker — an inert target file for selfcode probe runs."
 )
+
+
+def test_module_imports_without_raising():
+    """A fresh import must execute the module body without raising — the other
+    tests can be satisfied by a cached ``sys.modules`` entry, which would mask
+    an on-disk regression. Evicting the cache forces real re-execution; safe
+    here because the module is inert and nothing else holds a reference."""
+    sys.modules.pop("utah._probe_marker", None)
+    mod = importlib.import_module("utah._probe_marker")
+    assert mod is sys.modules["utah._probe_marker"]
 
 
 def test_module_imports_and_exposes_marker_docstring():
