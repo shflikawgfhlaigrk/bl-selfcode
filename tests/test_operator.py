@@ -244,3 +244,20 @@ def test_notify_human_always_records_the_failure(tmp_path):
     _human(tmp_path, now=1000.0, pushes=pushes)
     _human(tmp_path, now=1300.0, pushes=pushes)
     assert len([r for r in store.rows if r[2] == "needs_human"]) == 2
+
+
+def test_open_url_launches_in_background_never_steals_focus(monkeypatch):
+    """A repair/2FA URL prompt must open WITHOUT stealing focus — `open -g` — so a
+    mail-broken operator sweep never yanks Michael's cursor to a browser tab."""
+    seen = {}
+
+    def fake_run(argv, **kw):
+        seen["argv"] = list(argv)
+        class R:  # minimal CompletedProcess stand-in
+            returncode = 0
+        return R()
+
+    monkeypatch.setattr(operator.subprocess, "run", fake_run)
+    ok = operator._open_url("https://myaccount.google.com/apppasswords")
+    assert ok is True
+    assert seen["argv"][:2] == ["open", "-g"], f"must background-open, got {seen['argv'][:3]}"

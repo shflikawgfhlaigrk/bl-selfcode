@@ -48,8 +48,10 @@ def _kickstart(label: str) -> dict:
 
 
 def _open_url(url: str) -> bool:
+    # `-g` opens in the BACKGROUND so a repair/2FA prompt never steals Michael's focus
+    # or yanks the cursor — he finds the tab when ready, the sweep never grabs it.
     try:
-        subprocess.run(["open", url], check=False, timeout=5)
+        subprocess.run(["open", "-g", url], check=False, timeout=5)
         return True
     except (OSError, subprocess.TimeoutExpired):
         return False

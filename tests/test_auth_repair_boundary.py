@@ -107,7 +107,8 @@ def test_open_chrome_ace_falls_back_to_open_when_no_chrome(tmp_path, monkeypatch
                         lambda argv, **kw: calls.append((argv, kw)))
     assert auth_repair.open_chrome_ace("https://example.com/auth") is True
     (argv, kw), = calls
-    assert argv == ["open", "https://example.com/auth"]
+    # `-g`: background open — a repair prompt must never steal Michael's focus.
+    assert argv == ["open", "-g", "https://example.com/auth"]
     assert kw.get("timeout") == 5                       # bounded
 
 

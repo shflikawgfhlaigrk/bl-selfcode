@@ -118,7 +118,8 @@ def open_chrome_ace(url: str) -> bool:
         except OSError as exc:
             log.warning("auth_repair chrome launch failed: %s", exc)
     try:
-        subprocess.run(["open", url], check=False, timeout=5)
+        # `-g`: background open — never steal Michael's focus for a repair prompt.
+        subprocess.run(["open", "-g", url], check=False, timeout=5)
         return True
     except (OSError, subprocess.TimeoutExpired):
         return False
