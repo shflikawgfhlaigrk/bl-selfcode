@@ -20,6 +20,7 @@ import importlib
 __all__ = [
     "agent",
     "barge",
+    "barge_control",
     "liveness",
     "loop",
     "macapp",

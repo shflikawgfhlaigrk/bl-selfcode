@@ -17,8 +17,12 @@ import threading
 import time
 import uuid
 
+from urllib.parse import urlsplit
+
 from starlette.applications import Starlette
 from starlette.concurrency import run_in_threadpool
+from starlette.middleware import Middleware
+from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import (FileResponse, HTMLResponse, JSONResponse,
                                  RedirectResponse, Response)
 from starlette.routing import Mount, Route
@@ -293,12 +297,15 @@ async def api_speak(request):
 
 
 async def api_speak_stop(request):
-    """THE KILL SWITCH: stop Ace mid-sentence. Kills the clip playing right now and
-    fences off every queued sentence in every process's speak pipeline (voice loop
-    + this bridge). Wired to the chat box ◼ STOP; also callable from anything."""
-    from utah.voice import tts
+    """Stop Ace mid-sentence and arm the mic (button barge)."""
+    from utah.voice.barge_control import stop_and_arm_barge
 
-    return JSONResponse(await run_in_threadpool(tts.stop_speaking))
+    return JSONResponse(await run_in_threadpool(stop_and_arm_barge))
+
+
+async def api_voice_barge(request):
+    """Alias for speak/stop — explicit barge control from the deck."""
+    return await api_speak_stop(request)
 
 
 # --- SELF-CODE page · chat-box "ask for an edit, he does it" -----------------
@@ -636,6 +643,33 @@ async def deck_data(request):
     )
 
 
+_UNSAFE_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
+
+
+class OriginGuard(BaseHTTPMiddleware):
+    """CSRF defense for the deck's state-changing endpoints. The deck POSTs to
+    self-code, console, voice and tell — a drive-by page in the user's browser
+    could otherwise POST to ``http://127.0.0.1:8766/api/selfcode/edit`` and drive
+    those. Browsers ALWAYS attach an ``Origin`` header on a cross-origin POST, so:
+    a request whose ``Origin`` host doesn't match its ``Host`` is rejected 403.
+    Native callers (curl, the daemon, a tailnet tap) send no ``Origin`` and pass —
+    this is the standard token-less CSRF guard, not auth."""
+
+    async def dispatch(self, request, call_next):
+        if request.method in _UNSAFE_METHODS:
+            origin = request.headers.get("origin")
+            if origin:
+                origin_host = urlsplit(origin).netloc.split("@")[-1]
+                host = request.headers.get("host", "")
+                # Compare host:port; a bare-host Origin matches a bare-host Host.
+                if origin_host and origin_host != host and \
+                        origin_host.split(":")[0] != host.split(":")[0]:
+                    return JSONResponse(
+                        {"error": f"cross-origin request refused (Origin {origin})"},
+                        status_code=403)
+        return await call_next(request)
+
+
 def build_app() -> Starlette:
     routes = [
         Route("/", index),
@@ -655,6 +689,7 @@ def build_app() -> Starlette:
         Route("/api/tell/stream", api_tell_stream),
         Route("/api/speak", api_speak, methods=["POST"]),
         Route("/api/speak/stop", api_speak_stop, methods=["POST"]),
+        Route("/api/voice/barge", api_voice_barge, methods=["POST"]),
         Route("/api/selfcode/edit", api_selfcode_edit, methods=["POST"]),
         Route("/api/selfcode/job/{job}", api_selfcode_job),
         Route("/api/console", api_console, methods=["POST"]),
@@ -665,7 +700,7 @@ def build_app() -> Starlette:
         Mount("/assets", StaticFiles(directory=str(DASH / "assets"))),
         Route("/{route:path}", deck_data),  # catch-all data routes (last)
     ]
-    return Starlette(routes=routes)
+    return Starlette(routes=routes, middleware=[Middleware(OriginGuard)])
 
 
 app = build_app()

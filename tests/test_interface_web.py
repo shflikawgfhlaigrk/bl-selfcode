@@ -144,3 +144,50 @@ def test_memory_endpoint_degrades_to_last_good_counts(monkeypatch):
     second = client.get("/memory")                     # shed → cached + degraded, not 503
     assert second.status_code == 200
     assert second.json()["total"] == 9755 and "shed" in second.json()["degraded"]
+
+
+def test_csrf_guard_blocks_cross_origin_state_change(monkeypatch):
+    """A drive-by browser page must not POST to /api/selfcode/edit or /api/console:
+    a request carrying a cross-origin Origin header is rejected 403 before the
+    handler runs. Same-origin and native (no-Origin) callers are unaffected."""
+    from starlette.testclient import TestClient
+
+    from utah.interface import web
+
+    client = TestClient(web.build_app())
+
+    # Cross-origin browser attack → 403, handler never reached.
+    evil = client.post("/api/console", json={"cmd": "history"},
+                       headers={"Origin": "https://evil.example"})
+    assert evil.status_code == 403 and "origin" in evil.json()["error"].lower()
+
+    edit = client.post("/api/selfcode/edit", json={"instruction": "x"},
+                       headers={"Origin": "http://attacker.test"})
+    assert edit.status_code == 403
+
+    # Same-origin deck fetch (Origin matches Host) is allowed through the guard
+    # (it may still 4xx/5xx downstream, but NOT 403-for-origin).
+    same = client.post("/api/tell", json={"text": ""},
+                       headers={"Origin": "http://testserver", "Host": "testserver"})
+    assert same.status_code != 403
+
+    # Native client with no Origin header (curl, tailnet tap, daemon) is allowed.
+    native = client.post("/api/tell", json={"text": ""})
+    assert native.status_code != 403
+
+
+def test_csrf_guard_leaves_get_routes_untouched(monkeypatch):
+    """Read routes never carry a state change — the guard must not touch them even
+    with a foreign Origin (monitors/embeds legitimately GET cross-origin)."""
+    from starlette.testclient import TestClient
+
+    from utah.interface import web
+
+    async def no_daemon():
+        return None
+
+    monkeypatch.setattr(web, "_daemon_status", no_daemon)
+    monkeypatch.setattr(web, "_ledger_snapshot", lambda: {})
+    client = TestClient(web.build_app())
+    r = client.get("/status", headers={"Origin": "https://monitor.example"})
+    assert r.status_code == 200

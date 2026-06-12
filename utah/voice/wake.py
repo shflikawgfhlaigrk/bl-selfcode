@@ -20,8 +20,6 @@ from __future__ import annotations
 
 import re
 
-from utah import config
-
 #: Words the STT commonly pads the bare wake with. A whole filler word right before
 #: "ace" is swallowed into the wake so it never leaks out as a junk command.
 _FILLER = r"(?:hey|hay|say|says|save|saved|ok|okay|oh|a|ay|eh)"
@@ -60,31 +58,29 @@ def extract_command(transcript: str) -> str | None:
 
 
 def resolve_command(transcript: str, *, audio_wake: bool = False,
-                    wake_confidence: float | None = None) -> str | None:
+                    wake_confidence: float | None = None,
+                    button_barge: bool = False) -> str | None:
     """Stage B wake gate — decide whether an utterance is addressed to Utah.
 
     * ``audio_wake=False`` (default): transcript regex only — room speech ignored.
-    * ``audio_wake=True``: openWakeWord already armed this segment (Stage A). The
-      transcript is accepted as the command when the text wake is absent but STT
-      still captured a real question (Moonshine often drops the short "ace" syllable).
-      An empty transcript after audio wake is a bare wake (``""``), not ``None``.
+    * ``audio_wake=True``: openWakeWord armed this segment (Stage A). Command must
+      contain a literal "ace"/"utah" token (ace-only mode after 2026-06-12) — a
+      high ``wake_confidence`` does NOT waive the token, so room speech that slips
+      past Stage A is still dropped at Stage B. An empty transcript is a bare wake.
+    * ``button_barge=True``: deck ◼ BARGE armed capture — accept speech without ace.
     """
     cmd = extract_command(transcript)
     if cmd is not None:
         return cmd
+    if button_barge:
+        t = (transcript or "").strip()
+        return t if t else None
     if not audio_wake:
         return None
     t = (transcript or "").strip()
     if not t:
         return ""  # bare audio wake — orb pulse only
-    # CONFIDENCE BAND (2026-06-10): only a HIGH-confidence audio wake may accept a
-    # transcript that has NO literal "ace"/"utah" token as a command (Moonshine
-    # dropped the short syllable on a real call). In the medium band, a missing
-    # wake token means this was almost certainly room speech / TV — drop it, don't
-    # answer it. ``None`` confidence keeps legacy callers/tests permissive.
-    if wake_confidence is not None and wake_confidence < config.WAKE_TRUST_THRESHOLD:
-        return None
-    return t.lstrip(_STRIP)
+    return None
 
 
 __all__ = ["extract_command", "resolve_command"]

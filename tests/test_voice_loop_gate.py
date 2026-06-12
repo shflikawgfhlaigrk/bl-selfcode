@@ -6,8 +6,12 @@ import time
 from utah.voice import loop, vad, wake
 
 
-def test_should_capture_text_only_fallback():
-    assert loop._should_capture(audio_wake_ok=False, armed_until=0.0) is True
+def test_should_capture_refuses_without_audio_wake():
+    # By design there is NO transcript-only fallback: with openWakeWord unavailable
+    # or unfired, the mic never transcribes the room (privacy + CPU). Only an armed
+    # audio-wake segment is captured.
+    assert loop._should_capture(audio_wake_ok=False, armed_until=0.0) is False
+    assert loop._should_capture(audio_wake_ok=False, armed_until=time.monotonic() + 5) is False
 
 
 def test_should_capture_requires_arm_when_audio_wake_on():

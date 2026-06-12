@@ -7,11 +7,13 @@ from utah import config
 from utah.voice import wake
 
 
-def test_confidence_exactly_at_threshold_fires():
-    # the band is `< threshold` drops — AT the threshold must trust the wake
+def test_high_confidence_without_token_is_still_dropped():
+    # ace-only mode (2026-06-12): a high audio-wake confidence does NOT waive the
+    # literal-token requirement — room speech that slips past Stage A is dropped at
+    # Stage B. (See test_wake_band.py — this is the authoritative policy.)
     th = config.WAKE_TRUST_THRESHOLD
     assert wake.resolve_command("what's the lead count", audio_wake=True,
-                                wake_confidence=th) == "what's the lead count"
+                                wake_confidence=th + 0.05) is None
 
 
 def test_confidence_just_below_threshold_drops_room_speech():
