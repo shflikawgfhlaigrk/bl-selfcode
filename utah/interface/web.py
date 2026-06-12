@@ -663,8 +663,11 @@ class OriginGuard(BaseHTTPMiddleware):
             # (cross-origin, empty/unparseable "http://", "null") is refused — a
             # present-but-unclear Origin is treated as hostile, not waved through.
             if origin is not None:
-                origin_host = urlsplit(origin).netloc.split("@")[-1]
-                host = request.headers.get("host", "")
+                # Hostnames are case-insensitive (RFC 3986/7230) — normalize both
+                # sides so a mixed-case Origin neither bypasses the guard nor
+                # false-rejects a legitimate same-origin request.
+                origin_host = urlsplit(origin).netloc.split("@")[-1].lower()
+                host = request.headers.get("host", "").lower()
                 matches = bool(origin_host) and (
                     origin_host == host or origin_host.split(":")[0] == host.split(":")[0])
                 if not matches:

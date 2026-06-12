@@ -182,6 +182,13 @@ def test_csrf_guard_blocks_cross_origin_state_change(monkeypatch):
                         headers={"Origin": bad})
         assert r.status_code == 403, f"empty/garbage Origin {bad!r} bypassed the guard"
 
+    # Hostnames are case-INSENSITIVE (RFC 3986/7230): a same-origin request whose
+    # Origin and Host differ only in case must be ALLOWED, never false-rejected (a
+    # mixed-case tailnet hostname would otherwise lock the deck out of itself).
+    cased = client.post("/api/tell", json={"text": ""},
+                        headers={"Origin": "http://TestServer", "Host": "testserver"})
+    assert cased.status_code != 403
+
 
 def test_csrf_guard_leaves_get_routes_untouched(monkeypatch):
     """Read routes never carry a state change — the guard must not touch them even
