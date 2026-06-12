@@ -20,6 +20,8 @@ from __future__ import annotations
 
 import json
 import logging
+import math
+import re
 import urllib.parse
 import urllib.request
 
@@ -79,6 +81,25 @@ COUNTY_ARCGIS: dict[str, dict[str, str]] = {
 }
 
 
+def _like_token(tok: str) -> str:
+    """An owner-name token reduced to bare A-Z0-9. The ArcGIS WHERE string is
+    CONCATENATED, not parameterized (the REST API takes a literal ``where=``), so
+    quotes/semicolons/comments/LIKE-wildcards in a hostile case name must never
+    survive into the county query (CWE-89-adjacent)."""
+    return re.sub(r"[^A-Z0-9]", "", (tok or "").upper())
+
+
+def _finite(v) -> float | None:
+    """*v* as a finite float, else None — jsonb-sourced lat/lng arrive as floats,
+    strings, or garbage; a NaN envelope silently matches nothing and a TypeError
+    crashes the cron mid-row."""
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        return None
+    return f if math.isfinite(f) else None
+
+
 def _to_money(v) -> int | None:
     """County value field → a positive integer dollar amount, or None. Handles '108892',
     150800, '$1,234'; treats 0/blank/garbage as None (never a fabricated $0 ARV)."""
@@ -134,6 +155,60 @@ def _pick(attrs: dict, hints: tuple[str, ...]) -> str:
     return ""
 
 
+#: Free public-records DEBT/ENCUMBRANCE signals carried on the parcel record. There is
+#: NO free statewide GA mortgage/lien BALANCE source — the clerk of superior court records
+#: deeds/security-deeds but publishes no payoff figure, and the paid aggregators (ATTOM,
+#: CoreLogic, DataTree) are out by the OWN-IT rule. So we capture what IS free and honest:
+#: the homestead-exemption code (owner-occupancy / exemption status) and the recorded-deed
+#: reference (the recorder pointer to look up the security deed by hand) — and leave the
+#: dollar balance NULL with the source path documented. Never a fabricated balance.
+_HOMESTEAD_HINTS = ("HOMEEXEMPT", "HOMESTEAD", "HOME_EXEMPT", "HMSTD", "EXEMPT_CODE",
+                    "EXEMPTION")
+_DEED_HINTS = ("DEEDPAGE", "DEED_PAGE", "DEEDBOOK", "DEED_BOOK", "DEEDREF", "BOOKPAGE",
+               "DEED_REF")
+_TAX_HINTS = ("ESTTAX", "EST_TAX", "TAXAMT", "TAX_AMT", "TAXBILL", "ANNUALTAX", "TAXES")
+
+
+def _debt_signals(attrs: dict) -> dict:
+    """Free public-records encumbrance signals off a parcel record. NEVER returns a
+    fabricated mortgage/lien balance — no free GA source publishes one. Captures the
+    homestead-exemption code (occupancy/exemption), the recorded-deed reference (recorder
+    pointer for a manual security-deed payoff lookup) and the estimated annual tax. Blank/
+    zero fields collapse to honest NULL (never '' or $0)."""
+    homestead = _pick(attrs, _HOMESTEAD_HINTS) or None
+    deed = _pick(attrs, _DEED_HINTS) or None
+    tax = _to_money(_pick(attrs, _TAX_HINTS) or None)
+    return {
+        "mortgage_balance": None,        # no free balance source — honest null, never faked
+        "balance_source": "none_free",   # would require a paid aggregator or manual recorder
+        "homestead_exemption": homestead,
+        "deed_ref": deed,
+        "est_annual_tax": tax,
+    }
+
+
+def _ownership_status(decedent: str, owner: str) -> dict:
+    """Does the ESTATE own the subject parcel? The parcel's recorded OWNER string is the
+    ground truth: a surname+given-name match to the decedent IS the ownership proof. Returns
+    ``{owns_subject, match, confidence}`` — ``owns_subject`` is True only when the recorded
+    owner clearly carries the decedent's name, False when it is clearly a different party
+    (e.g. an LLC/bank with none of the decedent's name tokens), and None when the owner field
+    is absent. NEVER a fabricated True/False — grounded only in the recorded owner string."""
+    own = (owner or "").strip().upper()
+    if not own:
+        return {"owns_subject": None, "match": "none", "confidence": "none"}
+    dec_toks = {t for t in (decedent or "").upper().replace(",", " ").split() if len(t) > 1}
+    own_toks = {t for t in own.replace(",", " ").split() if len(t) > 1}
+    if not dec_toks:
+        return {"owns_subject": None, "match": "owner_present", "confidence": "low"}
+    hits = dec_toks & own_toks
+    if len(hits) >= 2:        # surname + given both present in the recorded owner string
+        return {"owns_subject": True, "match": "owner_name", "confidence": "high"}
+    if len(hits) == 1:        # only one name token shared — owner likely the decedent
+        return {"owns_subject": True, "match": "owner_name", "confidence": "medium"}
+    return {"owns_subject": False, "match": "owner_differs", "confidence": "low"}
+
+
 def _owner_mailing_address(attrs: dict) -> dict:
     """Assemble the owner's mailing address from a parcel record (best-effort across county
     field-name conventions). Returns ``{}`` when no mailing street is present — never faked.
@@ -174,17 +249,23 @@ def resolve_property(case_name: str, county: str, *, fetch=None) -> dict:
                         "(add an ArcGIS FeatureServer to COUNTY_ARCGIS) — gated, not faked")
         return {"available": False, "gated": True, "county": cty, "source": "none"}
     reg = reg or {"url": "INJECTED", "owner_field": "OWNER", "addr_field": "SITEADDR"}
-    name = (case_name or "").strip().upper().replace("'", "")
+    name = (case_name or "").strip().upper()
     of, af = reg["owner_field"], reg["addr_field"]
     # Parcel owner fields store the name "LAST FIRST MIDDLE" but a probate decedent is
     # "FIRST MIDDLE LAST" — a single LIKE on the full string never matches across that
     # reorder. Require the SURNAME and the GIVEN name to BOTH appear (order-agnostic).
-    toks = [t for t in name.replace(",", " ").split() if len(t) > 1]
+    # Tokens are sanitized to bare alphanumerics (see _like_token); a name that
+    # sanitizes to nothing GATES — a bare LIKE '%%' would "resolve" the whole county.
+    toks = [t for t in (_like_token(t) for t in name.replace(",", " ").split()) if len(t) > 1]
     if len(toks) >= 2:
         surname, given = toks[-1], toks[0]
         where = f"UPPER({of}) LIKE '%{surname}%' AND UPPER({of}) LIKE '%{given}%'"
+    elif toks:
+        where = f"UPPER({of}) LIKE '%{toks[0]}%'"
     else:
-        where = f"UPPER({of}) LIKE '%{name}%'"
+        failures.record("property", "bad_name",
+                        f"unusable case name {case_name!r} ({cty}) — gated, not faked")
+        return {"available": False, "gated": True, "county": cty, "source": "bad_name"}
     try:
         d = _arcgis_query(reg["url"], where, fetch=fetch)
         feats = d.get("features") or []
@@ -203,9 +284,16 @@ def resolve_property(case_name: str, county: str, *, fetch=None) -> dict:
         parcel = (attrs.get(pf) if pf else None) or attrs.get("PARCELID") or attrs.get("PARID")
         vf = reg.get("value_field")
         arv = _to_money(attrs.get(vf)) if vf else None   # county appraised/fair-market value
+        owner = attrs.get(of)
         return {"available": True, "gated": False, "county": cty, "source": "arcgis",
                 "address": attrs.get(af), "parcel": parcel, "arv": arv,
-                "owner": attrs.get(of), "lat": lat, "lng": lng,
+                "owner": owner, "lat": lat, "lng": lng,
+                # Does the estate own the subject parcel? Grounded in the recorded owner
+                # string (the surname+given match that resolved it) — never fabricated.
+                "ownership": _ownership_status(case_name, owner),
+                # Free encumbrance signals (homestead code / recorded-deed ref / est tax);
+                # the mortgage/lien BALANCE stays null — no free GA source publishes one.
+                "debt": _debt_signals(attrs),
                 # The owner's MAILING address (where tax bills go) — the heir/owner direct-
                 # mail contact (often != the property situs). This is the probate last-mile.
                 "owner_mail": _owner_mailing_address(attrs)}
@@ -222,11 +310,15 @@ def radius_check(lat, lng, radius_m: int = maps.THREE_MILES_M, *, places_fetch=N
     sold-comps API we don't have). Never oversold as a 'comps' price average."""
     from utah.product import leads
     out: dict = {"radius_m": radius_m, "places": [], "no_website_smbs": []}
+    lat, lng = _finite(lat), _finite(lng)
+    if lat is None or lng is None:
+        out["error"] = "invalid point"      # honest empty survey, never a crash mid-cron
+        failures.record("property", "radius_bad_point", f"lat={lat!r} lng={lng!r}")
+        return out
     near = maps.nearby(lat, lng, radius_m, fetch=places_fetch)
     if near.get("available"):
         out["places"] = near.get("places", [])
     # OSM no-website SMBs in the ~radius bbox (deg: 3mi ≈ 0.0435° lat / lng÷cos(lat))
-    import math
     dlat = radius_m / 111_320.0
     dlng = radius_m / (111_320.0 * max(0.1, math.cos(math.radians(lat))))
     bbox = (lat - dlat, lng - dlng, lat + dlat, lng + dlng)
@@ -250,18 +342,49 @@ def _arcgis_stats_query(url: str, params: dict, fetch=None, timeout: int = 20) -
         return json.loads(r.read().decode("utf-8", "replace"))
 
 
+def _area_parcel_count(reg: dict, lat, lng, radius_m: int, *, count_fetch=None) -> int | None:
+    """HONEST density signal for counties WITHOUT a published value field: the real number
+    of parcels within ``radius_m`` (server-side returnCountOnly). Not a price — a count.
+    Returns None on any error so it never fabricates a figure."""
+    dlat = radius_m / 111_320.0
+    dlng = radius_m / (111_320.0 * max(0.1, math.cos(math.radians(float(lat)))))
+    params = {
+        "where": "1=1",
+        "geometry": f"{float(lng) - dlng},{float(lat) - dlat},"
+                    f"{float(lng) + dlng},{float(lat) + dlat}",
+        "geometryType": "esriGeometryEnvelope", "inSR": "4326",
+        "spatialRel": "esriSpatialRelIntersects",
+        "returnCountOnly": "true", "f": "json"}
+    try:
+        d = _arcgis_stats_query(reg["url"], params, fetch=count_fetch)
+        c = d.get("count")
+        return int(c) if c is not None else None
+    except Exception:  # noqa: BLE001 — density is a bonus signal, never blocks the gate
+        return None
+
+
 def area_value_avg(county: str, lat, lng, radius_m: int = maps.THREE_MILES_M, *,
-                   fetch=None) -> dict:
+                   fetch=None, count_fetch=None) -> dict:
     """AVERAGE county-assessed parcel value within ``radius_m`` of ``(lat,lng)`` — the
     '3-mile average' the reports were missing (2026-06-10). Computed SERVER-SIDE
     (outStatistics avg+count) on the SAME county layer that produced the parcel's own
     ``arv``, so it is county-assessed values — honest, NOT a sold-comps average. Gates
-    when the county has no registered value layer or the server errors; never fabricates."""
+    when the county has no registered value layer or the server errors; never fabricates.
+    A value-less county still reports the HONEST 3-mile parcel COUNT (density), not a price."""
     reg = COUNTY_ARCGIS.get((county or "").strip().lower())
+    lat, lng = _finite(lat), _finite(lng)
+    if lat is None or lng is None:           # jsonb drift: gate, never crash mid-cron
+        return {"available": False, "gated": True, "county": county,
+                "reason": "invalid point"}
     vf = (reg or {}).get("value_field")
     if not reg or not vf:
-        return {"available": False, "gated": True, "county": county,
-                "reason": "no county value layer"}
+        out = {"available": False, "gated": True, "county": county,
+               "reason": "no county value layer"}
+        if reg:  # registered county, just no value field — still give the real density
+            n = _area_parcel_count(reg, lat, lng, radius_m, count_fetch=count_fetch)
+            if n is not None:
+                out["parcels_in_radius"] = n
+        return out
     stats_params = {
         "where": "1=1",
         "geometry": json.dumps({"x": float(lng), "y": float(lat),
@@ -291,7 +414,6 @@ def area_value_avg(county: str, lat, lng, radius_m: int = maps.THREE_MILES_M, *,
     # 2026-06-10): fetch the parcel VALUES inside the 3-mile bbox (paged) and average
     # client-side. Same square-bbox approximation radius_check uses for OSM; labeled
     # method=bbox_sample with the real parcel count. Never fabricates.
-    import math
     dlat = radius_m / 111_320.0
     dlng = radius_m / (111_320.0 * max(0.1, math.cos(math.radians(float(lat)))))
     values: list[int] = []
@@ -338,6 +460,10 @@ def enrich(case_name: str, county: str, *, fetch=None, geocode_fetch=None,
             lat, lng = geo["lat"], geo["lng"]
     payload = {"address": prop.get("address"), "parcel": prop.get("parcel"),
                "owner": prop.get("owner"), "arv": prop.get("arv"),
+               # ownership status (estate owns the subject parcel?) + free debt/encumbrance
+               # signals — both grounded, never fabricated. Stored on the probate row jsonb.
+               "ownership": prop.get("ownership") or {"owns_subject": None, "match": "none"},
+               "debt": prop.get("debt") or {"mortgage_balance": None, "balance_source": "none_free"},
                "lat": lat, "lng": lng, "source": prop.get("source"),
                # The probate direct-mail target (was the missing key that left every
                # resolved row letter-blocked): the owner's MAILING address when the
@@ -370,7 +496,9 @@ def enrich_ledger(limit: int = 25, *, ledger=None, fetch=None, geocode_fetch=Non
     from utah.product.ledger import Ledger
 
     lg = ledger or Ledger()
-    with psycopg.connect(config.DB_DSN, autocommit=True) as conn:
+    with psycopg.connect(config.DB_DSN, autocommit=True,
+                         connect_timeout=config.DB_CONNECT_TIMEOUT,
+                         options=f"-c statement_timeout={config.DB_STATEMENT_TIMEOUT_MS}") as conn:
         # Two classes of work, neither re-ground forever: unresolved rows NOT tried in
         # the last 7 days (the old query re-scanned the same dead rows hourly, starving
         # everything and logging resolved=0 — which read as "fully gated"), plus
@@ -413,7 +541,9 @@ def backfill_area_avg(limit: int = 50, *, ledger=None, fetch=None) -> dict:
     from utah.product.ledger import Ledger
 
     lg = ledger or Ledger()
-    with psycopg.connect(config.DB_DSN, autocommit=True) as conn:
+    with psycopg.connect(config.DB_DSN, autocommit=True,
+                         connect_timeout=config.DB_CONNECT_TIMEOUT,
+                         options=f"-c statement_timeout={config.DB_STATEMENT_TIMEOUT_MS}") as conn:
         rows = conn.execute(
             "SELECT case_name, county, heir_contact FROM probate "
             "WHERE heir_contact ? 'address' AND NOT heir_contact ? 'area_avg_3mi' "
@@ -436,5 +566,42 @@ def backfill_area_avg(limit: int = 50, *, ledger=None, fetch=None) -> dict:
     return {"scanned": len(rows), "stamped": stamped, "available": available}
 
 
+def backfill_ownership_debt(limit: int = 200, *, ledger=None, fetch=None) -> dict:
+    """Stamp ``ownership`` + ``debt`` onto probate rows resolved BEFORE those keys existed
+    (2026-06-11). Re-queries the county parcel layer once per resolved row to read the owner
+    string + free encumbrance fields, then merges into the existing heir_contact jsonb. Rows
+    with no resolved parcel get the honest unknown marker. One bad county never aborts the
+    pass; never fabricates an ownership verdict or a debt balance."""
+    import psycopg
+
+    from utah import config
+    from utah.product.ledger import Ledger
+
+    lg = ledger or Ledger()
+    with psycopg.connect(config.DB_DSN, autocommit=True,
+                         connect_timeout=config.DB_CONNECT_TIMEOUT,
+                         options=f"-c statement_timeout={config.DB_STATEMENT_TIMEOUT_MS}") as conn:
+        rows = conn.execute(
+            "SELECT case_name, county, heir_contact FROM probate "
+            "WHERE heir_contact ? 'address' "
+            "AND NOT (heir_contact ? 'ownership' AND heir_contact ? 'debt') "
+            "LIMIT %s", (limit,)).fetchall()
+    stamped = owned = 0
+    for case_name, county, hc in rows:
+        hc = hc or {}
+        try:
+            prop = resolve_property(case_name, county, fetch=fetch)
+            hc["ownership"] = prop.get("ownership") or {"owns_subject": None, "match": "none"}
+            hc["debt"] = prop.get("debt") or {"mortgage_balance": None, "balance_source": "none_free"}
+            lg.update_probate(case_name, county, heir_contact=hc)
+            stamped += 1
+            owned += 1 if hc["ownership"].get("owns_subject") else 0
+        except Exception as exc:  # noqa: BLE001 — one bad row must not abort the pass
+            failures.record("property", "ownership_backfill_failed", f"{case_name[:40]}: {exc}")
+    log.info("ownership/debt backfill: stamped=%d owned=%d", stamped, owned)
+    return {"scanned": len(rows), "stamped": stamped, "owned": owned}
+
+
 __all__ = ["resolve_property", "radius_check", "area_value_avg", "enrich", "enrich_ledger",
-           "backfill_area_avg", "COUNTY_ARCGIS"]
+           "backfill_area_avg", "backfill_ownership_debt", "COUNTY_ARCGIS",
+           "_ownership_status", "_debt_signals"]

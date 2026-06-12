@@ -182,3 +182,94 @@ def test_area_value_avg_falls_back_to_bbox_sample_when_stats_unsupported():
     assert out["available"] is True
     assert out["avg_value"] == 200000          # mean of the 3 REAL values; junk/zero excluded
     assert out["parcels"] == 3 and out["method"] == "bbox_sample"
+
+
+# --- OWNERSHIP STATUS — does the estate own the subject property? (audit) ------
+
+def test_ownership_status_owned_when_parcel_owner_matches_decedent():
+    """A parcel whose recorded owner is the decedent IS the estate's property: the
+    surname+given match that resolved it IS the ownership proof. owns_subject=True."""
+    st = prop._ownership_status("JOHN A WOODARD", "WOODARD JOHN A & MARY")
+    assert st["owns_subject"] is True
+    assert st["match"] == "owner_name"          # grounded in the parcel owner string
+    assert st["confidence"] in ("high", "medium")
+
+
+def test_ownership_status_unknown_when_owner_missing_never_invented():
+    st = prop._ownership_status("JOHN DOE", "")
+    assert st["owns_subject"] is None           # honest unknown, never a fabricated True/False
+    assert st["match"] == "none"
+
+
+def test_ownership_status_mismatch_is_honest():
+    # parcel resolved by a loose LIKE but the owner is clearly a different party
+    st = prop._ownership_status("MARY ELLEN SMITH", "ACME HOLDINGS LLC")
+    assert st["owns_subject"] is False or st["owns_subject"] is None
+    assert st["confidence"] != "high"
+
+
+def test_resolve_property_carries_ownership_status():
+    fetch = lambda u, w: {"features": [{"attributes": {
+        "OWNER": "JOWERS JOY", "SITEADDR": "123 Pine St", "PARCELID": "H-42"},
+        "geometry": {"x": -84.87, "y": 32.76}}]}
+    r = prop.resolve_property("JOY JOWERS", "testco", fetch=fetch)
+    assert r["ownership"]["owns_subject"] is True   # estate owns the subject parcel
+
+
+# --- DEBT / ENCUMBRANCE — free public-records signals, balance HONESTLY null ---
+
+def test_debt_signals_capture_homestead_and_deed_never_fabricate_balance():
+    """No FREE statewide mortgage/lien BALANCE source exists in GA — the recorder
+    holds deeds but publishes no payoff figure. We capture the free, honest signals
+    (homestead-exemption code, recorded-deed reference for the recorder lookup) and
+    leave the dollar balance NULL with the source path documented — never invented."""
+    attrs = {"HOMEEXEMPT": "S1", "DEEDPAGE": "1234/567", "esttax": 1185.47}
+    debt = prop._debt_signals(attrs)
+    assert debt["mortgage_balance"] is None        # never a fabricated dollar figure
+    assert debt["balance_source"] == "none_free"   # honest: requires paid/recorder
+    assert debt["homestead_exemption"] == "S1"     # real free signal (owner-occupied)
+    assert debt["deed_ref"] == "1234/567"          # recorder pointer for manual payoff lookup
+
+
+def test_debt_signals_blank_fields_stay_null_not_empty_string():
+    debt = prop._debt_signals({"HOMEEXEMPT": " ", "DEEDPAGE": "", "esttax": 0})
+    assert debt["mortgage_balance"] is None
+    assert debt["homestead_exemption"] is None     # blank -> honest null, not " "
+    assert debt["deed_ref"] is None
+    assert debt["est_annual_tax"] is None           # 0 -> null (never a fabricated $0)
+
+
+def test_resolve_property_carries_debt_block():
+    fetch = lambda u, w: {"features": [{"attributes": {
+        "OWNER": "JOWERS JOY", "SITEADDR": "123 Pine St", "PARCELID": "H-42",
+        "HOMEEXEMPT": "S0", "esttax": "990"}, "geometry": {"x": -84.87, "y": 32.76}}]}
+    r = prop.resolve_property("JOY JOWERS", "testco", fetch=fetch)
+    assert r["debt"]["mortgage_balance"] is None
+    assert r["debt"]["homestead_exemption"] == "S0"
+    assert r["debt"]["est_annual_tax"] == 990
+
+
+def test_enrich_payload_carries_ownership_and_debt():
+    def fetch(url, where):
+        return {"features": [{"attributes": {"Owner": "DOE JOHN", "PhisicalAddress": "1 Main St",
+                              "Value": "108892", "HOMEEXEMPT": "S1", "esttax": "1200"},
+                              "geometry": {"x": -85.0, "y": 32.8}}]}
+    out = prop.enrich("JOHN DOE", "harris", fetch=fetch,
+                      places_fetch=lambda *a, **k: {"places": []},
+                      smb_fetch=lambda *a, **k: [], stats_fetch=_stats_hit)
+    assert out["ownership"]["owns_subject"] is True
+    assert out["debt"]["mortgage_balance"] is None
+    assert out["debt"]["homestead_exemption"] == "S1"
+
+
+# --- AREA AVG — honest parcel COUNT even when the county has no value layer ----
+
+def test_area_value_avg_reports_parcel_count_when_no_value_layer():
+    """A county with parcels but no published assessed-value field can still give an
+    HONEST 3-mile parcel COUNT (density signal) — value gated, count real, never faked."""
+    # bulloch is registered (owner+addr) but has no value_field
+    out = prop.area_value_avg("bulloch", 32.4, -81.8,
+                              count_fetch=lambda u, p: {"count": 318})
+    assert out["available"] is False               # no AVG value — honest
+    assert out["gated"] is True
+    assert out["parcels_in_radius"] == 318         # real density signal, not a price

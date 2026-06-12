@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import logging
 import logging.handlers
+import math
 import os
 import signal
 import sys
@@ -31,27 +32,66 @@ from utah.daemon.server import ControlServer
 log = logging.getLogger("utah.daemon")
 
 # -- deploy seams (env-overridable; bounded by design) -----------------------
-POOL_LIMIT = int(os.environ.get("UTAH_POOL_LIMIT", "16"))
-GOV_MAX_INFLIGHT = int(os.environ.get("UTAH_MAX_INFLIGHT", "64"))
+# A typo'd override (`UTAH_POOL_LIMIT=sixteen`) used to raise AT IMPORT — the
+# daemon could not even boot and the supervisor crash-looped it. A bad value
+# now falls back to the default (logged), and floors keep each knob runnable
+# (pool=0 would be a daemon that accepts work and never runs any of it;
+# load/core<=0 a governor that sheds every call; nan/inf poison comparisons).
+
+
+def _env_int(name: str, default: int, *, floor: int) -> int:
+    """Read an int deploy seam: garbage → *default* (logged), below *floor* → clamped."""
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    try:
+        value = int(raw)
+    except ValueError:
+        log.warning("%s=%r is not an int — using default %d", name, raw, default)
+        return default
+    return max(floor, value)
+
+
+def _env_float(name: str, default: float, *, floor: float) -> float:
+    """Read a float deploy seam: garbage/non-finite → *default* (logged),
+    below *floor* → clamped."""
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    try:
+        value = float(raw)
+    except ValueError:
+        log.warning("%s=%r is not a float — using default %s", name, raw, default)
+        return default
+    if not math.isfinite(value):
+        log.warning("%s=%r is not finite — using default %s", name, raw, default)
+        return default
+    return max(floor, value)
+
+
+POOL_LIMIT = _env_int("UTAH_POOL_LIMIT", 16, floor=1)
+GOV_MAX_INFLIGHT = _env_int("UTAH_MAX_INFLIGHT", 64, floor=1)
 # 1.5 = shed heavy work once the box is 50% oversubscribed (load1 > 1.5*ncpu).
 # Was 8.0 (load1 > 144 on 18 cores) — it never tripped, so the load storm that
 # killed AceOS could recur. ping/status bypass keeps the daemon answerable.
-GOV_MAX_LOAD_PER_CORE = float(os.environ.get("UTAH_MAX_LOAD_PER_CORE", "1.5"))
-DRAIN_TIMEOUT_S = float(os.environ.get("UTAH_DRAIN_TIMEOUT", "10.0"))
+GOV_MAX_LOAD_PER_CORE = _env_float("UTAH_MAX_LOAD_PER_CORE", 1.5, floor=0.1)
+DRAIN_TIMEOUT_S = _env_float("UTAH_DRAIN_TIMEOUT", 10.0, floor=0.0)
 #: Grace after a stop is requested, so a `shutdown` RPC's ack flushes to the
 #: caller before the socket is torn down (clean `utah stop`).
-SHUTDOWN_GRACE_S = float(os.environ.get("UTAH_SHUTDOWN_GRACE", "0.2"))
+SHUTDOWN_GRACE_S = _env_float("UTAH_SHUTDOWN_GRACE", 0.2, floor=0.0)
 
 
 def _setup_logging() -> None:
     runtime.ensure_runtime()
+    root = logging.getLogger("utah")
+    if any(isinstance(h, logging.handlers.RotatingFileHandler) for h in root.handlers):
+        return  # already wired — a re-entry must not double every log line
     handler = logging.handlers.RotatingFileHandler(
         runtime.LOG_PATH, maxBytes=8 * 1024 * 1024, backupCount=3
     )
     handler.setFormatter(
         logging.Formatter("%(asctime)s %(levelname)s %(name)s %(message)s")
     )
-    root = logging.getLogger("utah")
     root.setLevel(logging.INFO)
     root.addHandler(handler)
     root.addHandler(logging.StreamHandler(sys.stderr))

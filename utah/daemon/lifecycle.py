@@ -14,12 +14,15 @@ Utah refuses that failure mode:
 from __future__ import annotations
 
 import fcntl
+import logging
 import os
 import threading
 from pathlib import Path
 
 from utah import UtahError
 from utah.daemon import runtime
+
+log = logging.getLogger("utah.daemon.lifecycle")
 
 
 class AlreadyRunning(UtahError):
@@ -36,6 +39,11 @@ class Singleton:
         self._fd: int | None = None
 
     def acquire(self) -> "Singleton":
+        if self._fd is not None:
+            # Idempotent for the holder: a second os.open would create a NEW
+            # open-file-description, and the kernel would refuse our own lock —
+            # the holder must never AlreadyRunning against itself.
+            return self
         runtime.ensure_runtime()
         fd = os.open(self._path, os.O_RDWR | os.O_CREAT, 0o600)
         try:
@@ -44,10 +52,14 @@ class Singleton:
             held = _read_int(fd)
             os.close(fd)
             raise AlreadyRunning(held) from exc
-        # We own it. Record our pid in the lockfile (introspection only).
-        os.ftruncate(fd, 0)
-        os.write(fd, f"{os.getpid()}\n".encode())
-        os.fsync(fd)
+        # We own it. Record our pid in the lockfile — introspection ONLY: a
+        # failed write must never surrender the flock (the actual exclusion).
+        try:
+            os.ftruncate(fd, 0)
+            os.write(fd, f"{os.getpid()}\n".encode())
+            os.fsync(fd)
+        except OSError:
+            log.warning("could not record pid in %s (lock still held)", self._path)
         self._fd = fd  # kept open → lock auto-releases when the process dies
         return self
 
@@ -83,15 +95,26 @@ def live_pid() -> int | None:
 
 
 def write_pidfile() -> None:
-    """Atomic pidfile write (introspection only; liveness is a probe)."""
-    tmp = runtime.PID_PATH.with_suffix(".tmp")
-    tmp.write_text(f"{os.getpid()}\n")
-    os.replace(tmp, runtime.PID_PATH)
+    """Atomic pidfile write — introspection only (liveness is a probe), so an
+    unwritable path is logged, never a daemon-boot crash."""
+    try:
+        tmp = runtime.PID_PATH.with_suffix(".tmp")
+        tmp.write_text(f"{os.getpid()}\n")
+        os.replace(tmp, runtime.PID_PATH)
+    except OSError:
+        log.warning("could not write pidfile %s (introspection only)", runtime.PID_PATH)
 
 
 def arm_hard_exit(timeout_s: float, code: int = 0) -> threading.Timer:
     """Guarantee termination: if a clean drain hangs past *timeout_s*, force
-    ``os._exit``. This is the structural kill of the zombie-daemon class."""
+    ``os._exit``. This is the structural kill of the zombie-daemon class.
+
+    A non-positive timeout would fire the exit immediately — that is always a
+    caller bug (it would kill the process before the drain even starts), so it
+    is rejected loudly instead of armed.
+    """
+    if timeout_s <= 0:
+        raise ValueError(f"hard-exit timeout must be > 0s, got {timeout_s}")
     timer = threading.Timer(timeout_s, lambda: os._exit(code))
     timer.daemon = True
     timer.start()

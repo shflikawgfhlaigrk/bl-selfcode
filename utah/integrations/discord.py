@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import time
 from dataclasses import dataclass, field
 
@@ -35,6 +36,8 @@ from utah.daemon import runtime
 log = logging.getLogger("utah.integrations.discord")
 
 SECRET = runtime.UTAH_HOME / "secrets" / "discord.json"
+#: Where provisioned webhook URLs land for the spine feeds (discord_feed reads these).
+WEBHOOKS_FILE = runtime.UTAH_HOME / "secrets" / "discord_webhooks.json"
 API = "https://discord.com/api/v10"
 USER_AGENT = "UtahBot (https://github.com/mthburnsbarber-web/ProjectUtah, 1.0)"
 
@@ -181,8 +184,6 @@ BLUEPRINT = Blueprint(
 
 # --- creds -------------------------------------------------------------------
 def _load_creds() -> dict | None:
-    import os
-
     creds: dict = {}
     try:
         c = json.loads(SECRET.read_text())
@@ -260,7 +261,8 @@ class Discord:
                 data = {}
             if 200 <= code < 300:
                 return data
-            last_exc = DiscordError(f"{method} {path} -> {code}: {getattr(resp, 'text', data)!r}")
+            last_exc = DiscordError(
+                f"{method} {path} -> {code}: {str(getattr(resp, 'text', data))[:300]!r}")
             break
         if last_exc:
             raise last_exc
@@ -535,15 +537,16 @@ def save_webhooks(report: dict) -> None:
     real = {k: v for k, v in hooks.items() if v and v != "(dry-run)"}
     if not real:
         return
-    path = runtime.UTAH_HOME / "secrets" / "discord_webhooks.json"
     try:
-        existing = json.loads(path.read_text()) if path.exists() else {}
-    except Exception:  # noqa: BLE001
+        existing = json.loads(WEBHOOKS_FILE.read_text()) if WEBHOOKS_FILE.exists() else {}
+        if not isinstance(existing, dict):
+            existing = {}
+    except (OSError, ValueError):  # garbled prior state — rebuild from this run
         existing = {}
     existing.update(real)
-    path.write_text(json.dumps(existing, indent=2))
+    WEBHOOKS_FILE.write_text(json.dumps(existing, indent=2))
     try:
-        path.chmod(0o600)
+        WEBHOOKS_FILE.chmod(0o600)   # webhook URLs are posting credentials
     except OSError:
         pass
 

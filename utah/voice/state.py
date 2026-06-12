@@ -22,24 +22,35 @@ STALE_S = 15.0  # no heartbeat in this long => the loop is not alive => report '
 
 def write(**fields) -> None:
     """Atomically write the current voice state (stamped with wall-clock ``ts`` so the
-    reader can detect staleness). Never raises — voice state is best-effort telemetry."""
+    reader can detect staleness). Never raises — voice state is best-effort telemetry.
+    A failed write cleans up its temp file: the loop heartbeats every few seconds, so
+    leaked ``.voice*.json`` litter would otherwise accumulate in the run dir forever."""
     fields["ts"] = time.time()
+    tmp: str | None = None
     try:
         STATE_PATH.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
         fd, tmp = tempfile.mkstemp(dir=str(STATE_PATH.parent), prefix=".voice", suffix=".json")
         with os.fdopen(fd, "w") as f:
             json.dump(fields, f)
         os.replace(tmp, STATE_PATH)
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:  # noqa: BLE001 — telemetry boundary: degrade, never crash the loop
         log.debug("voice state write failed: %s", exc)
+        if tmp is not None:
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
 
 
 def read() -> dict | None:
+    """The raw state dict, or ``None`` for missing/corrupt/non-dict content (a JSON
+    array is not a heartbeat — callers .get() on the result, so the type is the API)."""
     try:
         with open(STATE_PATH) as f:
-            return json.load(f)
+            data = json.load(f)
     except (OSError, ValueError):
         return None
+    return data if isinstance(data, dict) else None
 
 
 def status(now: float | None = None) -> dict:
@@ -48,7 +59,12 @@ def status(now: float | None = None) -> dict:
     st = read()
     if not st or "ts" not in st:
         return {"status": "down", "listening": False, "speaking": False}
-    age = now - st["ts"]
+    try:
+        age = now - float(st["ts"])
+    except (TypeError, ValueError):
+        # Garbage ts (hand-edited/partial file) — honest degraded answer, never a crash
+        # in the /voice route or the supervisor's deaf-restart probe.
+        return {"status": "down", "listening": False, "speaking": False}
     if age > STALE_S:
         return {"status": "down", "listening": False, "speaking": False,
                 "stale_s": round(age, 1)}

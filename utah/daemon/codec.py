@@ -33,9 +33,16 @@ def _numpy():
 
 
 def encode_ticks(rows) -> bytes:
-    """Pack an iterable of 6-tuples into a contiguous little-endian float64 buffer."""
+    """Pack an iterable of 6-tuples into a contiguous little-endian float64 buffer.
+
+    Raises :class:`CodecError` on ragged/non-numeric/mis-shaped input — callers
+    catch the typed error; a raw numpy ``ValueError`` would leak untyped.
+    """
     np = _numpy()
-    arr = np.asarray(list(rows), dtype="<f8")
+    try:
+        arr = np.asarray(list(rows), dtype="<f8")
+    except (ValueError, TypeError) as exc:
+        raise CodecError(f"ticks not coercible to float64 rows: {exc}") from exc
     if arr.size == 0:
         return b""
     if arr.ndim != 2 or arr.shape[1] != 6:
@@ -47,22 +54,40 @@ def decode_ticks(buf: bytes):
     """Zero-copy view of a tick buffer as an ``(N, 6)`` float64 array.
 
     Returns a read-only ndarray backed directly by *buf* — no copy, no decode.
+    Raises :class:`CodecError` on non-buffer input or a misaligned length.
     """
     np = _numpy()
-    if len(buf) % _TICK_WIDTH != 0:
-        raise CodecError(f"tick buffer not a multiple of {_TICK_WIDTH} bytes: {len(buf)}")
-    return np.frombuffer(buf, dtype="<f8").reshape(-1, 6)
+    try:
+        if len(buf) % _TICK_WIDTH != 0:
+            raise CodecError(
+                f"tick buffer not a multiple of {_TICK_WIDTH} bytes: {len(buf)}"
+            )
+        return np.frombuffer(buf, dtype="<f8").reshape(-1, 6)
+    except TypeError as exc:  # not bytes-like (len() or frombuffer rejected it)
+        raise CodecError(f"tick buffer must be bytes-like: {exc}") from exc
 
 
 def encode_pcm(samples) -> bytes:
-    """Pack int16 PCM samples (audio) into a little-endian buffer."""
+    """Pack int16 PCM samples (audio) into a little-endian buffer.
+
+    Raises :class:`CodecError` on non-numeric input (typed, never raw numpy).
+    """
     np = _numpy()
-    return np.ascontiguousarray(np.asarray(samples, dtype="<i2")).tobytes()
+    try:
+        return np.ascontiguousarray(np.asarray(samples, dtype="<i2")).tobytes()
+    except (ValueError, TypeError, OverflowError) as exc:
+        raise CodecError(f"pcm not coercible to int16: {exc}") from exc
 
 
 def decode_pcm(buf: bytes):
-    """Zero-copy int16 view of a PCM buffer."""
+    """Zero-copy int16 view of a PCM buffer.
+
+    Raises :class:`CodecError` on non-buffer input or an odd length.
+    """
     np = _numpy()
-    if len(buf) % 2 != 0:
-        raise CodecError(f"pcm buffer not a multiple of 2 bytes: {len(buf)}")
-    return np.frombuffer(buf, dtype="<i2")
+    try:
+        if len(buf) % 2 != 0:
+            raise CodecError(f"pcm buffer not a multiple of 2 bytes: {len(buf)}")
+        return np.frombuffer(buf, dtype="<i2")
+    except TypeError as exc:
+        raise CodecError(f"pcm buffer must be bytes-like: {exc}") from exc

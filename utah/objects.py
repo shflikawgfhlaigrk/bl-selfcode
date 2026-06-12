@@ -94,7 +94,10 @@ class _RowStruct(msgspec.Struct, frozen=True):
 
     @classmethod
     def from_mapping(cls, m) -> "_RowStruct":
-        """Build from a dict, keeping only known fields (extras ignored, never crash)."""
+        """Build from a dict, keeping only KNOWN fields — unknown keys are dropped, so a
+        jsonb row that grew extra keys never crashes the consumer. Missing REQUIRED
+        fields still raise ``TypeError``: a malformed row must fail loudly at the
+        boundary, never produce a half-typed object."""
         fields = set(cls.__struct_fields__)
         return cls(**{k: v for k, v in dict(m or {}).items() if k in fields})
 
@@ -138,3 +141,9 @@ class OutreachRow(_RowStruct, frozen=True):
     campaign: str
     channel: str = "email"
     id: int | None = None
+
+
+__all__ = [
+    "ReplySource", "WriteAction", "Hit", "Reply", "WriteDecision", "WriteResult",
+    "ConsolidationReport", "Lead", "Fire", "OutreachRow",
+]

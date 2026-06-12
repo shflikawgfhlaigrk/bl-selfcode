@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 import urllib.parse
 import urllib.request
@@ -24,6 +25,15 @@ _DDG_LITE_URL = "https://lite.duckduckgo.com/lite/"
 _UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 14_5) AppleWebKit/605.1.15 "
        "(KHTML, like Gecko) Version/17.5 Safari/605.1.15")
 MAX_PAGE_CHARS = 10000   # nav/boilerplate eats the first few KB; give the brain real article text
+
+#: Hard byte cap on ONE fetched page — an unbounded ``resp.read()`` let a hostile or
+#: misconfigured server stream gigabytes into the daemon's RAM before the char
+#: truncation ever ran. 2 MB of HTML is far past any article worth extracting.
+MAX_FETCH_BYTES = int(os.environ.get("UTAH_RESEARCH_MAX_FETCH_BYTES", str(2 * 1024 * 1024)))
+
+#: Hard cap on one search page — nothing downstream reads more than a handful of
+#: sources; an uncapped ``k`` turned one bad caller into 40+ result fetches.
+MAX_RESULTS = 25
 
 #: Research extraction is DISTINCT from brain.extract_facts (which is tuned for personal/
 #: project facts about Michael and returns [] on general web prose). This pulls the key
@@ -123,7 +133,7 @@ def _get(url: str, params: dict | None = None, timeout: float = 20.0) -> str:
         url = url + ("&" if "?" in url else "?") + urllib.parse.urlencode(params)
     req = urllib.request.Request(url, headers={"User-Agent": _UA, "Accept": "text/html"})
     with urllib.request.urlopen(req, timeout=timeout) as resp:
-        return resp.read().decode("utf-8", "replace")
+        return resp.read(MAX_FETCH_BYTES).decode("utf-8", "replace")
 
 
 def _looks_blocked(body: str) -> bool:
@@ -138,6 +148,10 @@ def search(query: str, k: int = 5, get=None) -> list[tuple[str, str]]:
     q = query.strip()
     if not q:
         return []
+    try:
+        k = max(1, min(int(k), MAX_RESULTS))   # one bad caller must not fan out 40+ fetches
+    except (TypeError, ValueError):
+        k = 5
     blocked = False
     for url in (_DDG_HTML_URL, _DDG_LITE_URL):
         try:
@@ -175,6 +189,7 @@ def gather(query: str, k: int = 3, *, search_fn=None, fetch_fn=None, budget: int
     """
     search_fn = search_fn or (lambda q, kk=k: search(q, kk))
     fetch_fn = fetch_fn or fetch
+    budget = max(1200, int(budget))   # a junk budget must never slice the context to ''
     try:
         sources = search_fn(query, k)
     except SearchBlocked as exc:
@@ -264,4 +279,4 @@ def research(query: str, *, k: int = 4, search_fn=None, fetch_fn=None,
 
 
 __all__ = ["search", "fetch", "gather", "research", "sanitize_fetched_text",
-           "SearchBlocked", "extract_research_facts"]
+           "SearchBlocked", "extract_research_facts", "MAX_FETCH_BYTES", "MAX_RESULTS"]

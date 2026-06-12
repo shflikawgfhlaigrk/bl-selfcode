@@ -20,10 +20,13 @@ a human-review proposal, and the byte-checked kill-switch is always armed.
 """
 from __future__ import annotations
 
+import logging
 import time
 from dataclasses import dataclass, field
 
 from utah import selfcode, sica
+
+log = logging.getLogger("utah.sica_loop")
 
 _META_PROMPT = (
     "You are the meta-agent improving Utah's OWN codebase (a self-improving coding "
@@ -34,6 +37,16 @@ _META_PROMPT = (
     "Best so far (utility {best_u}): {best_task}\n\n"
     "Recent attempts:\n{recent}\n\nNext task:"
 )
+
+
+def _num(value, default: float = 0.0) -> float:
+    """Coerce a proposer-reported number defensively — a malformed utility/cost
+    (string, object, None) becomes *default* instead of taking the loop's budget
+    accounting down mid-cycle."""
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
 
 
 @dataclass
@@ -97,15 +110,31 @@ class MetaLoop:
             if spent >= self.cost_budget_usd:
                 stopped = "cost"
                 break
-            out = self._propose(task) or {}
+            # Contain the proposer: one crashing/garbage attempt is RECORDED as a
+            # failed attempt — the cycle's telemetry and budget accounting survive.
+            out: dict = {}
+            error = ""
+            try:
+                raw = self._propose(task)
+                if isinstance(raw, dict):
+                    out = raw
+                elif raw is not None:
+                    error = f"proposer returned {type(raw).__name__}, expected dict"
+            except Exception as exc:  # noqa: BLE001 — any proposer crash becomes a failed attempt
+                error = f"{type(exc).__name__}: {exc}"
+                log.warning("meta-loop attempt failed (%.60r): %s", task, error)
             res.steps += 1
-            spent += float(out.get("cost_usd", 0.0) or 0.0)
-            res.attempts.append({
+            spent += _num(out.get("cost_usd"))
+            attempt = {
                 "task": task,
-                "utility": float(out.get("utility", 0.0) or 0.0),
-                "passed": bool(out.get("tests_passed")),
-                "merged": bool(out.get("merged")),
-            })
+                "utility": _num(out.get("utility")),
+                # An errored attempt can NEVER claim success (dishonest-signal guard).
+                "passed": bool(out.get("tests_passed")) and not error,
+                "merged": bool(out.get("merged")) and not error,
+            }
+            if error:
+                attempt["error"] = error
+            res.attempts.append(attempt)
         res.best_after = self._best_u()
         res.improved = res.best_after > res.best_before
         res.stopped = stopped

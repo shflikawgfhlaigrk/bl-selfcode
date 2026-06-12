@@ -27,11 +27,15 @@ log = logging.getLogger("utah.consolidate")
 def consolidate(limit: int = 20) -> ConsolidationReport:
     """Run one consolidation pass over up to *limit* unpromoted turns.
 
+    *limit* is clamped to >= 0 before it reaches the backend: the real store
+    runs ``LIMIT %s`` and a negative value is a Postgres error that would
+    abort the whole maintenance pass instead of degrading to a no-op.
+
     Raises:
         MemoryUnavailable: the store is down (the pass cannot run at all).
     """
     backend = memory.get_backend()
-    turns = backend.unpromoted_turns(limit)
+    turns = backend.unpromoted_turns(max(0, int(limit)))
 
     promoted = 0
     skipped = 0
@@ -42,6 +46,13 @@ def consolidate(limit: int = 20) -> ConsolidationReport:
             brain_failures += 1
             continue
         for fact in facts[: config.MAX_FACTS_PER_TURN]:
+            if not isinstance(fact, str) or not fact.strip():
+                # Malformed extractor output (None/int/blank) would crash
+                # memory.store with an untyped AttributeError — aborting the
+                # pass and stranding the turn forever. Count it and move on.
+                skipped += 1
+                log.warning("fact skipped (not a usable string): %.80r", fact)
+                continue
             try:
                 memory.store(fact, source="consolidation", confidence=0.8)
                 promoted += 1

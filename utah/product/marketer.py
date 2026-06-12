@@ -10,17 +10,18 @@ from __future__ import annotations
 
 import logging
 
-from utah import failures
-from utah.daemon import runtime
+import psycopg
+
+from utah import config, failures
+from utah.integrations import social_post
 
 log = logging.getLogger("utah.product.marketer")
 
 MAX_CAPTION = 2200  # Instagram caption limit
-_SECRETS = runtime.UTAH_HOME / "secrets"
 
 
 def creds_available(channel: str) -> bool:
-    return (_SECRETS / f"{channel}.json").exists()
+    return social_post.creds_available(channel)
 
 
 def compose_caption(subject: dict) -> str:
@@ -32,62 +33,32 @@ def compose_caption(subject: dict) -> str:
     return cap[:MAX_CAPTION]
 
 
-def _real_publish(caption: str, media_ref: str, channel: str):  # pragma: no cover — network
-    """REAL Instagram Reels publish via the Graph API (two-step: create container with a
-    PUBLIC video_url, then publish). Was a stub that raised — the marketer could never
-    post even WITH creds. Creds: ~/.utah/secrets/instagram.json
-    {"access_token": "...", "ig_user_id": "..."} (IG Business/Creator account token with
-    instagram_content_publish). media_ref must be a PUBLIC https mp4 URL. Other channels
-    still raise → honest post_failed, never faked."""
-    if channel != "instagram":
-        raise RuntimeError(f"{channel} posting not implemented (creds at {_SECRETS}/{channel}.json)")
-    import json as _json
-    import time as _time
-    import urllib.parse as _up
-    import urllib.request as _ur
-
-    creds = _json.loads((_SECRETS / "instagram.json").read_text())
-    token, user = creds["access_token"], creds["ig_user_id"]
-    base = f"https://graph.facebook.com/v21.0/{user}"
-
-    def _post(url, params):
-        data = _up.urlencode(params).encode()
-        with _ur.urlopen(_ur.Request(url, data=data), timeout=60) as r:
-            return _json.loads(r.read().decode())
-
-    container = _post(f"{base}/media", {
-        "media_type": "REELS", "video_url": media_ref,
-        "caption": caption[:2190], "access_token": token,
-    })["id"]
-    for _ in range(30):                       # video processing: poll until FINISHED
-        st = _json.loads(_ur.urlopen(
-            f"https://graph.facebook.com/v21.0/{container}"
-            f"?fields=status_code&access_token={_up.quote(token)}", timeout=30).read())
-        if st.get("status_code") == "FINISHED":
-            break
-        if st.get("status_code") == "ERROR":
-            raise RuntimeError(f"IG container processing failed: {st}")
-        _time.sleep(5)
-    return _post(f"{base}/media_publish",
-                 {"creation_id": container, "access_token": token})["id"]
+def _real_publish(caption: str, media_ref: str, channel: str) -> str:  # pragma: no cover
+    """Delegate to the social posting boundary (IG Graph + TikTok Content Posting)."""
+    pub = social_post.publish_instagram if channel == "instagram" else social_post.publish_tiktok
+    return pub(caption, media_ref)
 
 
 def post(caption: str, *, media_ref: str, channel: str = "instagram", publish_fn=None) -> dict:
     """Publish a post to *channel*. With an injected publisher or real creds it posts; with
     neither it documents the gate and returns posted=False (never fabricates). Never raises."""
-    if publish_fn is None and not creds_available(channel):
-        failures.record("marketer", "gated",
-                        f"{channel} post gated: no creds at {_SECRETS}/{channel}.json "
-                        "(Michael's posting creds)")
-        return {"posted": False, "gated": True, "channel": channel}
-    publisher = publish_fn or _real_publish
-    try:
-        post_id = publisher(caption, media_ref, channel)
-        log.info("marketer: posted to %s (%s)", channel, post_id)
-        return {"posted": True, "gated": False, "channel": channel, "id": post_id}
-    except Exception as exc:  # noqa: BLE001
-        failures.record("marketer", "post_failed", f"{channel}: {exc}")
-        return {"posted": False, "gated": False, "channel": channel, "error": str(exc)}
+    if publish_fn is not None:
+        try:
+            post_id = publish_fn(caption, media_ref, channel)
+            log.info("marketer: posted to %s (%s)", channel, post_id)
+            return {"posted": True, "gated": False, "channel": channel, "id": post_id}
+        except Exception as exc:  # noqa: BLE001
+            failures.record("marketer", "post_failed", f"{channel}: {exc}")
+            return {"posted": False, "gated": False, "channel": channel, "error": str(exc)}
+
+    res = social_post.post(caption, media_ref=media_ref, channel=channel)
+    if res.get("gated"):
+        failures.record("marketer", "gated", f"{channel} post gated (Michael's posting creds)")
+    elif res.get("error"):
+        failures.record("marketer", "post_failed", f"{channel}: {res['error']}")
+    elif res.get("posted"):
+        log.info("marketer: posted to %s (%s)", channel, res.get("id"))
+    return res
 
 
 def spotlight(lead: dict, *, to: str | None = None, send_fn=None, ledger=None) -> dict:
@@ -115,33 +86,49 @@ def spotlight(lead: dict, *, to: str | None = None, send_fn=None, ledger=None) -
             "sent": bool(res.get("sent"))}
 
 
-def run_scheduled(ledger=None, *, to: str | None = None, foundation_gate=None) -> dict:
+def _pick_fresh_lead() -> tuple[str, str] | None:
+    """The next not-yet-spotlighted lead as ``(name, kind)``, or None when every lead has
+    been featured. BOUNDED read (connect_timeout + statement_timeout — house DB rule, same
+    pattern as selfcode_web) so a stalled Postgres can't hang the daily marketer cron."""
+    with psycopg.connect(
+            config.DB_DSN, autocommit=True, connect_timeout=8,
+            options=f"-c statement_timeout={config.DB_STATEMENT_TIMEOUT_MS}") as c:
+        row = c.execute(
+            "SELECT name, kind FROM leads WHERE name NOT IN "
+            "(SELECT subject FROM marketer_posts WHERE channel='email_spotlight') "
+            "ORDER BY ts DESC LIMIT 1").fetchone()
+    return (row[0], row[1]) if row else None
+
+
+def run_scheduled(ledger=None, *, to: str | None = None, foundation_gate=None,
+                  pick_fn=None, send_fn=None) -> dict:
     """``com.utah.marketer`` cron — spotlight ONE not-yet-featured lead/day via email.
-    UNIQUE(channel, media_ref) in marketer_posts prevents re-spotlighting the same business."""
+    UNIQUE(channel, media_ref) in marketer_posts prevents re-spotlighting the same business.
+
+    Launchd entrypoint (``print(run_scheduled())``): NEVER raises. A dead Postgres
+    degrades to ``{"status": "store_unreachable", ...}`` with a recorded failure.
+    ``pick_fn`` / ``send_fn`` are injectable so tests never touch the live store."""
     from utah import foundation
+    from utah.product.ledger import Ledger
 
     gate = foundation.gate_cron if foundation_gate is None else foundation_gate
     skip = gate("marketer")
     if skip:
         return skip
-
-    import psycopg
-
-    from utah import config
-    from utah.product.ledger import Ledger
-
     lg = ledger or Ledger()
-    with psycopg.connect(config.DB_DSN, autocommit=True) as c:
-        row = c.execute(
-            "SELECT name, kind FROM leads WHERE name NOT IN "
-            "(SELECT subject FROM marketer_posts WHERE channel='email_spotlight') "
-            "ORDER BY ts DESC LIMIT 1").fetchone()
-    if not row:
+    try:
+        picked = (pick_fn or _pick_fresh_lead)()
+    except Exception as exc:  # noqa: BLE001 — cron boundary: dead store degrades, never raises
+        failures.record("marketer", "store_unreachable", f"spotlight pick failed: {exc}")
+        log.warning("marketer cron: lead store unreachable: %s", exc)
+        return {"status": "store_unreachable", "error": str(exc)}
+    if not picked:
         return {"status": "no_fresh_lead"}
-    out = spotlight({"name": row[0], "kind": row[1]}, to=to, ledger=lg)
+    name, kind = picked
+    out = spotlight({"name": name, "kind": kind}, to=to, send_fn=send_fn, ledger=lg)
     log.info("marketer cron: %s", out)
     return out
 
 
 __all__ = ["compose_caption", "post", "spotlight", "run_scheduled",
-           "creds_available", "MAX_CAPTION"]
+           "creds_available", "MAX_CAPTION", "_pick_fresh_lead"]

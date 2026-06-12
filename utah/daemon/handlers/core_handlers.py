@@ -23,6 +23,24 @@ def _as_dict(params: object) -> dict:
     raise RpcError(INVALID_PARAMS, "params must be an object")
 
 
+def _as_int(p: dict, key: str, default: int) -> int:
+    """A numeric param as int, or typed ``INVALID_PARAMS`` — garbage from the
+    wire must never surface as a raw ``ValueError`` → ``INTERNAL_ERROR``."""
+    v = p.get(key, default)
+    try:
+        return int(v)
+    except (TypeError, ValueError) as exc:
+        raise RpcError(INVALID_PARAMS, f"'{key}' must be an integer, got {v!r}") from exc
+
+
+def _as_float(p: dict, key: str, default: float) -> float:
+    v = p.get(key, default)
+    try:
+        return float(v)
+    except (TypeError, ValueError) as exc:
+        raise RpcError(INVALID_PARAMS, f"'{key}' must be a number, got {v!r}") from exc
+
+
 async def ping(ctx: Context, params: object) -> dict:
     return {"pong": True, "uptime_s": ctx.uptime_s}
 
@@ -110,8 +128,8 @@ def _memory_list_blocking(limit: int, offset: int) -> list:
 async def memory_list(ctx: Context, params: object) -> dict:
     """The actual live memory ROWS behind the gauge — deck drill-down (off-loop)."""
     p = _as_dict(params)
-    limit = max(1, min(int(p.get("limit", 50)), 200))
-    offset = max(0, int(p.get("offset", 0)))
+    limit = max(1, min(_as_int(p, "limit", 50), 200))
+    offset = max(0, _as_int(p, "offset", 0))
     with ctx.governor.read_admission():
         return {"rows": await ctx.pool.run(_memory_list_blocking, limit, offset)}
 
@@ -126,7 +144,7 @@ def _entities_blocking(limit: int) -> list:
 async def memory_entities(ctx: Context, params: object) -> dict:
     """The actual entities behind the gauge — deck drill-down (off-loop)."""
     p = _as_dict(params)
-    limit = max(1, min(int(p.get("limit", 100)), 500))
+    limit = max(1, min(_as_int(p, "limit", 100), 500))
     with ctx.governor.read_admission():
         return {"entities": await ctx.pool.run(_entities_blocking, limit)}
 
@@ -157,7 +175,7 @@ def _ledger_snapshot_blocking(limit: int) -> dict:
 
 async def ledger_snapshot(ctx: Context, params: object) -> dict:
     """Live product-ledger snapshot for the deck's revenue panels (off-loop, governed)."""
-    limit = max(1, min(int(_as_dict(params).get("limit", 8)), 100))
+    limit = max(1, min(_as_int(_as_dict(params), "limit", 8), 100))
     with ctx.governor.read_admission():
         return await ctx.pool.run(_ledger_snapshot_blocking, limit)
 
@@ -207,9 +225,7 @@ async def scout_probate(ctx: Context, params: object) -> dict:
 
 
 def _queue_outreach_blocking(campaign: str) -> dict:
-    import psycopg
-
-    from utah import config
+    from utah import config, db_pool
     from utah.product import outreach
     from utah.product.ledger import SMB_LEAD_SOURCES, SMB_OUTREACH_CAMPAIGN, get_ledger
 
@@ -217,7 +233,9 @@ def _queue_outreach_blocking(campaign: str) -> dict:
         return {"campaign": campaign, "queued": 0, "sent": 0,
                 "gated": "RPC outreach is SMB-only (osm/google_maps); probate is separate"}
     sources = tuple(SMB_LEAD_SOURCES)
-    with psycopg.connect(config.DB_DSN, autocommit=True) as c:
+    # BOUNDED: the shared per-DSN pool (connect_timeout + statement_timeout) —
+    # a stalled Postgres must never pin a worker-pool thread forever.
+    with db_pool.get_pool(config.DB_DSN).connection() as c:
         rows = c.execute(
             "SELECT name, kind, contact, source FROM leads WHERE source = ANY(%s)",
             (list(sources),),
@@ -260,7 +278,7 @@ async def work_leads(ctx: Context, params: object) -> dict:
     p = _as_dict(params)
     channel = str(p.get("channel", "auto")).strip().lower() or "auto"
     campaign = str(p.get("campaign", SMB_OUTREACH_CAMPAIGN))
-    limit = max(1, min(int(p.get("limit", DAILY_OUTREACH)), 200))
+    limit = max(1, min(_as_int(p, "limit", DAILY_OUTREACH), 200))
     with ctx.governor.admission():
         return await ctx.pool.run(_work_leads_blocking, channel, limit, campaign)
 
@@ -278,7 +296,7 @@ async def research(ctx: Context, params: object) -> dict:
     query = str(p.get("query", "")).strip()
     if not query:
         raise RpcError(INVALID_PARAMS, "research requires a 'query'")
-    k = max(1, min(int(p.get("k", 4)), 8))
+    k = max(1, min(_as_int(p, "k", 4), 8))
     with ctx.governor.admission():
         return await ctx.pool.run(_research_blocking, query, k)
 
@@ -341,7 +359,7 @@ def _busy(seconds: float) -> float:
 
 async def agent(ctx: Context, params: object) -> dict:
     """Run a real off-loop task in the pool (the no-loop-blocking gate)."""
-    seconds = float(_as_dict(params).get("seconds", 0.2))
+    seconds = _as_float(_as_dict(params), "seconds", 0.2)
     seconds = max(0.0, min(seconds, 30.0))  # bounded: never a forever task
     with ctx.governor.admission():
         ran = await ctx.pool.run(_busy, seconds)

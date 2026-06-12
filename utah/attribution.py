@@ -23,6 +23,13 @@ from utah import entities
 _NUM = re.compile(r"\$?\d[\d,]*(?:\.\d+)?%?")
 #: Entities that are always "known" (persona/owner) — never count as unsupported.
 _ALWAYS_KNOWN = frozenset({"ace", "michael", "utah", "i don't know"})
+#: True refusals assert nothing, so they short-circuit as trivially supported. The live
+#: brain emits typographic apostrophes ("I don’t know.") — normalized before matching so
+#: an honest refusal that merely MENTIONS a number is never flagged as fabrication.
+#: Deliberately ONLY the hard "I don't know" forms: a soft refusal that smuggles a guess
+#: ("Not in the context. As a rough estimate, 4321.") must stay gated so strict mode can
+#: strip the guess.
+_REFUSAL_PREFIXES = ("i don't know", "i do not know")
 
 
 class AttributionReport(msgspec.Struct, frozen=True):
@@ -54,8 +61,8 @@ def check_attribution(answer: str, context: str) -> AttributionReport:
     appears. Refusals and empty answers are trivially supported (nothing asserted)."""
     ans = (answer or "").strip()
     ctx = context or ""
-    low_ans = ans.casefold()
-    if not ans or low_ans.startswith(("i don't know", "i do not know")):
+    low_ans = ans.casefold().replace("’", "'").replace("‘", "'")
+    if not ans or low_ans.startswith(_REFUSAL_PREFIXES):
         return AttributionReport(True, [], [], 1.0, 1.0)
 
     ctx_nums = {_norm_num(m.group(0)) for m in _NUM.finditer(ctx)}

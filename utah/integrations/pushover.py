@@ -6,16 +6,27 @@ Honest gate: with no creds it records the gate and returns ``sent=False, gated=T
 phone re-alerts until acked. Every send failure is documented to the failure log.
 
 Creds live OUTSIDE the repo at ``~/.utah/secrets/pushover.json`` (Michael's input):
-``{api_token, user_key, group_key?, default_target?}``. The HTTP transport is
+``{api_token, user_key, group_key?, default_target?, encryption_key?}``.
+If the Pushover app has end-to-end encryption enabled, ``encryption_key`` must be
+the 64-char hex key from the app or every notification shows "error decrypting".
+The HTTP transport is
 injectable (``http_post=`` per call, or module-global :func:`set_transport`) so the
 whole stack is testable with zero network and zero real pushes.
 """
 from __future__ import annotations
 
+import base64
+import hashlib
+import hmac as hmac_mod
 import json
 import logging
+import os
+import subprocess
 import urllib.parse
 import urllib.request
+
+from cryptography.hazmat.primitives import padding
+from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 
 from utah import config, failures
 from utah.daemon import runtime
@@ -37,10 +48,79 @@ def set_transport(fn) -> None:
     _transport = fn
 
 
+def _normalize_creds(raw: dict) -> dict:
+    """Accept legacy Ace/plan key names (``token``/``user``) alongside Utah's
+    ``api_token``/``user_key`` — same secret file, either shape works."""
+    c = dict(raw)
+    if not c.get("api_token") and c.get("token"):
+        c["api_token"] = c["token"]
+    if not c.get("user_key") and c.get("user"):
+        c["user_key"] = c["user"]
+    if not c.get("encryption_key"):
+        for alias in ("e2ee_key", "e2e_key", "e2ee"):
+            if c.get(alias):
+                c["encryption_key"] = c[alias]
+                break
+    return c
+
+
+def _encryption_key_hex(creds: dict) -> str | None:
+    key = (creds.get("encryption_key") or "").strip().lower()
+    if not key:
+        return None
+    if len(key) != 64 or any(ch not in "0123456789abcdef" for ch in key):
+        log.warning("pushover encryption_key ignored: expected 64 hex chars")
+        return None
+    return key
+
+
+#: Bound on the gzip child in the E2EE path — an unbounded subprocess on the ALERT
+#: path could hang every page to the phone.
+_GZIP_TIMEOUT_S = float(os.environ.get("UTAH_PUSHOVER_GZIP_TIMEOUT_S", "10"))
+
+
+def encrypt_field(plaintext: str, key_hex: str, *, iv: bytes | None = None) -> str:
+    """Pushover E2EE field encryption (gzip → AES-256-CBC → HMAC-SHA256 → base64)."""
+    key = bytes.fromhex(key_hex)
+    # Match Pushover's documented openssl pipeline (macOS/BSD gzip -9 -n) — the
+    # byte-exact contract is pinned against the real openssl reference in tests.
+    compressed = subprocess.check_output(
+        ["gzip", "-9", "-c", "-n"], input=(plaintext or "").encode("utf-8"),
+        timeout=_GZIP_TIMEOUT_S)
+    iv_bytes = iv if iv is not None else os.urandom(16)
+    padder = padding.PKCS7(128).padder()
+    padded = padder.update(compressed) + padder.finalize()
+    cipher = Cipher(algorithms.AES(key), modes.CBC(iv_bytes))
+    encryptor = cipher.encryptor()
+    ciphertext = encryptor.update(padded) + encryptor.finalize()
+    digest = hmac_mod.new(key, iv_bytes + ciphertext, hashlib.sha256).digest()
+    return base64.b64encode(iv_bytes + ciphertext + digest).decode("ascii")
+
+
+def _apply_e2ee(fields: dict, creds: dict) -> dict:
+    """Encrypt the displayable fields, ALL or NOTHING: a mid-pipeline failure (gzip
+    hang/missing) falls back to the plaintext fields — same trade as an invalid key
+    (better a readable push than 'error decrypting' noise or a dead alert path),
+    and a half-encrypted payload with the ``encrypted`` flag must never ship."""
+    key_hex = _encryption_key_hex(creds)
+    if not key_hex:
+        return fields
+    out = dict(fields)
+    try:
+        for name in ("message", "title", "url", "url_title"):
+            if name in out and out[name] not in (None, ""):
+                out[name] = encrypt_field(str(out[name]), key_hex)
+    except (subprocess.SubprocessError, OSError, ValueError) as exc:
+        failures.record("pushover", "e2ee_failed", f"sending plaintext: {exc}")
+        return fields
+    out["encrypted"] = "1"
+    return out
+
+
 def _load_creds() -> dict | None:
     try:
         c = json.loads(SECRET.read_text())
-        return c if isinstance(c, dict) else None
+        return _normalize_creds(c) if isinstance(c, dict) else None
     except Exception:  # noqa: BLE001 — missing/garbled creds is a gate, not a crash
         return None
 
@@ -102,6 +182,8 @@ def send(message: str, *, title: str = "Utah", priority: int = 0,
         fields["retry"] = int(retry or config.PUSHOVER_EMERGENCY_RETRY)
         fields["expire"] = int(expire or config.PUSHOVER_EMERGENCY_EXPIRE)
 
+    fields = _apply_e2ee(fields, creds)
+
     poster = http_post or _transport or _real_http_post
     try:
         status, body = poster(API_URL, fields)
@@ -121,4 +203,4 @@ def send(message: str, *, title: str = "Utah", priority: int = 0,
             "target": (to[:6] + "…") if len(to) > 6 else to}
 
 
-__all__ = ["send", "available", "set_transport", "SECRET", "API_URL"]
+__all__ = ["send", "available", "set_transport", "encrypt_field", "SECRET", "API_URL"]

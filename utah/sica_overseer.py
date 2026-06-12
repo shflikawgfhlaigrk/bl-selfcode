@@ -12,15 +12,23 @@ autonomous lane uses so a runaway `claude -p` can be killed mid-run.
 """
 from __future__ import annotations
 
+import logging
+import os
+import signal
 import subprocess
 import time
 from dataclasses import dataclass
 
 from utah import config, sica
 
+log = logging.getLogger("utah.sica_overseer")
+
 POLL_S = 30.0
 #: consecutive unchanged-output polls that mean "stuck/looping" → cancel.
 STALL_POLLS = 4
+#: Bound on draining a finished/killed child's pipes — a grandchild that
+#: inherited the pipe must not hang the cycle after the overseer already ruled.
+DRAIN_TIMEOUT_S = float(os.environ.get("UTAH_OVERSEER_DRAIN_TIMEOUT", "30"))
 
 
 @dataclass
@@ -45,10 +53,14 @@ def assess(*, elapsed_s: float, cost_usd: float = 0.0, stall_count: int = 0,
 
 def supervise(*, is_alive, elapsed_fn, cancel_fn, output_fn=lambda: None,
               cost_fn=lambda: 0.0, poll_s: float = POLL_S, sleep_fn=time.sleep,
-              stall_polls: int = STALL_POLLS) -> Verdict:
+              stall_polls: int = STALL_POLLS, time_limit_s: float | None = None,
+              cost_limit_usd: float | None = None) -> Verdict:
     """Poll a running attempt until it ends or the overseer cancels it. Returns the
     final Verdict (cancel=False if the run finished on its own). All boundaries are
-    injected so this is unit-proven without a real subprocess."""
+    injected so this is unit-proven without a real subprocess; ``time_limit_s`` /
+    ``cost_limit_usd`` default to the paper limits (sica.TIME_LIMIT_S / COST_LIMIT_USD)."""
+    limit_s = sica.TIME_LIMIT_S if time_limit_s is None else time_limit_s
+    limit_usd = sica.COST_LIMIT_USD if cost_limit_usd is None else cost_limit_usd
     last_output = None
     stall = 0
     while is_alive():
@@ -62,6 +74,7 @@ def supervise(*, is_alive, elapsed_fn, cancel_fn, output_fn=lambda: None,
             stall = 0
             last_output = out
         v = assess(elapsed_s=elapsed_fn(), cost_usd=cost_fn(), stall_count=stall,
+                   time_limit_s=limit_s, cost_limit_usd=limit_usd,
                    stall_polls=stall_polls)
         if v.cancel:
             cancel_fn()
@@ -69,32 +82,71 @@ def supervise(*, is_alive, elapsed_fn, cancel_fn, output_fn=lambda: None,
     return Verdict(False, "completed")
 
 
-def run_claude_supervised(task: str, *, cwd: str, poll_s: float = POLL_S) -> None:
+def _drain(proc: subprocess.Popen) -> tuple[str, str]:
+    """Collect the child's remaining stdout/stderr, BOUNDED. After a kill (or a
+    clean exit) ``communicate`` can still block if a grandchild inherited the
+    pipes — escalate to a kill and give up on the text rather than hang the cycle."""
+    try:
+        return proc.communicate(timeout=DRAIN_TIMEOUT_S)
+    except subprocess.TimeoutExpired:
+        log.warning("overseer: pipe drain exceeded %.0fs — killing and abandoning output",
+                    DRAIN_TIMEOUT_S)
+        proc.kill()
+        try:
+            return proc.communicate(timeout=5)
+        except subprocess.TimeoutExpired:  # pragma: no cover — kernel-level pipe wedge
+            return "", ""
+
+
+def run_claude_supervised(task: str, *, cwd: str, poll_s: float = POLL_S,
+                          time_limit_s: float | None = None) -> None:
     """Run `claude -p` WITH coding tools under overseer supervision (Popen, so a
     runaway run is killed mid-flight). Raises subprocess.TimeoutExpired on an
     overseer cancel (→ sica τ penalty) and RuntimeError on a nonzero exit, so
-    selfcode.propose discards the change exactly as for the plain runner."""
+    selfcode.propose discards the change exactly as for the plain runner.
+    ``time_limit_s`` defaults to the paper wall-clock limit (sica.TIME_LIMIT_S)."""
+    limit_s = sica.TIME_LIMIT_S if time_limit_s is None else time_limit_s
+    # start_new_session: the run gets its OWN process group, so a cancel kills the
+    # whole tree. A bare proc.kill() only hit the CLI itself — children it spawned
+    # (its Bash tool) survived as orphans, kept coding past the limit, AND held the
+    # stdout pipe open so the post-cancel drain stalled until they exited.
     proc = subprocess.Popen(
         [config.BRAIN_CMD, "-p", "--allowedTools", "Edit", "Write", "Read", "Bash"],
         stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-        cwd=cwd, text=True,
+        cwd=cwd, text=True, start_new_session=True,
     )
-    assert proc.stdin is not None
-    proc.stdin.write(task)
-    proc.stdin.close()
+
+    def _cancel() -> None:
+        """SIGKILL the run's whole process group; fall back to the leader alone."""
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)   # pgid == pid (start_new_session)
+        except (ProcessLookupError, PermissionError):
+            proc.kill()
+
+    try:
+        # A child that dies before draining stdin (bad CLI flags, instant crash)
+        # surfaces here as BrokenPipeError mid-write — swallow it and fall through
+        # to the HONEST exit-code handling below instead of crashing the cycle.
+        proc.stdin.write(task)
+        proc.stdin.close()
+    except (BrokenPipeError, OSError) as exc:
+        log.warning("claude run closed stdin early (will report its exit code): %s", exc)
     start = time.monotonic()
     verdict = supervise(
         is_alive=lambda: proc.poll() is None,
         elapsed_fn=lambda: time.monotonic() - start,
-        cancel_fn=proc.kill,
+        cancel_fn=_cancel,
         poll_s=poll_s,
+        time_limit_s=limit_s,
     )
-    out, err = proc.communicate()
+    out, err = _drain(proc)
     if verdict.cancel:
-        raise subprocess.TimeoutExpired(config.BRAIN_CMD, sica.TIME_LIMIT_S)
+        log.warning("overseer cancelled claude run: %s", verdict.reason)
+        raise subprocess.TimeoutExpired(config.BRAIN_CMD, limit_s)
     if proc.returncode != 0:
         raise RuntimeError(f"claude coding run exited {proc.returncode}: "
                            f"{(err or out or '')[-300:]}")
 
 
-__all__ = ["Verdict", "assess", "supervise", "run_claude_supervised", "POLL_S", "STALL_POLLS"]
+__all__ = ["Verdict", "assess", "supervise", "run_claude_supervised", "POLL_S",
+           "STALL_POLLS", "DRAIN_TIMEOUT_S"]

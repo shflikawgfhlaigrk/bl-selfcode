@@ -78,7 +78,21 @@ def check_ticks() -> tuple[bool, str]:
     ticks = get_ledger().live_ticks()
     if not ticks:
         return False, "no live ticks at all during an open session"
-    age_s = min(float(t.get("age_ms") or 9e12) for t in ticks) / 1000.0
+    # age_ms=0 is the FRESHEST possible tick — `or 9e12` once treated that falsy
+    # zero as "missing" and called a perfectly live feed dead. Only None/unreadable
+    # ages are skipped; a feed whose every age is unreadable is shape drift, not green.
+    ages_s: list[float] = []
+    for t in ticks:
+        raw = t.get("age_ms")
+        if raw is None:
+            continue
+        try:
+            ages_s.append(float(raw) / 1000.0)
+        except (TypeError, ValueError):
+            continue
+    if not ages_s:
+        return False, "ticks present but no readable age_ms — feed shape drifted"
+    age_s = min(ages_s)
     if age_s > TICK_MAX_AGE_S:
         return False, f"freshest tick {age_s:.0f}s old in session — feed dead or tab gone"
     return True, f"freshest tick {age_s:.1f}s old"

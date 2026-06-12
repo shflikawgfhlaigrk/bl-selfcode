@@ -39,9 +39,18 @@ class ByteStream(Protocol):
 
 
 def encode(kind: int, payload: bytes, max_frame: int = MAX_FRAME_BYTES) -> bytes:
-    """Serialize one frame. Raises :class:`FrameError` if oversize."""
+    """Serialize one frame. Raises :class:`FrameError` on oversize, an
+    out-of-range kind, or a non-bytes payload — a str/None payload must surface
+    as a typed protocol error, never a raw ``TypeError`` that escapes into the
+    server's connection loop as an unhandled crash."""
     if not 0 <= kind <= 0xFF:
         raise FrameError(f"frame kind out of range: {kind}")
+    if not isinstance(payload, (bytes, bytearray, memoryview)):
+        raise FrameError(
+            f"frame payload must be bytes-like, got {type(payload).__name__}"
+        )
+    if not isinstance(payload, bytes):
+        payload = bytes(payload)  # one copy; memoryview/bytearray frame identically
     n = len(payload)
     if n > max_frame:
         raise FrameError(f"frame too large: {n} > {max_frame}")

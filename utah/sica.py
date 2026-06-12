@@ -164,7 +164,11 @@ class _PgArchive:
     def _conn(self):
         import psycopg
         from utah import config
-        return psycopg.connect(self._dsn or config.DB_DSN, autocommit=True, connect_timeout=8)
+        # Bounded both ways: connect_timeout caps a dead host; statement_timeout caps a
+        # wedged query (a stuck archive write would otherwise hang the autonomy cycle).
+        return psycopg.connect(
+            self._dsn or config.DB_DSN, autocommit=True, connect_timeout=8,
+            options=f"-c statement_timeout={config.DB_STATEMENT_TIMEOUT_MS}")
 
     def _ensure(self, c) -> None:
         if not self._ready:

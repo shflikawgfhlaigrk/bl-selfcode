@@ -9,11 +9,28 @@ tested. Speak/publish failures never crash the loop.
 from __future__ import annotations
 
 import logging
+import os
 import re
+import threading
+import time
 
 from utah import core
 from utah.objects import ReplySource
 from utah.voice import tts, wake
+
+#: Bare-wake ack cooldown — a real transcribed "ace" earns ONE "Yeah?"; repeats inside
+#: the window stay silent (the 2026-06-10 self-ack loop: 689 wakes in 15 min). 0 keeps
+#: every deliberate bare wake audible; raise it if the ack ever chatters again.
+_ACK_COOLDOWN_S = float(os.environ.get("UTAH_VOICE_ACK_COOLDOWN_S", "12"))
+_last_ack_at = 0.0
+#: Guards the check-then-set on ``_last_ack_at``: STT thrash can hand two identical
+#: bare wakes to two threads at once; without the lock both clear the cooldown check
+#: and Ace says "Yeah?" twice.
+_ack_lock = threading.Lock()
+
+#: Where the deck web layer (the /code console lane) lives. Deployment config, not a
+#: constant buried in the function body — override with UTAH_VOICE_CONSOLE_URL.
+_CONSOLE_URL = os.environ.get("UTAH_VOICE_CONSOLE_URL", "http://127.0.0.1:8766").rstrip("/")
 
 log = logging.getLogger("utah.voice.agent")
 
@@ -38,16 +55,6 @@ def _speakable(text: str) -> str:
         return flat
     return " ".join(sentences[:_VOICE_MAX_SENTENCES]).strip() + " Want the rest?"
 
-#: Voice speaks these via one-shot :func:`core.tell` — no stream generator, no recall
-#: before capability, time-to-first-audio = Piper only. Brain/learned still stream.
-_VOICE_INSTANT = frozenset({
-    ReplySource.SOCIAL,
-    ReplySource.CAPABILITY,
-    ReplySource.MEMORY,
-    ReplySource.LOCAL,
-    ReplySource.UNAVAILABLE,
-})
-
 
 def _default_publish(channel: str, event: dict) -> None:
     """Publish the voice turn onto the daemon bus so the deck can render it."""
@@ -56,13 +63,26 @@ def _default_publish(channel: str, event: dict) -> None:
     ctl.call_sync("publish", {"channel": channel, "event": event}, timeout=3.0)
 
 
+def _speak_safe(speak_stream, chunks, on_speaking) -> None:
+    """Speak, swallowing speaker failures — a dead audio device must not kill the
+    turn (the answer still publishes to the deck)."""
+    try:
+        speak_stream(chunks, on_start=on_speaking)
+    except Exception as exc:  # noqa: BLE001
+        log.warning("voice speak failed: %s", exc)
+
+
+def _publish_safe(publish, channel: str, event: dict) -> None:
+    """Publish, swallowing bus failures — a dead daemon bus must not kill the turn."""
+    try:
+        publish(channel, event)
+    except Exception as exc:  # noqa: BLE001
+        log.warning("voice publish failed (%s): %s", channel, exc)
+
+
 def pulse_wake(command: str = "", *, publish=None) -> None:
     """Deck orb pulse the instant audio wake fires — before the slow STT/brain path."""
-    publish = publish or _default_publish
-    try:
-        publish("wake", {"command": command})
-    except Exception as exc:  # noqa: BLE001
-        log.warning("voice wake publish failed: %s", exc)
+    _publish_safe(publish or _default_publish, "wake", {"command": command})
 
 
 #: Voice → coding-agent bridge (Michael 2026-06-10: "the voice and the coding agent
@@ -84,28 +104,67 @@ def coding_task(command: str) -> str | None:
     return None
 
 
+def _console_post(url: str, data: bytes) -> str:
+    """Default HTTP poster for the deck console — bounded, JSON body."""
+    import urllib.request
+
+    req = urllib.request.Request(
+        url, data=data, headers={"Content-Type": "application/json"})
+    with urllib.request.urlopen(req, timeout=10) as r:
+        return r.read().decode("utf-8", "replace")
+
+
 def _selfcode_dispatch(task: str, *, http_post=None) -> str | None:
     """POST the task into the deck console's /code lane (the web process owns the
     job runner + live transcript). Returns the job id or None. Never raises."""
     import json as _json
-    import urllib.request
 
     try:
-        if http_post is None:
-            def http_post(url, data):
-                req = urllib.request.Request(
-                    url, data=data, headers={"Content-Type": "application/json"})
-                with urllib.request.urlopen(req, timeout=10) as r:
-                    return r.read().decode("utf-8", "replace")
-        raw = http_post("http://127.0.0.1:8766/api/console",
-                        _json.dumps({"line": "/code " + task}).encode())
+        post = http_post or _console_post
+        raw = post(_CONSOLE_URL + "/api/console",
+                   _json.dumps({"line": "/code " + task}).encode())
         return (_json.loads(raw) or {}).get("job")
     except Exception as exc:  # noqa: BLE001 — voice must never crash on a dead web layer
         log.warning("voice selfcode dispatch failed: %s", exc)
         return None
 
 
-def handle_utterance(transcript, *, audio_wake: bool = False, tell=None, tell_stream=None,
+def _ack_bare_wake(transcript, speak_stream, publish, on_speaking) -> dict:
+    """A wake with no command. Ack ONLY a deliberate, TRANSCRIBED bare "ace" — and
+    at most once per cooldown. An audio wake with an EMPTY transcript is noise/echo,
+    not Michael: live 2026-06-10, Ace's own "Yeah?" re-triggered the wake model every
+    ~25s (689 wake events in 15 min) — empty MUST stay silent or the ack feeds
+    itself forever."""
+    global _last_ack_at
+    if not (transcript or "").strip():
+        return {"wake": True, "command": "", "answer": ""}
+    with _ack_lock:  # atomic check-then-set — two thrashed wakes must yield ONE ack
+        now = time.monotonic()
+        if now - _last_ack_at < _ACK_COOLDOWN_S:
+            return {"wake": True, "command": "", "answer": ""}
+        _last_ack_at = now
+    answer = "Yeah?"
+    _speak_safe(speak_stream, iter([answer]), on_speaking)
+    _publish_safe(publish, "voice", {"q": "", "answer": answer, "source": "wake"})
+    return {"wake": True, "command": "", "answer": answer}
+
+
+def _selfcode_turn(command, task, dispatch, speak_stream, publish, on_speaking) -> dict:
+    """voice → coding agent: dispatch a REAL propose-only self-code job and speak an
+    HONEST ack — "on it" only when the console accepted the job, never a fake-ok
+    when the deck web layer is down."""
+    job = (dispatch or _selfcode_dispatch)(task)
+    answer = (("On it — coding that now, propose-only on my isolated clone. "
+               "Open the Self-Code console to watch me work.") if job else
+              "I couldn't reach my coding bay — the deck web layer looks down.")
+    _speak_safe(speak_stream, iter([answer]), on_speaking)
+    _publish_safe(publish, "voice", {"q": command, "answer": answer, "source": "selfcode"})
+    return {"wake": True, "command": command, "answer": answer,
+            "source": "selfcode", "job": job}
+
+
+def handle_utterance(transcript, *, audio_wake: bool = False, wake_confidence=None,
+                     tell=None, tell_stream=None,
                      speak_stream=None, publish=None, on_speaking=None,
                      dispatch=None) -> dict | None:
     """Handle one heard utterance. Returns ``None`` if the wake word is absent
@@ -125,39 +184,24 @@ def handle_utterance(transcript, *, audio_wake: bool = False, tell=None, tell_st
     speak_stream = speak_stream or tts.speak_stream
     publish = publish or _default_publish
 
-    command = wake.resolve_command(transcript, audio_wake=audio_wake)
+    command = wake.resolve_command(transcript, audio_wake=audio_wake,
+                                   wake_confidence=wake_confidence)
     if command is None:
         return None  # not addressed to Utah
 
     # Wake fired — pulse the deck orb IMMEDIATELY, before the (slow) brain turn, so
     # Michael sees Utah heard "ace" at once (the wave the old Ace orb emitted), not
     # 14s later when the answer lands. Never let a publish hiccup crash the loop.
-    try:
-        publish("wake", {"command": command})
-    except Exception as exc:  # noqa: BLE001
-        log.warning("voice wake publish failed: %s", exc)
+    _publish_safe(publish, "wake", {"command": command})
 
     if not command:
-        return {"wake": True, "command": "", "answer": ""}  # bare "ace"
+        return _ack_bare_wake(transcript, speak_stream, publish, on_speaking)
 
     # voice → coding agent: "code <task>" / "fix your <x>" runs a REAL propose-only
     # self-code job; Ace acknowledges aloud and the console shows his live transcript.
     task = coding_task(command)
     if task is not None:
-        job = (dispatch or _selfcode_dispatch)(task)
-        answer = (("On it — coding that now, propose-only on my isolated clone. "
-                   "Open the Self-Code console to watch me work.") if job else
-                  "I couldn't reach my coding bay — the deck web layer looks down.")
-        try:
-            speak_stream(iter([answer]), on_start=on_speaking)
-        except Exception as exc:  # noqa: BLE001
-            log.warning("voice speak failed: %s", exc)
-        try:
-            publish("voice", {"q": command, "answer": answer, "source": "selfcode"})
-        except Exception as exc:  # noqa: BLE001
-            log.warning("voice publish failed: %s", exc)
-        return {"wake": True, "command": command, "answer": answer,
-                "source": "selfcode", "job": job}
+        return _selfcode_turn(command, task, dispatch, speak_stream, publish, on_speaking)
 
     tell_fn = tell or core.tell
     try:
@@ -169,19 +213,27 @@ def handle_utterance(transcript, *, audio_wake: bool = False, tell=None, tell_st
     parts: list[str] = []
     captured = {"source": "brain"}
 
-    if instant is not None and instant.source in _VOICE_INSTANT:
-        # Fast path — weather/time/social/memory/local: one Piper synth, no stream overhead.
-        answer = (instant.text or "").strip()
+    # LATENCY: tell() already ran the FULL turn (recall → ground → reason). If it
+    # produced an answer — for ANY source, including BRAIN/LEARNED — SPEAK THAT ANSWER
+    # NOW. The old code threw a non-instant tell() answer away and ran tell_stream(), a
+    # SECOND full brain round-trip (measured ~1.4-5s of dead air before the first word).
+    # Piper synth of the first sentence of an already-complete answer is ~0.1s, so this
+    # is the fastest path to first audio AND one brain call per turn, not two. tell_stream
+    # remains the fallback ONLY when tell() came back empty/unavailable (e.g. an empty
+    # BRAIN turn). The deck still gets the full answer; only the spoken form is shortened
+    # (a recalled list read verbatim is the 85s monologue Michael hit).
+    instant_answer = (instant.text or "").strip() if instant is not None else ""
+    fast_ok = (instant is not None and instant_answer
+               and instant.source is not ReplySource.UNAVAILABLE)
+
+    if fast_ok:
+        # One Piper synth of the already-computed answer — no stream, no 2nd brain call.
+        answer = instant_answer
         captured["source"] = instant.source.value
-        if answer:
-            try:
-                # Speak a SHORT form (the deck still gets the full `answer`); a recalled
-                # list read aloud verbatim is the 85s monologue Michael hit.
-                speak_stream(iter([_speakable(answer)]), on_start=on_speaking)
-            except Exception as exc:  # noqa: BLE001
-                log.warning("voice speak failed: %s", exc)
+        _speak_safe(speak_stream, iter([_speakable(answer)]), on_speaking)
     else:
-        # Slow path — brain / learned: stream answer chunks for low time-to-first-audio.
+        # Fallback — tell() gave us nothing usable (empty/unavailable): stream the brain
+        # answer chunks so we still get low time-to-first-audio rather than a dead turn.
         def _answer_chunks():
             try:
                 for channel, chunk in tell_stream(command, want_thinking=False, voice=True):
@@ -193,18 +245,13 @@ def handle_utterance(transcript, *, audio_wake: bool = False, tell=None, tell_st
             except Exception as exc:  # noqa: BLE001
                 log.warning("voice brain turn failed: %s", exc)
 
-        try:
-            speak_stream(_answer_chunks(), on_start=on_speaking)
-        except Exception as exc:  # noqa: BLE001
-            log.warning("voice speak failed: %s", exc)
+        _speak_safe(speak_stream, _answer_chunks(), on_speaking)
         answer = "".join(parts).strip()
         if instant is not None and instant.text and not answer:
             answer = instant.text.strip()
             captured["source"] = instant.source.value
-    try:
-        publish("voice", {"q": command, "answer": answer, "source": captured["source"]})
-    except Exception as exc:  # noqa: BLE001
-        log.warning("voice publish failed: %s", exc)
+    _publish_safe(publish, "voice",
+                  {"q": command, "answer": answer, "source": captured["source"]})
 
     return {"wake": True, "command": command, "answer": answer, "source": captured["source"]}
 

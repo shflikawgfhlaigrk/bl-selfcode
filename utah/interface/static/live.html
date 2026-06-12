@@ -136,6 +136,45 @@
   .kpi{background:var(--panel2);border:1px solid var(--line);border-radius:7px;padding:10px 11px}
   .kpi b{color:var(--gold2);font-size:18px;display:block} .kpi span{color:var(--mut);font-size:9px;letter-spacing:1.5px}
   .empty{height:100%;min-height:80px;display:flex;align-items:center;justify-content:center;color:var(--dim);letter-spacing:3px;font-size:11px}
+
+  /* ===== ACE TERMINAL — TUI shell living inside the center dash (Discord-slot tab).
+     A real terminal into Ace: typed line POSTs the existing /api/tell brain and streams
+     /api/tell/stream. Deck's own gold-on-black palette, no third-party branding. ===== */
+  .term{display:flex;flex-direction:column;height:100%;min-height:0;
+    background:radial-gradient(900px 360px at 12% -30%,#15130c 0%,transparent 62%),#070709;
+    border:1px solid #221d10;border-radius:8px;overflow:hidden;
+    font:12.5px/1.5 ui-monospace,"JetBrains Mono",Menlo,monospace}
+  .term-banner{padding:9px 13px 8px;border-bottom:1px solid #1c1810;
+    background:linear-gradient(180deg,#100e08,transparent)}
+  .term-banner pre{margin:0;color:var(--gold);font-size:9.5px;line-height:1.15;letter-spacing:.5px;white-space:pre;overflow:hidden}
+  .term-banner .sub{color:var(--mut);font-size:9.5px;letter-spacing:1.2px;margin-top:5px}
+  .term-banner .sub b{color:var(--gold2)}
+  .term-out{flex:1;min-height:0;overflow:auto;padding:10px 13px;color:#d8d2bf;white-space:pre-wrap;word-break:break-word}
+  .term-out .ln{margin:0 0 1px}
+  .term-out .l-sys{color:var(--mut)}
+  .term-out .l-cmd{color:var(--gold2)}
+  .term-out .l-cmd .pfx{color:var(--gold);font-weight:700}
+  .term-out .l-think{color:#6f6a58;font-style:italic}
+  .term-out .l-ans{color:#e8e3d4}
+  .term-out .l-meta{color:var(--mut);font-size:10px;letter-spacing:.6px}
+  .term-out .l-err{color:var(--err)}
+  .term-out .src{display:inline-block;font-size:8.5px;letter-spacing:1px;padding:0 5px;border-radius:4px;
+    background:#15130c;color:var(--gold);border:1px solid #2a2415;margin-right:6px}
+  .term-cur{display:inline-block;width:7px;height:13px;background:var(--gold);margin-left:1px;
+    vertical-align:-2px;animation:term-blink 1s step-end infinite}
+  @keyframes term-blink{50%{opacity:0}}
+  .term-in{display:flex;align-items:center;gap:8px;padding:9px 13px;border-top:1px solid #1c1810;
+    background:linear-gradient(0deg,#0c0b07,transparent)}
+  .term-in .pfx{color:var(--gold);font-weight:700;flex:none}
+  .term-in input{flex:1;background:transparent;border:0;outline:0;color:var(--gold2);
+    font:inherit;letter-spacing:.3px;caret-color:var(--gold)}
+  .term-in input::placeholder{color:var(--dim)}
+  .term-status{display:flex;gap:16px;align-items:center;padding:5px 13px;border-top:1px solid #14110a;
+    background:#0a0906;color:var(--mut);font-size:9px;letter-spacing:1.4px;flex-wrap:wrap}
+  .term-status .s{display:flex;align-items:center;gap:6px} .term-status .s b{color:var(--gold2)}
+  .term-status .sdot{width:6px;height:6px;border-radius:50%;background:var(--dim)}
+  .term-status .sdot.ok{background:var(--ok);box-shadow:0 0 7px var(--okglow)}
+  .term-status .sdot.busy{background:var(--warn);box-shadow:0 0 7px rgba(231,169,59,.5)}
   /* ---- status pill: the ONE consistent rendering of a panel's STATE (placeholders +
        the state legend), emitted by normalizeState(). Exactly two visual tiers — .error
        (a real failure just happened: red) vs .idle (dormant/gated/offline/loading/
@@ -510,7 +549,10 @@
 
 <script>
 const $=id=>document.getElementById(id);
-const esc=s=>String(s==null?"":s).replace(/[&<>]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[c]));
+/* esc() output lands in TEXT and inside double/single-quoted ATTRIBUTES (title=,
+   aria-label=, data-*) fed with real scraped/learned strings — quotes must be
+   neutralized too, or one lead name with a `"` breaks out of its attribute (DOM XSS). */
+const esc=s=>String(s==null?"":s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const rows=o=>Object.entries(o).map(([k,v])=>`<div class="row"><span class="k">${esc(k)}</span><span class="v">${esc(v)}</span></div>`).join("");
 const led=(id,cls)=>{const e=$(id);if(!e)return; e.className="led "+cls;
   // the bare connectivity dot now also speaks: name it from its chip label and
@@ -655,22 +697,24 @@ async function poll(){
     LAST={};return;
   }
   LAST={s,m,st};
+  /* one malformed status payload (daemon mid-restart) must dim a metric, never
+     TypeError out of poll() and freeze the whole deck until a reload */
+  const g=s.governor||{}, p=s.pool||{}, b=s.bus||{};
   /* degraded = daemon shed a read under load and we're showing the last good
      snapshot. Real data, busy machine — say so instead of pretending DORMANT. */
   DEGRADED=(st&&st.degraded)||{}; if(m&&m.degraded)DEGRADED.memory=m.degraded;
   const busy=Object.keys(DEGRADED).length>0;
   setStateBadge($("spine-state"),busy?"ONLINE — UNDER LOAD":"ONLINE",busy?"warn":"ok");
   // header metrics
-  $("h-load").textContent=s.governor.load_per_core;
-  $("h-bus").textContent=s.bus.published;
-  $("t-load").textContent=s.governor.load_per_core;
-  $("t-bus").textContent=s.bus.published;
+  $("h-load").textContent=g.load_per_core!=null?g.load_per_core:"—";
+  $("h-bus").textContent=b.published!=null?b.published:"—";
+  $("t-load").textContent=g.load_per_core!=null?g.load_per_core:"—";
+  $("t-bus").textContent=b.published!=null?b.published:"—";
   if(m&&m.live!=null) $("h-mem").textContent=m.live;
   // ---- SYSTEM SPINE rows (real fields only; gated where no producer) ----
   /* lab/feed gate truth comes from the live snapshot — the GATED markers were
      hardcoded when the feed was still down and lied after it went live */
   const labLive=((st&&st.lab)||{}).feed==="live";
-  const g=s.governor, p=s.pool, b=s.bus;
   const sys=[
     {nm:"Local Core Daemon", drill:"daemon", big:fmtUp(s.uptime_s), sub:"unix · ~/.utah/run · v"+s.version, st:"UPTIME", led:"ok"},
     {nm:"Event Bus", drill:"bus", big:b.published, sub:b.subscribers+" subs · "+b.dropped+" dropped", st:"PUBLISHED", led:"ok"},
@@ -681,12 +725,15 @@ async function poll(){
     {nm:"Risk Firewall", drill:"risk", big:"GATED", sub:"trade kernel · pre-exec", st:"NO PRODUCER", led:"off", gated:true},
     {nm:"Sync & Ingest", drill:"sync", big:labLive?"LIVE":"GATED", sub:"wealthcharts rx · cdp", st:labLive?"TICKING":"NO PRODUCER", led:labLive?"ok":"off", gated:!labLive},
   ];
+  /* data-attribute + listener binding — never interpolate into an inline handler:
+     HTML entities decode before handler JS parses, so esc() can't protect that context */
   $("spine").innerHTML=sys.map(r=>{
     const state=r.gated?'gated':r.led;
-    return `<div class="sysrow drillable${r.gated?' gated':''}" onclick="drill('${r.drill}')"><span class="led ${r.led}"></span>`+
+    return `<div class="sysrow drillable${r.gated?' gated':''}" data-drill="${esc(r.drill)}"><span class="led ${esc(r.led)}"></span>`+
     `<div><div class="nm">${esc(r.nm)}<span class="hint">TAP</span></div><div class="sub">${esc(r.sub)}</div></div>`+
     `<div><div class="big">${esc(r.big)}</div><div class="st">${stateBadge(r.st, state, r.nm+": "+r.big+" ("+r.st+")")}</div></div></div>`;
   }).join("");
+  $("spine").querySelectorAll("[data-drill]").forEach(el=>el.onclick=()=>drill(el.dataset.drill));
   // core orb reflects voice
   const orb=document.querySelector(".orb"); if(orb) orb.classList.toggle("listen", vlive && !orb.classList.contains("heard"));
   // right-rail function cards
@@ -704,22 +751,24 @@ function renderFns(s,m,st,voice){
   const lab=(st&&st.lab)||{};
   const mls=document.getElementById("menu-lab-sub");
   if(mls&&lab.engines) mls.textContent=lab.engines+" engines · paper/sim · "+(lab.feed==="live"?"LIVE WealthCharts feed":"feed gated");
+  const pool=(s&&s.pool)||{}, bus=(s&&s.bus)||{};
   const fns=[
-    {nm:"Voice Loop", sub:"wake · barge-in · TTS", st:voice.status?voice.status.toUpperCase():"DOWN", cls:(voice.status==="listening")?"":(voice.status?"warn":"off"), click:"drill('voice')"},
-    {nm:"Agent Mesh", sub:up?(s.pool.borrowed+" running · "+s.pool.available+" ready"):"worker pool", st:up?(s.pool.borrowed>0?"RUNNING":"READY"):"DOWN", cls:up?"":"off", click:"drill('agents')"},
-    {nm:"Memory Holograph", sub:m?(m.entities+" entities · graph"):"pgvector · hnsw", st:m?(m.degraded?"BUSY":"INDEXED"):"DOWN", cls:m?(m.degraded?"warn":""):"off", click:"drill('memory')"},
-    {nm:"Black Box Ledger", sub:audit+" audit events", st:up?"RECORDING":"DOWN", cls:up?"":"off", click:"drill('audit')"},
-    {nm:"Sensor Array", sub:up?(s.bus.subscribers+" subscribers"):"world-model bus", st:up?"RX":"DOWN", cls:up?"":"off", click:"drill('sensor')"},
-    {nm:"Trading Engine Lab", sub:(lab.feed==="live"?(lab.live_engines+" of "+lab.engines+" live · "):"paper / sim · ")+"fires "+((st&&st.ledger&&st.ledger.fires)||0), st:lab.feed==="live"?"LIVE":"GATED", cls:lab.feed==="live"?"":"dim", gated:lab.feed!=="live", click:"openLab()"},
-    {nm:"Risk / Threat Kernel", sub:"pre-exec gate", st:"GATED", cls:"dim", gated:true, click:"drill('risk')"},
-    {nm:"Self-Coding Bay", sub:"bounded autonomy", st:"LOCKED · APPROVAL", cls:"dim", gated:true, click:"openConsole('selfcode','🤖 SELF-CODING BAY')"},
+    {nm:"Voice Loop", sub:"wake · barge-in · TTS", st:voice.status?voice.status.toUpperCase():"DOWN", cls:(voice.status==="listening")?"":(voice.status?"warn":"off"), click:()=>drill('voice')},
+    {nm:"Agent Mesh", sub:up?(pool.borrowed+" running · "+pool.available+" ready"):"worker pool", st:up?(pool.borrowed>0?"RUNNING":"READY"):"DOWN", cls:up?"":"off", click:()=>drill('agents')},
+    {nm:"Memory Holograph", sub:m?(m.entities+" entities · graph"):"pgvector · hnsw", st:m?(m.degraded?"BUSY":"INDEXED"):"DOWN", cls:m?(m.degraded?"warn":""):"off", click:()=>drill('memory')},
+    {nm:"Black Box Ledger", sub:audit+" audit events", st:up?"RECORDING":"DOWN", cls:up?"":"off", click:()=>drill('audit')},
+    {nm:"Sensor Array", sub:up?(bus.subscribers+" subscribers"):"world-model bus", st:up?"RX":"DOWN", cls:up?"":"off", click:()=>drill('sensor')},
+    {nm:"Trading Engine Lab", sub:(lab.feed==="live"?(lab.live_engines+" of "+lab.engines+" live · "):"paper / sim · ")+"fires "+((st&&st.ledger&&st.ledger.fires)||0), st:lab.feed==="live"?"LIVE":"GATED", cls:lab.feed==="live"?"":"dim", gated:lab.feed!=="live", click:()=>openLab()},
+    {nm:"Risk / Threat Kernel", sub:"pre-exec gate", st:"GATED", cls:"dim", gated:true, click:()=>drill('risk')},
+    {nm:"Self-Coding Bay", sub:"bounded autonomy", st:"LOCKED · APPROVAL", cls:"dim", gated:true, click:()=>openConsole('selfcode','🤖 SELF-CODING BAY')},
   ];
-  $("fns").innerHTML=fns.map(f=>{
+  $("fns").innerHTML=fns.map((f,i)=>{
     const state=f.gated?'gated':(f.cls==='warn'?'warn':(f.cls==='off'?'off':'ok'));
-    return `<div class="fn drillable${f.gated?' gated':''}"${f.click?` onclick="${f.click}"`:""}><span class="led ${f.cls==='off'?'off':(f.cls==='warn'?'warn':(f.cls==='dim'?'':'ok'))}"></span>`+
+    return `<div class="fn drillable${f.gated?' gated':''}"${f.click?` data-fn="${i}"`:""}><span class="led ${f.cls==='off'?'off':(f.cls==='warn'?'warn':(f.cls==='dim'?'':'ok'))}"></span>`+
     `<div><div class="nm">${esc(f.nm)}${f.click?'<span class="hint">TAP</span>':""}</div><div class="sub">${esc(f.sub)}</div></div>`+
     `<div class="st">${stateBadge(f.st, state, f.nm+": "+f.st)}</div></div>`;
   }).join("");
+  $("fns").querySelectorAll("[data-fn]").forEach(el=>{const f=fns[+el.dataset.fn]; if(f&&f.click) el.onclick=f.click;});
   $("fn-count").textContent=fns.filter(f=>!f.gated).length+" LIVE";
   $("h-gates").textContent=fns.filter(f=>f.gated).length;
 }
@@ -727,6 +776,7 @@ function renderFns(s,m,st,voice){
 /* ============================ CENTER DASH (tabbed real data) ============================ */
 const TABS=[
   {id:"overview", label:"OVERVIEW"},
+  {id:"terminal", label:"ACE TERMINAL"},
   {id:"memory",   label:"MEMORY"},
   {id:"leads",    label:"LEADS"},
   {id:"probate",  label:"PROBATE"},
@@ -749,8 +799,10 @@ function metaOf(r){return [r.kind,r.region,r.county,r.campaign,r.channel,r.sourc
 /* plain-English one-liner shown at the top of every center tab */
 const TAB_INTRO={
   overview:"A quick snapshot of everything. Tap any tile or row for the full story.",
+  terminal:"A live terminal straight into Ace. Type a line, press Enter — it streams his reasoning and answer in real time.",
   memory:"Everything Utah has learned and remembers. Tap a fact to read it in full.",
   leads:"Local businesses with no website — your prospects. Tap one for its type, location and contact info.",
+  probate:"Probate real-estate cases from county filings. Tap one for the estate, county and assessed value.",
   outreach:"Everyone Utah has already messaged. It never contacts the same prospect twice.",
   research:"Facts Utah taught itself from the web. Tap one to read it.",
   selfcode:"Utah improving its OWN code — what he finds on the web, what he corrects in himself, ask him for an edit, and goals wired off real merges.",
@@ -793,11 +845,13 @@ async function loadDash(tab, quiet){
         ["BUS EVENTS", s.bus.published,"bus"], ["CPU CORES", s.governor.ncpu,"governor"],
         ["LOAD / CORE", s.governor.load_per_core,"governor"], ["VOICE", (voice.status||"—").toUpperCase(),"voice"],
       ];
-      let h=intro("overview")+'<div class="kpis">'+kpi.map(k=>`<div class="kpi drillable" onclick="drill('${k[2]}')"><b>${esc(k[1])}</b><span>${esc(k[0])}</span></div>`).join("")+"</div>";
+      let h=intro("overview")+'<div class="kpis">'+kpi.map(k=>`<div class="kpi drillable" data-drill="${esc(k[2])}"><b>${esc(k[1])}</b><span>${esc(k[0])}</span></div>`).join("")+"</div>";
       h+='<div class="drill-sec">RECENT ACTIVITY (BLACK-BOX LEDGER) — tap for all</div>';
       const aud=(st&&st.audit)||[];
       h+= aud.length? `<div onclick="drill('audit')" style="cursor:pointer">`+aud.slice(0,8).map(a=>`<div class="item"><div class="body" style="-webkit-line-clamp:2">${esc(a)}</div></div>`).join("")+`</div>` : '<div class="verdict good"><span class="vled"></span>Clean — nothing has broken.</div>';
-      body.innerHTML=h; return;
+      body.innerHTML=h;
+      body.querySelectorAll("[data-drill]").forEach(el=>el.onclick=()=>drill(el.dataset.drill));
+      return;
     }
     if(tab==="memory"){
       const d=await getPanel("memory"); tabCounts.memory=(d.rows||[]).length; _tabRows.memory=d.rows||[];
@@ -831,6 +885,7 @@ async function loadDash(tab, quiet){
       if(v.last_transcript) h+=`<div class="drill-sec">LAST TRANSCRIPT (${esc(v.age_s)}s ago)</div><div class="item"><div class="body">${esc(v.last_transcript)}</div></div>`;
       body.innerHTML=h; return;
     }
+    if(tab==="terminal"){ mountTerminal(body, quiet); return; }
     if(tab==="selfcode"){ await loadSelfcode(body, quiet); return; }
     // generic row panels: leads / outreach / research / audit
     const d=await getPanel(tab);
@@ -846,6 +901,93 @@ async function loadDash(tab, quiet){
     }
     body.innerHTML=h; renderTabs(); wireRows();
   }catch(e){ body.innerHTML=emptyBox("unavailable — "+String(e.message||e)); }
+}
+
+/* ============================ ACE TERMINAL (Discord-slot tab) ============================ */
+/* A real, working terminal into Ace. A typed line POSTs the same grounded brain the rest
+   of the deck uses and streams over /api/tell/stream — no new brain, just a TUI surface.
+   Built ONCE; survives the 2s background poll (mountTerminal no-ops on a quiet refresh once
+   the shell exists, so the output history and the line you're typing are never wiped). */
+const ACE_BANNER=
+" █████╗  ██████╗███████╗\n"+
+"██╔══██╗██╔════╝██╔════╝\n"+
+"███████║██║     █████╗  \n"+
+"██╔══██║██║     ██╔══╝  \n"+
+"██║  ██║╚██████╗███████╗\n"+
+"╚═╝  ╚═╝ ╚═════╝╚══════╝";
+let _termES=null, _termBusy=false;
+/* Never STEAL focus from the user. Only grab the terminal input if the user isn't
+   already typing in some OTHER text field (e.g. the main chat dock #q) — otherwise the
+   terminal yanked the caret away mid-keystroke when a lookup mounted or finished
+   ("Ace looking things up cut me off from typing"). */
+function termFocusIfIdle(inp){
+  if(!inp) return;
+  const a=document.activeElement;
+  if(a && a!==inp && a!==document.body && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName||"")) return;
+  inp.focus();
+}
+function mountTerminal(body, quiet){
+  if(body.querySelector(".term")){ renderTabs(); return; }  // already live — don't wipe on poll
+  body.innerHTML=
+    '<div class="term">'+
+      '<div class="term-banner"><pre>'+esc(ACE_BANNER)+'</pre>'+
+        '<div class="sub"><b>ACE TERMINAL</b> · grounded · no-fab · on-device-first — type a line and press <b>ENTER</b></div></div>'+
+      '<div class="term-out" id="term-out"></div>'+
+      '<div class="term-in"><span class="pfx">ace&nbsp;&rsaquo;</span>'+
+        '<input id="term-in" autocomplete="off" spellcheck="false" placeholder="ask Ace anything — e.g. what is my live system status?"/></div>'+
+      '<div class="term-status">'+
+        '<span class="s"><span class="sdot ok" id="term-dot"></span><span id="term-state">READY</span></span>'+
+        '<span class="s">SESSION <b id="term-turns">0</b></span>'+
+        '<span class="s">ENGINE <b>ACE CORE</b></span>'+
+        '<span class="s">LINK <b>/api/tell</b></span></div>'+
+    '</div>';
+  renderTabs();
+  const out=$("term-out"), inp=$("term-in");
+  termWrite(out,"sys","Ace Terminal ready. Connected to the local core — every answer is grounded, nothing is faked.");
+  inp.addEventListener("keydown",e=>{
+    if(e.key==="Enter"){ e.preventDefault(); const q=inp.value.trim(); if(q){ inp.value=""; termSend(q); } }
+  });
+  setTimeout(()=>termFocusIfIdle(inp),30);
+}
+function termWrite(out, cls, text){
+  const d=document.createElement("div"); d.className="ln l-"+cls; d.textContent=text;
+  out.appendChild(d); out.scrollTop=out.scrollHeight; return d;
+}
+function termSetState(s, busy){
+  const st=$("term-state"), dot=$("term-dot"); if(!st)return;
+  st.textContent=s; if(dot) dot.className="sdot "+(busy?"busy":"ok");
+}
+function termSend(q){
+  const out=$("term-out"); if(!out)return;
+  if(_termES){ _termES.close(); _termES=null; }
+  // echo the command line, TUI-style
+  const cmd=document.createElement("div"); cmd.className="ln l-cmd";
+  cmd.innerHTML='<span class="pfx">ace &rsaquo; </span>'+esc(q); out.appendChild(cmd);
+  _termBusy=true; termSetState("THINKING…",true);
+  const tn=$("term-turns"); if(tn) tn.textContent=String((+tn.textContent||0)+1);
+  const t0=performance.now(); let tFirst=null, src="pending", thinkLn=null, ansLn=null, ended=false;
+  const ans=()=>{ if(!ansLn){ ansLn=document.createElement("div"); ansLn.className="ln l-ans";
+    ansLn.innerHTML='<span class="src">'+esc((src||"ace").toUpperCase())+'</span>'; ansLn._txt=""; out.appendChild(ansLn);} return ansLn; };
+  function finish(state){
+    if(ended)return; ended=true; _termBusy=false;
+    const tot=((performance.now()-t0)/1000).toFixed(1);
+    const ttf=tFirst!=null?((tFirst-t0)/1000).toFixed(1):"—";
+    termWrite(out,"meta","— "+ttf+"s first token · "+tot+"s total"+(state==="error"?" · link error":""));
+    termSetState("READY",false);
+    termFocusIfIdle($("term-in"));   // refocus ONLY if the user isn't typing elsewhere
+  }
+  _termES=new EventSource("/api/tell/stream?q="+encodeURIComponent(q));
+  _termES.addEventListener("source",e=>{ src=e.data; termSetState(("via "+src).toUpperCase(),true); });
+  _termES.addEventListener("thinking",e=>{ if(tFirst==null)tFirst=performance.now();
+    if(!thinkLn){ thinkLn=document.createElement("div"); thinkLn.className="ln l-think"; thinkLn._txt=""; out.appendChild(thinkLn); }
+    thinkLn._txt+=e.data; thinkLn.textContent="· "+thinkLn._txt; out.scrollTop=out.scrollHeight; });
+  _termES.addEventListener("answer",e=>{ if(tFirst==null)tFirst=performance.now();
+    const a=ans(); a._txt+=e.data; a.textContent=""; a.innerHTML='<span class="src">'+esc((src||"ace").toUpperCase())+'</span>'+esc(a._txt);
+    out.scrollTop=out.scrollHeight; });
+  _termES.addEventListener("done",()=>{ if(_termES){_termES.close();_termES=null;}
+    if(!ansLn) termWrite(out,"err","[no answer returned]"); finish("done"); });
+  _termES.onerror=()=>{ if(_termES){_termES.close();_termES=null;}
+    if(!ansLn) termWrite(out,"err","[core unreachable — link error]"); finish("error"); };
 }
 
 /* ===================== SELF-CODE CONSOLE — genuine / commands ===================== */
@@ -1396,8 +1538,10 @@ function drillGated(){
     items.push({nm:"Probate",why:"inherited-property cases — needs the county filing feed",drill:"probate"});
   let h=xpBlock("gated",true);
   h+=sec(items.length+" FEATURES WAITING ON A DATA SOURCE — tap any to learn more");
-  h+=items.map(it=>`<div class="item drillable" onclick="${it.drill==='trading'?"openLab()":"drill('"+it.drill+"')"}"><div class="h"><span class="nm">${esc(it.nm)}<span class="hint">TAP</span></span><span class="meta"${markerAttrs("GATED")}>GATED</span></div><div class="body" style="-webkit-line-clamp:2">${esc(it.why)}</div></div>`).join("");
+  h+=items.map(it=>`<div class="item drillable" data-drill="${esc(it.drill)}"><div class="h"><span class="nm">${esc(it.nm)}<span class="hint">TAP</span></span><span class="meta"${markerAttrs("GATED")}>GATED</span></div><div class="body" style="-webkit-line-clamp:2">${esc(it.why)}</div></div>`).join("");
   drillOpen("◆ WHAT'S GATED & WHY", h);
+  document.querySelectorAll("#drill-body .item[data-drill]").forEach(el=>
+    el.onclick=()=>el.dataset.drill==="trading"?openLab():drill(el.dataset.drill));
 }
 
 /* Generic console drill — render any capability panel's live state (selfcode/browser). */
@@ -1459,10 +1603,12 @@ async function openLab(){
        `<div class="kpi"><b>${esc((d.feed||"—").toUpperCase())}</b><span>WC FEED</span></div>`+
        `<div class="kpi"><b>${esc(d.fires||0)}</b><span>FIRES (LEDGER)</span></div></div>`;
     h+='<div class="drill-sec">ENGINE ROSTER — is each one making money? (tap for the full record)</div>';
+    /* engine names are API-fed strings: bind via data-attribute, never an inline
+       onclick (entities decode before handler JS parses — esc() can't protect it) */
     h+=(d.engines||[]).map(e=>{
        const score=e.graded?` · ${esc(e.graded)} graded · ${esc(Math.round((e.win_rate||0)*100))}% win · ${e.net_pnl>=0?'+':''}${esc(e.net_pnl)} pnl`:'';
        const day=e.fires_24h?` · ${esc(e.fires_24h)} today`:'';
-       return `<div class="drill-row drillable" onclick="openEngine('${esc(e.name)}')"><span class="led ${e.state==='live'?'ok':''}"></span> `+
+       return `<div class="drill-row drillable" data-eng="${esc(e.name)}"><span class="led ${e.state==='live'?'ok':''}"></span> `+
        `<b>${esc(e.name)}</b><span class="hint">TAP</span><span class="drill-meta">${esc(e.kind)} · ${esc((e.state||'').toUpperCase())}${e.fires?` · ${esc(e.fires)} FIRES`:''}${day}${score}</span></div>`;
     }).join("");
     h+='<div class="drill-sec">LAST '+((d.rows||[]).length)+' FIRES (of '+esc(d.fires||0)+' total in the ledger)</div>';
@@ -1470,6 +1616,8 @@ async function openLab(){
         ? d.rows.map(r=>`<div class="drill-row"><b>${esc(r.engine)}</b><span class="drill-meta">${esc(r.direction)} · ${esc(r.outcome||'open')} · ${esc(r.ts||'')}</span></div>`).join("")
         : emptyBox("DORMANT — 0 FIRES (NO PRODUCER WIRED · WC FEED LANDS TOMORROW)");
     drillOpen("⚡ TRADING ENGINE LAB", h);
+    document.querySelectorAll("#drill-body .drill-row[data-eng]").forEach(el=>
+      el.onclick=()=>openEngine(el.dataset.eng));
     _labTimer=setInterval(refreshTicker,1000);   // ms-fresh ticker while the lab is open
   }catch(e){ drillOpen("⚡ TRADING ENGINE LAB", emptyBox("unavailable — "+String(e.message||e))); }
 }

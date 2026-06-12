@@ -97,8 +97,14 @@ def _now_hour() -> int:
 
 
 def classify(text: str) -> str | None:
-    """The social category of a whole-message turn, or ``None`` if it isn't social."""
-    t = (text or "").strip()
+    """The social category of a whole-message turn, or ``None`` if it isn't social.
+
+    Defensive on type: this sits in front of the brain on EVERY turn, so a
+    non-string (whatever the transport decoded) means "not social" — it must
+    never raise into the routing hot path."""
+    if not isinstance(text, str):
+        return None
+    t = text.strip()
     if not t:
         return None
     for name, pattern in _CATEGORIES:
@@ -128,7 +134,10 @@ def reply(text: str, *, hour: int | None = None) -> str | None:
         sal = _salutation(_now_hour() if hour is None else hour)
         template = _GREETING_TEMPLATES[seed % len(_GREETING_TEMPLATES)]
         return template.format(sal=sal)
-    options = _REPLIES[cat]
+    # .get + fallback: if _CATEGORIES and _REPLIES ever drift (a category added
+    # without replies), degrade to a safe canned line — this runs in front of the
+    # brain on EVERY turn, so a KeyError here would break the routing hot path.
+    options = _REPLIES.get(cat) or ("Got it.",)
     return options[seed % len(options)]
 
 

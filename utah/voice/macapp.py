@@ -52,6 +52,12 @@ APP_PATH: Path = runtime.UTAH_HOME / "UtahVoice.app"
 EXEC_NAME = "UtahVoice"
 MIC_REASON = 'Utah listens for the wake word "ace" and your spoken commands.'
 
+#: codesign talks to the system signing/notarization machinery, which can wedge
+#: (stale securityd, slow first-run policy checks). The supervisor calls ensure()
+#: while building the voice child's spec — an unbounded hang there stalls the
+#: whole fleet bring-up, so every codesign call is time-bounded.
+_CODESIGN_TIMEOUT_S = float(os.environ.get("UTAH_VOICE_CODESIGN_TIMEOUT_S", "120"))
+
 #: The app stub sits at this suffix under a framework version directory.
 _STUB_SUFFIX = "/Resources/Python.app/Contents/MacOS/Python"
 
@@ -157,11 +163,15 @@ def _needs_rebuild(stub_src: str) -> bool:
             return True
     except Exception:  # noqa: BLE001
         return True
-    # Signature still valid?
-    return subprocess.run(
-        ["codesign", "--verify", "--deep", "--strict", str(APP_PATH)],
-        capture_output=True,
-    ).returncode != 0
+    # Signature still valid? An unverifiable signature (codesign wedged/missing)
+    # reads as stale — rebuild — never an exception into the supervisor.
+    try:
+        return subprocess.run(
+            ["codesign", "--verify", "--deep", "--strict", str(APP_PATH)],
+            capture_output=True, timeout=_CODESIGN_TIMEOUT_S,
+        ).returncode != 0
+    except (subprocess.TimeoutExpired, OSError):
+        return True
 
 
 def _build(stub_src: str) -> None:
@@ -184,7 +194,7 @@ def _build(stub_src: str) -> None:
     # of identical bytes and is attributed to com.utah.voice (not a random cdhash).
     res = subprocess.run(
         ["codesign", "--force", "--sign", "-", "--identifier", BUNDLE_ID, str(APP_PATH)],
-        capture_output=True, text=True,
+        capture_output=True, text=True, timeout=_CODESIGN_TIMEOUT_S,
     )
     if res.returncode != 0:
         raise RuntimeError(f"codesign failed: {res.stderr.strip()}")

@@ -128,7 +128,8 @@ def test_run_scheduled_drives_real_sends_to_uncontacted_email_leads(monkeypatch)
     r = outreach.run_scheduled(limit=1, ledger=FakeLedger(),
                                foundation_gate=lambda cap: None,        # substrate green
                                channel="email", now_hour=10,           # pin a business hour
-                               send_fn=lambda to, s, b: sent.append(to) or {"sent": True})
+                               send_fn=lambda to, s, b: sent.append(to) or {"sent": True},
+                               verify_fn=lambda e: {"deliverable": True})  # isolate send-driving from DNS
     assert r["sent"] == 1 and sent == ["joe@example.com"]               # capped + actually sent
 
 
@@ -219,6 +220,93 @@ def test_send_proceeds_with_real_canspam_address():
 
     leads = [{"name": "Email Co", "contact": {"email": "x@y.com"}}]
     footer = {"address": "123 Main St, Newnan GA 30263", "unsubscribe": "Reply STOP to opt out."}
-    r = outreach.queue(lg, "c1", leads, footer=footer, can_send=True, send_fn=fake_send)
+    r = outreach.queue(lg, "c1", leads, footer=footer, can_send=True, send_fn=fake_send,
+                       verify_fn=lambda e: {"deliverable": True})  # isolate from DNS — gate has its own tests
     assert sent_to == ["x@y.com"]                          # real address -> real send proceeds
     assert r["sent"] == 1
+
+
+def test_compose_includes_business_site_and_passes_spam_gate():
+    """Michael's directive: every outreach email carries the business site (proof of
+    work). Cold pitch + follow-ups all include it, and the link must never trip the
+    spam-content gate that would block the send."""
+    msg = outreach.compose({"name": "Joe's Diner", "kind": "restaurant"}, "smb_no_website",
+                           footer={"address": "123 Main St, Newnan GA", "unsubscribe": "STOP"})
+    assert outreach.BUSINESS_SITE in msg["body"]
+    assert not outreach.content_score(msg["subject"] + " " + msg["body"])["block"]
+    for final in (False, True):
+        fu = outreach.compose_followup({"name": "Joe's Diner"}, final=final,
+                                       footer={"address": "123 Main St, Newnan GA",
+                                               "unsubscribe": "STOP"})
+        assert outreach.BUSINESS_SITE in fu["body"]
+        assert not outreach.content_score(fu["subject"] + " " + fu["body"])["block"]
+
+
+def test_landed_send_flips_lead_status_to_contacted(monkeypatch):
+    """Funnel truth: a send that actually LANDS marks the lead contacted (B-fix: 58
+    sends had left every lead at status='new', blinding the funnel metrics). The flip
+    happens ONLY on success — a gated/failed send leaves the lead untouched."""
+    flipped: list[str] = []
+
+    class FakeLedger:
+        def uncontacted_email_leads(self, campaign, limit):
+            return [{"name": "Joe's Diner", "kind": "restaurant",
+                     "contact": {"email": "joe@example.com"}}][:limit]
+        def is_contacted(self, r, c):
+            return False
+        def log_outreach(self, r, c, channel="email"):
+            return True
+        def record_mail(self, *a, **k):
+            return True
+        def mark_lead_contacted(self, recipient):
+            flipped.append(recipient)
+            return 1
+
+    monkeypatch.setattr(outreach, "default_footer",
+                        lambda: {"address": "28 Dogwood Rd, Newnan GA 30263", "unsubscribe": "Reply STOP"})
+    r = outreach.run_scheduled(limit=1, ledger=FakeLedger(),
+                               foundation_gate=lambda cap: None, channel="email",
+                               now_hour=10, send_fn=lambda to, s, b: {"sent": True},
+                               verify_fn=lambda e: {"deliverable": True})  # isolate from DNS
+    assert r["sent"] == 1 and flipped == ["joe@example.com"]
+
+    # failed send: no flip, lead keeps status (and its one shot)
+    flipped.clear()
+    r = outreach.run_scheduled(limit=1, ledger=FakeLedger(),
+                               foundation_gate=lambda cap: None, channel="email",
+                               now_hour=10, send_fn=lambda to, s, b: {"sent": False, "error": "smtp down"},
+                               verify_fn=lambda e: {"deliverable": True})  # reach the send to test smtp-down
+    assert r["sent"] == 0 and flipped == []
+
+
+# --- deliverability gate at the send path: never send to an address that can't receive ---
+_REAL_FOOTER = {"address": "28 Dogwood Rd, Newnan GA 30263", "unsubscribe": "Reply STOP"}
+
+
+def test_queue_does_not_send_to_unverifiable_email():
+    """The send-path deliverability gate: an address that can't receive mail is NEVER sent
+    to — that hard bounce is exactly what blacklists the sending domain. Counted as
+    unverified, not sent. verify_fn is injectable so the test never touches real DNS."""
+    failures.set_store(FakeFailureStore())
+    lg = _RecLedger()
+    sent: list = []
+    leads = [{"name": "Dead Co", "contact": {"email": "owner@no-such-mail.invalid"}}]
+    r = outreach.queue(lg, "c1", leads, footer=_REAL_FOOTER, can_send=True,
+                       send_fn=lambda *a: sent.append(a) or {"sent": True},
+                       verify_fn=lambda e: {"deliverable": False, "reason": "no-mail-server"})
+    assert sent == []                       # nothing left the building
+    assert r["unverified"] == 1
+    assert r["sent"] == 0
+
+
+def test_queue_sends_to_verified_email():
+    failures.set_store(FakeFailureStore())
+    lg = _RecLedger()
+    sent: list = []
+    leads = [{"name": "Live Co", "contact": {"email": "owner@livebiz.com"}}]
+    r = outreach.queue(lg, "c1", leads, footer=_REAL_FOOTER, can_send=True,
+                       send_fn=lambda to, s, b: sent.append(to) or {"sent": True},
+                       verify_fn=lambda e: {"deliverable": True, "reason": "ok", "confidence": "mx"})
+    assert sent == ["owner@livebiz.com"]
+    assert r["sent"] == 1
+    assert r["unverified"] == 0

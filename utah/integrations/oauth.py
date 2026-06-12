@@ -34,13 +34,21 @@ class OAuthError(RuntimeError):
 
 
 def _security(*args: str) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
-        ["/usr/bin/security", *args],
-        capture_output=True,
-        text=True,
-        timeout=8,
-        check=False,
-    )
+    """Bounded ``security(1)`` call. A wedged Keychain (hang → TimeoutExpired) or a
+    missing binary reads as a FAILED lookup (returncode 1), never an exception — the
+    OAuthError contract upstream must not be broken by a raw TimeoutExpired."""
+    try:
+        return subprocess.run(
+            ["/usr/bin/security", *args],
+            capture_output=True,
+            text=True,
+            timeout=8,
+            check=False,
+        )
+    except (subprocess.TimeoutExpired, OSError) as exc:
+        log.warning("oauth: security(1) %s failed: %s", args[0] if args else "?", exc)
+        return subprocess.CompletedProcess(args=["security", *args], returncode=1,
+                                           stdout="", stderr=str(exc))
 
 
 def read_blob(*, service: str = UTAH_SERVICE, account: str = GMAIL_ACCOUNT) -> dict | None:
@@ -58,14 +66,26 @@ def read_blob(*, service: str = UTAH_SERVICE, account: str = GMAIL_ACCOUNT) -> d
         raise OAuthError(f"corrupt OAuth blob ({service}/{account}): {exc}") from exc
 
 
-def write_blob(blob: dict, *, service: str = UTAH_SERVICE, account: str = GMAIL_ACCOUNT) -> None:
+def write_blob(blob: dict, *, service: str = UTAH_SERVICE, account: str = GMAIL_ACCOUNT) -> bool:
+    """Persist *blob* under the Keychain service. Returns True only when the Keychain
+    ACCEPTED the write — a silent write failure would strand a refreshed token in
+    memory and force a re-consent on the next process.
+
+    The payload rides ``security -w`` argv (same-user-visible for the ms the call
+    runs): ``add-generic-password`` has no non-interactive stdin mode, and the
+    destination IS the Keychain — the same trade Ace's capstone gateway makes."""
     if platform.system() != "Darwin":
-        return
+        return False
     payload = json.dumps(blob, separators=(",", ":"))
-    _security(
+    p = _security(
         "add-generic-password", "-U",
         "-s", service, "-a", account, "-w", payload,
     )
+    if p.returncode != 0:
+        log.warning("oauth: keychain write failed (%s/%s): rc=%s", service, account,
+                    p.returncode)
+        return False
+    return True
 
 
 def _expired(blob: dict) -> bool:
@@ -98,6 +118,11 @@ def _post_form(url: str, fields: dict) -> tuple[int, Any]:
             return exc.code, json.loads(body)
         except json.JSONDecodeError:
             return exc.code, body
+    except (urllib.error.URLError, TimeoutError) as exc:
+        # network down/DNS dead/read timeout — OAuthError, never a stray URLError
+        # (every caller catches the OAuthError contract, nothing else).
+        raise OAuthError(
+            f"token endpoint unreachable: {getattr(exc, 'reason', exc)}") from exc
 
 
 def refresh_blob(blob: dict) -> dict:
@@ -123,7 +148,12 @@ def refresh_blob(blob: dict) -> dict:
         if "invalid_grant" in low:
             raise OAuthError("refresh token rejected (invalid_grant)")
         raise OAuthError(f"token refresh failed ({status}): {str(payload)[:200]}")
-    blob["token"] = payload["access_token"]
+    tok = payload.get("access_token")
+    if not tok:
+        # a 200 with an odd payload must stay inside the OAuthError contract —
+        # a raw KeyError here escaped everything the callers catch.
+        raise OAuthError(f"token refresh returned no access_token: {str(payload)[:200]}")
+    blob["token"] = tok
     blob["client_id"] = cid
     blob["client_secret"] = secret
     ttl = int(payload.get("expires_in", 3600))
@@ -162,6 +192,9 @@ def gmail_profile(*, service: str = UTAH_SERVICE) -> dict:
             p = json.loads(resp.read().decode())
     except urllib.error.HTTPError as exc:
         raise OAuthError(f"profile failed: {exc.code}") from exc
+    except (urllib.error.URLError, TimeoutError) as exc:
+        raise OAuthError(
+            f"profile unreachable: {getattr(exc, 'reason', exc)}") from exc
     email = config.normalize_owner_email(p.get("emailAddress"))
     return {
         "email": email,
@@ -196,7 +229,8 @@ def copy_ace_to_utah_if_correct() -> bool:
         return False
     if email.lower() != config.OWNER_EMAIL.lower():
         return False
-    write_blob(blob, service=UTAH_SERVICE)
+    if not write_blob(blob, service=UTAH_SERVICE):
+        return False                          # honest: a rejected write is NOT a copy
     log.info("oauth: copied Ace gmail token → com.utah.oauth (%s)", email)
     return True
 

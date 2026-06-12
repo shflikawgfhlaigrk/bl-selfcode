@@ -13,6 +13,7 @@ identically. Ollama (0.30.5) streams ``message.thinking`` separately from
 """
 from __future__ import annotations
 
+import http.client
 import json
 import logging
 import os
@@ -153,7 +154,9 @@ def _post(payload: dict, timeout: int):
         return urllib.request.urlopen(req, timeout=timeout)
     except urllib.error.URLError as exc:
         raise LocalUnavailable(f"ollama unreachable: {getattr(exc, 'reason', exc)}") from exc
-    except OSError as exc:
+    # BadStatusLine & friends are http.client.HTTPException — NOT OSError — and
+    # urlopen raises them raw on a garbage response line.
+    except (OSError, http.client.HTTPException) as exc:
         raise LocalUnavailable(f"ollama call failed: {exc}") from exc
 
 
@@ -163,7 +166,8 @@ def _http_runner(payload: dict, timeout: int) -> dict:
     resp = _post(payload, timeout)
     try:
         body = resp.read().decode("utf-8")
-    except OSError as exc:
+    # IncompleteRead (a half-delivered body) is HTTPException, not OSError.
+    except (OSError, http.client.HTTPException) as exc:
         raise LocalUnavailable(f"ollama read failed: {exc}") from exc
     finally:
         resp.close()
@@ -193,6 +197,11 @@ def _http_stream_runner(payload: dict, timeout: int) -> Iterator[dict]:
             yield {"content": msg.get("content") or "", "thinking": msg.get("thinking") or ""}
             if obj.get("done"):
                 break
+    # A socket dying mid-stream raises OSError; a half-delivered chunked body raises
+    # http.client.IncompleteRead (HTTPException, NOT OSError). Both must escalate as
+    # LocalUnavailable, never crash the chat/voice caller mid-sentence.
+    except (OSError, http.client.HTTPException) as exc:
+        raise LocalUnavailable(f"ollama stream failed: {exc}") from exc
     finally:
         resp.close()
 

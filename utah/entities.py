@@ -9,7 +9,10 @@ the recall boost both run on this today, so it must be deterministic and total
 """
 from __future__ import annotations
 
+import logging
 import re
+
+log = logging.getLogger("utah.entities")
 
 _CAP = re.compile(r"\b([A-Z][a-zA-Z0-9]*(?:\s+[A-Z][a-zA-Z0-9]*)*)\b")
 
@@ -80,7 +83,8 @@ def extract(text: str) -> list[str]:
         try:
             return list(dict.fromkeys(e for e in (_extractor(text) or []) if e and len(e) > 1))
         except Exception:  # noqa: BLE001 — a bad NER must never break recall/supersede
-            pass
+            log.warning("injected entity extractor failed — falling back to regex pass",
+                        exc_info=True)
     return _regex_extract(text)
 
 

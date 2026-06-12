@@ -1,20 +1,20 @@
-"""The IG publish adapter contract: instagram-only, gated without creds, and the
-post() seam still never fabricates. (The old _real_publish RAISED even with creds —
-the marketer could never post; this locks the repaired contract.)"""
+"""The IG/TikTok publish adapter contract: gated without creds, post() never fabricates."""
 from __future__ import annotations
 
 import pytest
 
+from utah.integrations import social_post
 from utah.product import marketer
 
 
-def test_unimplemented_channel_raises_honestly():
-    with pytest.raises(RuntimeError, match="not implemented"):
-        marketer._real_publish("cap", "https://x/v.mp4", "tiktok")
+def test_tiktok_publish_requires_creds(monkeypatch, tmp_path):
+    monkeypatch.setattr(social_post, "_SECRETS", tmp_path)
+    with pytest.raises(RuntimeError, match="gated"):
+        social_post.publish_tiktok("cap", "https://x/v.mp4")
 
 
 def test_post_gates_without_creds(monkeypatch, tmp_path):
-    monkeypatch.setattr(marketer, "_SECRETS", tmp_path)
+    monkeypatch.setattr(social_post, "_SECRETS", tmp_path)
     res = marketer.post("caption", media_ref="https://x/v.mp4", channel="instagram")
     assert res == {"posted": False, "gated": True, "channel": "instagram"}
 

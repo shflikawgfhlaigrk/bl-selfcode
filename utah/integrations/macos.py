@@ -38,6 +38,10 @@ def read_clipboard(*, run_fn=None) -> dict:
 
 
 def reveal_file(path: str, *, run_fn=None) -> dict:
+    """Reveal *path* in Finder. Empty/blank paths are refused BEFORE any subprocess —
+    ``open -R ""`` would just error out of osascript-land with a useless message."""
+    if not (path or "").strip():
+        return {"ok": False, "gated": False, "error": "path required"}
     if run_fn is None and not perms_available():
         return _gate("reveal_file")
     runner = run_fn or (lambda p: subprocess.run(["open", "-R", p], check=True,
@@ -51,13 +55,20 @@ def reveal_file(path: str, *, run_fn=None) -> dict:
 
 
 def run_shortcut(name: str, *, run_fn=None) -> dict:
+    """Run a macOS Shortcut by *name* and surface its stdout (a Shortcuts automation
+    returning text is real data — it must reach the caller, not vanish inside the
+    CompletedProcess). Blank names are refused before any subprocess."""
+    if not (name or "").strip():
+        return {"ok": False, "gated": False, "error": "shortcut name required"}
     if run_fn is None and not perms_available():
         return _gate("run_shortcut")
     runner = run_fn or (lambda n: subprocess.run(["shortcuts", "run", n], check=True,
                                                  capture_output=True, text=True, timeout=30))
     try:
-        runner(name)
-        return {"ok": True, "gated": False, "shortcut": name}
+        res = runner(name)
+        out = getattr(res, "stdout", None)
+        return {"ok": True, "gated": False, "shortcut": name,
+                "output": out.strip() if isinstance(out, str) else None}
     except Exception as exc:  # noqa: BLE001
         failures.record("macos", "shortcut_failed", str(exc))
         return {"ok": False, "gated": False, "error": str(exc)}

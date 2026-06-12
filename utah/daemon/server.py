@@ -61,8 +61,9 @@ class ControlServer:
         try:
             if self._sock_path.exists():
                 self._sock_path.unlink()
-        except OSError:
-            pass
+        except OSError as exc:
+            # Bind decides — if the leftover really blocks us it fails loudly there.
+            log.debug("stale socket cleanup failed (bind will decide): %s", exc)
         listener = await anyio.create_unix_listener(str(self._sock_path))
         os.chmod(self._sock_path, 0o600)
         log.info("control socket bound: %s", self._sock_path)
@@ -77,11 +78,25 @@ class ControlServer:
         try:
             raw = stream.extra(SocketAttribute.raw_socket)
             authorize(raw)
-        except (PeerAuthError, Exception) as exc:
+        except PeerAuthError as exc:
             log.warning("rejected connection: %s", exc)
             await stream.aclose()
             return
-        # 2. Framed request/response loop.
+        except Exception:  # cred machinery itself broke → deny (fail-closed)
+            log.exception("peer-cred check failed — denying connection")
+            await stream.aclose()
+            return
+        # 2. Framed request/response loop. The outer guard is structural: one
+        # connection's surprise must never propagate into listener.serve and
+        # take every other client down with it. (Cancellation passes through —
+        # it is BaseException, not Exception.)
+        try:
+            await self._serve_connection(stream)
+        except Exception:
+            log.exception("connection handler crashed — closing this peer only")
+            failures.record("daemon", "connection_crash", "unhandled in _serve_connection")
+
+    async def _serve_connection(self, stream) -> None:
         async with stream:
             while True:
                 try:
@@ -201,4 +216,12 @@ class ControlServer:
             return None if req.is_notification else rpc.err(
                 req.id, INTERNAL_ERROR, f"internal error in {req.method}"
             )
-        return None if req.is_notification else rpc.ok(req.id, result)
+        if req.is_notification:
+            return None
+        try:
+            return rpc.ok(req.id, result)
+        except Exception as exc:  # un-JSON-able result — the one encode the
+            # try above can't see; without this it crashed the whole listener.
+            log.exception("unencodable result from %s", req.method)
+            failures.record("daemon", "unencodable_result", f"{req.method}: {exc}")
+            return rpc.err(req.id, INTERNAL_ERROR, f"unencodable result from {req.method}")

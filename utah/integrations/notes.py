@@ -22,11 +22,24 @@ def perms_available() -> bool:
     return MACOS_FLAG.exists()
 
 
+def _as_str(s: str) -> str:
+    """AppleScript string literal: double quotes + backslash escapes. AppleScript
+    accepts ONLY double-quoted strings — the previous ``!r`` (Python repr → SINGLE
+    quotes) was an osascript syntax error on every call, the same bug class proven
+    live in notify on 2026-06-10."""
+    return '"' + str(s).replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
+def _script(title: str, body: str) -> str:
+    """The AppleScript for one new note — PURE so the literal contract is testable
+    without macOS/Notes."""
+    return (f'tell application "Notes" to make new note with properties '
+            f'{{name:{_as_str(title)}, body:{_as_str(body)}}}')
+
+
 def _real_run(title: str, body: str) -> bool:  # pragma: no cover
-    script = (f'tell application "Notes" to make new note with properties '
-              f'{{name:{title!r}, body:{body!r}}}')
-    subprocess.run(["osascript", "-e", script], check=True, capture_output=True,
-                   text=True, timeout=15)
+    subprocess.run(["osascript", "-e", _script(title, body)], check=True,
+                   capture_output=True, text=True, timeout=15)
     return True
 
 

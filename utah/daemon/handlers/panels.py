@@ -8,7 +8,10 @@ from __future__ import annotations
 import os
 from collections.abc import Awaitable, Callable
 
-import psutil
+try:
+    import psutil
+except ImportError:  # degraded gauge, never a dead panel module
+    psutil = None  # type: ignore[assignment]
 
 from utah.daemon.dispatch import Context
 
@@ -16,18 +19,28 @@ PanelHandler = Callable[[Context], Awaitable[dict]]
 
 
 def _sys_detail() -> dict:
+    """Live per-core/process gauges for the governor drill-down.
+
+    Honest degradation: a missing psutil or a down loadavg gauge is reported
+    as empty/None plus a ``note`` — never fabricated zeros that read as "idle".
+    """
+    try:
+        l1, l5, l15 = (round(x, 2) for x in os.getloadavg())
+    except OSError:  # "load average unobtainable" — report the gauge as down
+        l1 = l5 = l15 = None
+    out: dict = {"load1": l1, "load5": l5, "load15": l15}
+    if psutil is None:
+        out.update(per_core_pct=[], top_processes=[],
+                   note="DEGRADED: psutil unavailable — per-core/process gauges off")
+        return out
     per = [round(x, 1) for x in psutil.cpu_percent(interval=0.15, percpu=True)]
     procs = sorted(
         (pr.info for pr in psutil.process_iter(["pid", "name", "cpu_percent"])),
         key=lambda x: -(x.get("cpu_percent") or 0.0),
     )
-    l1, l5, l15 = os.getloadavg()
-    return {
-        "per_core_pct": per,
-        "load1": round(l1, 2),
-        "load5": round(l5, 2),
-        "load15": round(l15, 2),
-        "top_processes": [
+    out.update(
+        per_core_pct=per,
+        top_processes=[
             {
                 "pid": q["pid"],
                 "name": q.get("name"),
@@ -35,7 +48,8 @@ def _sys_detail() -> dict:
             }
             for q in procs[:8]
         ],
-    }
+    )
+    return out
 
 
 def _ledger_recent(domain: str, limit: int) -> list:
@@ -208,7 +222,7 @@ async def _panel_mail(ctx: Context) -> dict:
 
 
 async def _panel_marketer(ctx: Context) -> dict:
-    from utah.product import marketer
+    from utah.integrations import social_post
     from utah.product.ledger import Ledger
 
     def _mk() -> dict:
@@ -216,12 +230,15 @@ async def _panel_marketer(ctx: Context) -> dict:
             rows = Ledger().recent("marketer", 15)
         except Exception:  # noqa: BLE001
             rows = []
+        snap = social_post.status()
         return {
             "panel": "marketer",
             "rows": rows,
-            "instagram": "ready" if marketer.creds_available("instagram") else "gated",
-            "tiktok": "ready" if marketer.creds_available("tiktok") else "gated",
-            "note": "email_spotlight LIVE (mail.send); IG/TikTok gated on creds",
+            "email": snap["email"],
+            "instagram": snap["channels"]["instagram"],
+            "tiktok": snap["channels"]["tiktok"],
+            "channels": snap["channels"],
+            "note": snap["note"],
         }
 
     with ctx.governor.read_admission():

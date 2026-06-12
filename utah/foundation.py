@@ -30,15 +30,20 @@ PG_PORT = "5433"
 _UNSET = object()
 
 
-def postgres_ready(*, isready: str = PG_ISREADY, host: str = PG_HOST, port: str = PG_PORT) -> bool:
-    """True when Utah Postgres accepts connections on the /tmp socket."""
+def postgres_ready(*, isready: str = PG_ISREADY, host: str = PG_HOST, port: str = PG_PORT,
+                   timeout_s: float = 5.0) -> bool:
+    """True when Utah Postgres accepts connections on the /tmp socket.
+
+    Bounded by *timeout_s*: a wedged pg_isready (disk stall, socket black hole)
+    reads as down instead of hanging the probe — the cron gate needs an answer.
+    """
     if not os.path.isfile(isready):
         return False
     try:
         res = subprocess.run(
             [isready, "-h", host, "-p", port, "-q"],
             capture_output=True,
-            timeout=5,
+            timeout=timeout_s,
             check=False,
         )
         return res.returncode == 0
@@ -47,11 +52,18 @@ def postgres_ready(*, isready: str = PG_ISREADY, host: str = PG_HOST, port: str 
 
 
 def supervisor_alive(*, pid_path=os.fspath(runtime.RUN_DIR / "utah-sup.pid")) -> bool:
-    """True when the supervisor pidfile points at a live process."""
+    """True when the supervisor pidfile points at a live process.
+
+    pid <= 0 is rejected outright: ``os.kill(0, 0)`` probes OUR process group and
+    ``os.kill(-1, 0)`` probes EVERY process — both would read a zeroed/corrupt
+    pidfile as a live supervisor.
+    """
     try:
         raw = open(pid_path, encoding="utf-8").read().strip()
         pid = int(raw)
     except (OSError, ValueError):
+        return False
+    if pid <= 0:
         return False
     try:
         os.kill(pid, 0)
@@ -61,15 +73,27 @@ def supervisor_alive(*, pid_path=os.fspath(runtime.RUN_DIR / "utah-sup.pid")) ->
 
 
 def daemon_ping(*, ping_fn: Callable[[], bool] | None = None) -> bool:
-    """True when the control socket answers ``ping``."""
-    if ping_fn is not None:
-        return ping_fn()
-    from utah.daemon import client as ctl
-
+    """True when the control socket answers ``ping``. Total: a probe that raises
+    (socket gone, daemon mid-restart) is the down signal, never an exception."""
     try:
+        if ping_fn is not None:
+            return bool(ping_fn())
+        from utah.daemon import client as ctl
+
         out = ctl.call_sync("ping", timeout=3.0)
         return bool(out.get("ok") or out.get("pong"))
     except Exception:  # noqa: BLE001 — unreachable is the signal
+        return False
+
+
+def _run_probe(name: str, fn: Callable[[], bool]) -> bool:
+    """One substrate probe, totalized: a crashing probe is a red check (the
+    check() docstring promises 'never raises'), logged so the crash itself
+    is not silent."""
+    try:
+        return bool(fn())
+    except Exception:  # noqa: BLE001 — a broken probe must read as down, not crash the cron
+        log.warning("foundation probe %s crashed — treating as down", name, exc_info=True)
         return False
 
 
@@ -85,9 +109,9 @@ def check(
     ping_fn = ping_fn or (lambda: daemon_ping(ping_fn=None))
 
     checks = {
-        "postgres": postgres_fn(),
-        "supervisor": supervisor_fn(),
-        "daemon": ping_fn(),
+        "postgres": _run_probe("postgres", postgres_fn),
+        "supervisor": _run_probe("supervisor", supervisor_fn),
+        "daemon": _run_probe("daemon", ping_fn),
     }
     anomalies: list[str] = []
     if not checks["postgres"]:

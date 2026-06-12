@@ -39,13 +39,20 @@ class Bus:
     """Process-local fan-out. ``channels=None`` on a subscription means 'all'."""
 
     def __init__(self, buffer: int = 256) -> None:
-        self._buffer = buffer
+        # Floor of 1: a zero/negative buffer would make every subscription
+        # born-undeliverable (every publish an instant drop).
+        self._buffer = max(1, int(buffer))
         self._subs: dict[int, tuple] = {}
         self._ids = itertools.count(1)
         self.published = 0
         self.dropped = 0
+        self.pruned = 0
 
     def subscribe(self, channels=None) -> Subscription:
+        """Register a subscriber. A *falsy* ``channels`` (``None`` OR ``[]``)
+        means ALL channels — the server hands ``params.get("channels")``
+        straight through, so an omitted key and an empty list are both the
+        firehose. Pinned by test; changing it silently breaks the deck."""
         sid = next(self._ids)
         send, receive = anyio.create_memory_object_stream(self._buffer)
         chans = set(channels) if channels else None
@@ -58,7 +65,11 @@ class Bus:
             pair[0].close()
 
     def publish(self, channel: str, event: dict) -> int:
-        """Fan out one event. Never blocks; drops to a full subscriber."""
+        """Fan out one event. Never blocks and never raises on a bad subscriber:
+        a full buffer drops the event (counted), a dead receive end (subscriber
+        task died without unsubscribing) prunes the subscription — an uncaught
+        BrokenResourceError here would crash every publisher (ledger, handlers,
+        the deck feed)."""
         msg = {"channel": channel, "event": event}
         delivered = 0
         for sid, (send, chans) in list(self._subs.items()):
@@ -70,6 +81,10 @@ class Bus:
             except anyio.WouldBlock:
                 self.dropped += 1
                 log.debug("subscriber %d full → dropped event on %s", sid, channel)
+            except (anyio.BrokenResourceError, anyio.ClosedResourceError):
+                self._remove(sid)
+                self.pruned += 1
+                log.debug("subscriber %d dead → pruned on publish to %s", sid, channel)
         self.published += 1
         return delivered
 

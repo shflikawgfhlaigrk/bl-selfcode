@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import logging
 import os
+import threading
 from collections import deque
 
 log = logging.getLogger("utah.voice.vad")
@@ -30,6 +31,21 @@ class VAD:
     def reset(self) -> None: ...                  # pragma: no cover
 
 
+def _frame_f32(frame: bytes):
+    """int16 PCM bytes → the exact float32 window Silero requires: scaled to
+    [-1, 1] and pad/trim to FRAME samples. Pure (numpy only), so the normalization
+    the model depends on is provable without loading torch/ONNX."""
+    import numpy as np
+
+    a = np.frombuffer(frame, dtype="int16").astype("float32") / 32768.0
+    if a.shape[0] != FRAME:  # Silero needs exactly FRAME samples
+        if a.shape[0] < FRAME:
+            a = np.pad(a, (0, FRAME - a.shape[0]))
+        else:
+            a = a[:FRAME]
+    return a
+
+
 class SileroVAD:
     """Silero VAD (ONNX, lazy-loaded). ``prob`` returns P(speech) for one 512-sample
     (32 ms) int16 PCM frame; ``reset`` clears the model's recurrent state between
@@ -37,26 +53,22 @@ class SileroVAD:
 
     def __init__(self) -> None:
         self._model = None
+        self._load_lock = threading.Lock()  # one lazy ONNX load, even under a race
 
     def _load(self):
         if self._model is None:
-            from silero_vad import load_silero_vad
+            with self._load_lock:
+                if self._model is None:
+                    from silero_vad import load_silero_vad
 
-            self._model = load_silero_vad(onnx=True)
+                    self._model = load_silero_vad(onnx=True)
         return self._model
 
     def prob(self, frame: bytes) -> float:
-        import numpy as np
         import torch
 
         model = self._load()
-        a = np.frombuffer(frame, dtype="int16").astype("float32") / 32768.0
-        if a.shape[0] != FRAME:  # Silero needs exactly FRAME samples
-            if a.shape[0] < FRAME:
-                a = np.pad(a, (0, FRAME - a.shape[0]))
-            else:
-                a = a[:FRAME]
-        return float(model(torch.from_numpy(a), SAMPLE_RATE).item())
+        return float(model(torch.from_numpy(_frame_f32(frame)), SAMPLE_RATE).item())
 
     def reset(self) -> None:
         if self._model is not None and hasattr(self._model, "reset_states"):

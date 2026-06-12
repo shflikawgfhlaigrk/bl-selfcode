@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Ace Terminal</title>
+<style>
+  :root{
+    --bg:#070709;--bg2:#0c0c12;--panel:#100e08;--line:#1c1810;
+    --gold:#c9a24a;--gold2:#ecd08a;--goldglow:rgba(201,162,74,.35);
+    --txt:#e8e3d4;--mut:#7d7765;--dim:#34323c;
+    --ok:#33d17a;--okglow:rgba(51,209,122,.5);--warn:#e7a93b;--err:#e2554b;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%;margin:0}
+  body{background:
+      radial-gradient(1100px 520px at 14% -22%,#15130c 0%,transparent 60%),
+      radial-gradient(800px 460px at 100% 118%,#0e0d16 0%,transparent 60%),var(--bg);
+    color:var(--txt);font:13px/1.5 ui-monospace,"JetBrains Mono",Menlo,monospace;letter-spacing:.2px}
+  ::-webkit-scrollbar{width:8px;height:8px}::-webkit-scrollbar-thumb{background:#23211a;border-radius:4px}
+  ::-webkit-scrollbar-track{background:transparent}
+
+  #shell{height:100dvh;display:grid;grid-template-rows:auto 1fr auto auto;
+    max-width:1080px;margin:0 auto;border-left:1px solid var(--line);border-right:1px solid var(--line);
+    background:linear-gradient(180deg,#080806,#060608)}
+
+  /* top banner */
+  .banner{padding:14px 18px 12px;border-bottom:1px solid var(--line);
+    background:linear-gradient(180deg,#100e08,transparent)}
+  .banner .top{display:flex;align-items:center;gap:14px;margin-bottom:10px}
+  .banner .mark{width:24px;height:24px;border:1.5px solid var(--gold);border-radius:6px;transform:rotate(45deg);box-shadow:0 0 14px var(--goldglow);flex:none}
+  .banner .ttl{color:var(--gold2);letter-spacing:4px;font-size:15px;font-weight:700}
+  .banner .tag{color:var(--mut);font-size:10px;letter-spacing:3px}
+  .banner pre{margin:0;color:var(--gold);font-size:11px;line-height:1.12;letter-spacing:1px;white-space:pre;overflow:hidden}
+  .banner .sub{color:var(--mut);font-size:10.5px;letter-spacing:1.4px;margin-top:8px}
+  .banner .sub b{color:var(--gold2)}
+
+  /* output */
+  .out{min-height:0;overflow:auto;padding:14px 18px;white-space:pre-wrap;word-break:break-word}
+  .ln{margin:0 0 2px}
+  .l-sys{color:var(--mut)}
+  .l-cmd{color:var(--gold2)} .l-cmd .pfx{color:var(--gold);font-weight:700}
+  .l-think{color:#6f6a58;font-style:italic}
+  .l-ans{color:var(--txt)}
+  .l-meta{color:var(--mut);font-size:11px;letter-spacing:.6px}
+  .l-err{color:var(--err)}
+  .src{display:inline-block;font-size:9px;letter-spacing:1px;padding:1px 6px;border-radius:4px;
+    background:#15130c;color:var(--gold);border:1px solid #2a2415;margin-right:7px}
+
+  /* input line */
+  .inrow{display:flex;align-items:center;gap:10px;padding:12px 18px;border-top:1px solid var(--line);
+    background:linear-gradient(0deg,#0c0b07,transparent)}
+  .inrow .pfx{color:var(--gold);font-weight:700;flex:none}
+  .inrow input{flex:1;background:transparent;border:0;outline:0;color:var(--gold2);
+    font:inherit;letter-spacing:.3px;caret-color:var(--gold)}
+  .inrow input::placeholder{color:var(--dim)}
+
+  /* status row */
+  .status{display:flex;gap:20px;align-items:center;padding:7px 18px;border-top:1px solid #14110a;
+    background:#0a0906;color:var(--mut);font-size:9.5px;letter-spacing:1.5px;flex-wrap:wrap}
+  .status .s{display:flex;align-items:center;gap:7px} .status .s b{color:var(--gold2)}
+  .sdot{width:7px;height:7px;border-radius:50%;background:var(--dim)}
+  .sdot.ok{background:var(--ok);box-shadow:0 0 8px var(--okglow)}
+  .sdot.busy{background:var(--warn);box-shadow:0 0 8px rgba(231,169,59,.5)}
+</style>
+</head>
+<body>
+<div id="shell">
+  <div class="banner">
+    <div class="top"><div class="mark"></div><span class="ttl">ACE TERMINAL</span><span class="tag">LOCAL · GROUNDED · NO-FAB</span></div>
+    <pre id="ascii"></pre>
+    <div class="sub">A live terminal into <b>Ace</b> — type a line, press <b>ENTER</b>. Every answer is grounded on real data; nothing is faked.</div>
+  </div>
+  <div class="out" id="out"></div>
+  <div class="inrow"><span class="pfx">ace&nbsp;&rsaquo;</span>
+    <input id="in" autocomplete="off" spellcheck="false" autofocus placeholder="ask Ace anything — e.g. what is my live system status right now?"/></div>
+  <div class="status">
+    <span class="s"><span class="sdot ok" id="dot"></span><span id="state">READY</span></span>
+    <span class="s">SESSION <b id="turns">0</b></span>
+    <span class="s">ENGINE <b>ACE CORE</b></span>
+    <span class="s">LINK <b>/api/tell</b></span>
+  </div>
+</div>
+<script>
+const $=id=>document.getElementById(id);
+const esc=s=>String(s==null?"":s).replace(/[&<>]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[c]));
+const ASCII=
+" █████╗  ██████╗███████╗\n"+
+"██╔══██╗██╔════╝██╔════╝\n"+
+"███████║██║     █████╗  \n"+
+"██╔══██║██║     ██╔══╝  \n"+
+"██║  ██║╚██████╗███████╗\n"+
+"╚═╝  ╚═╝ ╚═════╝╚══════╝";
+$("ascii").textContent=ASCII;
+
+let _es=null;
+function write(cls,text){ const out=$("out");
+  const d=document.createElement("div"); d.className="ln l-"+cls; d.textContent=text;
+  out.appendChild(d); out.scrollTop=out.scrollHeight; return d; }
+function setState(s,busy){ $("state").textContent=s; $("dot").className="sdot "+(busy?"busy":"ok"); }
+
+write("sys","Ace Terminal ready. Connected to the local core — answers stream live below.");
+
+function send(q){
+  const out=$("out"); if(_es){_es.close();_es=null;}
+  const cmd=document.createElement("div"); cmd.className="ln l-cmd";
+  cmd.innerHTML='<span class="pfx">ace &rsaquo; </span>'+esc(q); out.appendChild(cmd);
+  setState("THINKING…",true);
+  const tn=$("turns"); tn.textContent=String((+tn.textContent||0)+1);
+  const t0=performance.now(); let tFirst=null, src="pending", thinkLn=null, ansLn=null, ended=false;
+  function ans(){ if(!ansLn){ ansLn=document.createElement("div"); ansLn.className="ln l-ans";
+    ansLn._txt=""; ansLn.innerHTML='<span class="src">'+esc((src||"ace").toUpperCase())+'</span>'; out.appendChild(ansLn);} return ansLn; }
+  function finish(state){ if(ended)return; ended=true;
+    const tot=((performance.now()-t0)/1000).toFixed(1);
+    const ttf=tFirst!=null?((tFirst-t0)/1000).toFixed(1):"—";
+    write("meta","— "+ttf+"s first token · "+tot+"s total"+(state==="error"?" · link error":""));
+    setState("READY",false); $("in").focus(); }
+  _es=new EventSource("/api/tell/stream?q="+encodeURIComponent(q));
+  _es.addEventListener("source",e=>{ src=e.data; setState(("via "+src).toUpperCase(),true); });
+  _es.addEventListener("thinking",e=>{ if(tFirst==null)tFirst=performance.now();
+    if(!thinkLn){ thinkLn=document.createElement("div"); thinkLn.className="ln l-think"; thinkLn._txt=""; out.appendChild(thinkLn); }
+    thinkLn._txt+=e.data; thinkLn.textContent="· "+thinkLn._txt; out.scrollTop=out.scrollHeight; });
+  _es.addEventListener("answer",e=>{ if(tFirst==null)tFirst=performance.now();
+    const a=ans(); a._txt+=e.data; a.innerHTML='<span class="src">'+esc((src||"ace").toUpperCase())+'</span>'+esc(a._txt);
+    out.scrollTop=out.scrollHeight; });
+  _es.addEventListener("done",()=>{ if(_es){_es.close();_es=null;}
+    if(!ansLn) write("err","[no answer returned]"); finish("done"); });
+  _es.onerror=()=>{ if(_es){_es.close();_es=null;}
+    if(!ansLn) write("err","[core unreachable — link error]"); finish("error"); };
+}
+$("in").addEventListener("keydown",e=>{ if(e.key==="Enter"){ e.preventDefault();
+  const q=$("in").value.trim(); if(q){ $("in").value=""; send(q); } }});
+$("in").focus();
+</script>
+</body>
+</html>

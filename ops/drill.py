@@ -11,23 +11,36 @@ before the deadline or the drill fails loudly (failure ledger + nonzero exit).
 Run it after any substrate change and weekly by hand:
 
     PYTHONPATH=~/Desktop/ProjectUtah ~/.utah/venv/bin/python ops/drill.py
+
+Knobs (env-overridable so tests drive the probes against a fake deck and a
+fake launchctl — never the live fleet):
+  UTAH_DECK_URL      deck base URL        (default http://127.0.0.1:8766)
+  UTAH_LAUNCHCTL     launchctl binary     (default launchctl from PATH)
+  UTAH_KICK_TIMEOUT  kickstart bound, sec (default 15)
 """
 from __future__ import annotations
 
 import json
+import logging
 import os
 import subprocess
 import sys
 import time
 import urllib.request
 
-DECK = "http://127.0.0.1:8766"
+log = logging.getLogger("utah.ops.drill")
+
+DECK = os.environ.get("UTAH_DECK_URL", "http://127.0.0.1:8766")
 UID = os.getuid()
+_LAUNCHCTL = os.environ.get("UTAH_LAUNCHCTL", "launchctl")
+_KICK_TIMEOUT = float(os.environ.get("UTAH_KICK_TIMEOUT", "15"))
 
 
 def _kick(label: str) -> None:
-    subprocess.run(["launchctl", "kickstart", "-k", f"gui/{UID}/{label}"],
-                   check=True, timeout=15)
+    """Kickstart one launchd service. Bounded; raises on failure or timeout —
+    run() turns that into an honest per-service failure instead of a crash."""
+    subprocess.run([_LAUNCHCTL, "kickstart", "-k", f"gui/{UID}/{label}"],
+                   check=True, capture_output=True, timeout=_KICK_TIMEOUT)
 
 
 def _await(check, deadline_s: float, interval: float = 2.0):
@@ -88,9 +101,23 @@ DRILLS = [
 ]
 
 
-def run(drills=None, kick=_kick) -> dict:
-    """Kickstart each service, then hold it to its SLOs. Records failures."""
+def _ledger_record(area: str, kind: str, detail: str) -> None:
+    """Default recorder: the real failures ledger (imported lazily so the drill
+    still RUNS outside the runtime venv — misses then degrade to a warning)."""
+    from utah import failures
+
+    failures.record(area, kind, detail)
+
+
+def run(drills=None, kick=_kick, record=None) -> dict:
+    """Kickstart each service, then hold it to its SLOs.
+
+    Returns ``{"ok": bool, "failed": [...], "results": [...]}``. Missed SLOs go
+    through *record* (the failures-ledger seam); a broken recorder is logged and
+    never masks the drill verdict — the dict and exit code stay honest.
+    """
     drills = DRILLS if drills is None else drills
+    record = _ledger_record if record is None else record
     results, failed = [], []
     for label, checks in drills:
         try:
@@ -107,18 +134,17 @@ def run(drills=None, kick=_kick) -> dict:
                             "detail": detail})
             if not ok:
                 failed.append(f"{label}/{name}")
-    if failed:
+    for miss in failed:
         try:
-            from utah import failures
-
-            for f in failed:
-                failures.record("drill", "restart_slo_missed", f)
-        except Exception:  # noqa: BLE001 — recording is best-effort outside the venv
-            pass
+            record("drill", "restart_slo_missed", miss)
+        except Exception as exc:  # noqa: BLE001 — ledger is best-effort, verdict is not
+            log.warning("drill: could not record %s to the failures ledger: %s",
+                        miss, exc)
     return {"ok": not failed, "failed": failed, "results": results}
 
 
 if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO)
     out = run()
     print(json.dumps(out, indent=1))
     sys.exit(0 if out["ok"] else 1)

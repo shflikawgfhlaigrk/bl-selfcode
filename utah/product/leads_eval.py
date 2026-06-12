@@ -87,13 +87,24 @@ def measure_precision(leads, *, check_fn=None) -> LeadQuality:
 
 def run_eval(sample: int = 25, *, ledger=None, check_fn=None) -> dict:
     """Sample recent SMB leads and measure 'actually no website' precision. Records the
-    score so a regression in lead quality is visible. Returns a plain dict for the deck."""
+    score so a regression in lead quality is visible. Returns a plain dict for the deck.
+
+    Cron-shaped boundary: a dead lead store yields a zeroed, honest result with an
+    ``error`` and a recorded failure — never a raise, never a fabricated precision."""
     from utah import failures
 
     if ledger is None:
         from utah.product.ledger import Ledger
         ledger = Ledger()
-    leads = ledger.leads_missing_email(sample)   # recent SMB leads (the no-website pile)
+    try:
+        leads = ledger.leads_missing_email(sample)   # recent SMB leads (the no-website pile)
+    except Exception as exc:  # noqa: BLE001 — store down: zeroed + documented, never invented
+        failures.record("leads", "eval_store_unreachable",
+                        f"lead-quality eval skipped (store unreachable): {exc}")
+        log.warning("leads_eval store unreachable: %s", exc)
+        out = msgspec.structs.asdict(LeadQuality(0, 0, 0, 0.0, 0.0, []))
+        out["error"] = str(exc)
+        return out
     q = measure_precision(leads, check_fn=check_fn)
     if q.sampled and q.false_positive_rate > 0.25:
         failures.record("leads", "low_precision",

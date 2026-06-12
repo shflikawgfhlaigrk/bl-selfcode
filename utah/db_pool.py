@@ -71,7 +71,13 @@ def get_pool(dsn: str, *, configure: Callable | None = None,
     *configure* runs once per new connection (e.g. register pgvector); pass ``None`` for
     stores that need no per-connection setup (the failure log). The pool is opened in the
     background, so this never blocks on a dead Postgres — callers see the failure when they
-    request a connection, as :class:`MemoryUnavailable`/timeout."""
+    request a connection, as :class:`MemoryUnavailable`/timeout.
+
+    Raises:
+        ValueError: empty/blank *dsn* — a pool that can never connect would otherwise
+            sit silently dark behind every store sharing the '' cache key."""
+    if not dsn or not dsn.strip():
+        raise ValueError("db_pool.get_pool: empty DSN")
     cache_key = _key or dsn
     with _lock:
         pool = _pools.get(cache_key)

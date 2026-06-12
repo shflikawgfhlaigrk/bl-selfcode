@@ -101,7 +101,12 @@ def store(
     neighbors = backend.nearest(vector, config.SUPERSEDE_SCAN)
     decision = decide_write(text, neighbors)
     if decision.action is WriteAction.REINFORCED:
-        assert decision.reinforce_id is not None
+        if decision.reinforce_id is None:
+            # Not an assert: python -O strips asserts, and reinforce(None) would
+            # silently corrupt a row. The invariant breaking must fail LOUDLY.
+            raise RuntimeError(
+                "reinforce decision carried no target id (decide_write invariant broken)"
+            )
         backend.reinforce(decision.reinforce_id)
         return WriteResult(id=decision.reinforce_id, action=WriteAction.REINFORCED)
     mem_id = backend.insert(
@@ -287,29 +292,20 @@ def close() -> None:
             _backend = None
 
 
+# Only the names this module OWNS: pure-logic rules live in utah.memory.logic and
+# types/exceptions in their own modules — the package facade re-exports the union.
+# (A previous __all__ listed five names never imported here, breaking star-imports.)
 __all__ = [
-    "AdmissionDenied",
-    "DenseRow",
-    "MemoryUnavailable",
-    "Neighbor",
-    "PostgresStore",
-    "SparseRow",
-    "StoreBackend",
     "answer",
     "close",
-    "compute_decay",
-    "content_words",
+    "core_recall",
     "decay",
-    "decide_write",
     "get_backend",
     "init",
-    "lexical_overlap",
-    "passes_gate",
+    "list_entities",
+    "list_memories",
     "recall",
-    "recall_pool",
     "reset",
-    "rrf_fuse",
     "set_backend",
-    "should_archive",
     "store",
 ]

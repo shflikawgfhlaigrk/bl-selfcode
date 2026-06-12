@@ -12,11 +12,17 @@ never triggers a needless self-code run — only a real outage does.
 from __future__ import annotations
 
 import logging
+import re
 from typing import Callable
 
 from utah import config, failures, sica_discover
 
 log = logging.getLogger("utah.revenue_heal")
+
+#: Defense in depth for the f-string table interpolation below: every table name comes
+#: from the fixed PRODUCERS map, but a typo'd/poisoned entry must be refused BEFORE it
+#: can reach SQL (CWE-89 shape). Plain lowercase identifiers only.
+_SAFE_TABLE = re.compile(r"^[a-z_][a-z0-9_]*$")
 
 #: producer -> (ledger table, the module Ace must fix, max idle HOURS before it's an outage).
 #: leads runs daily and must always produce; probate is lumpier (county filings) → generous.
@@ -40,8 +46,13 @@ def _hours_since_last(table: str) -> float | None:
     never false-trigger). *table* comes from the fixed PRODUCERS map, never user input."""
     import psycopg
 
+    if not _SAFE_TABLE.match(table or ""):
+        log.warning("revenue_heal: refused non-identifier table %r", table)
+        return None
     try:
-        with psycopg.connect(config.DB_DSN, autocommit=True, connect_timeout=8) as conn:
+        with psycopg.connect(config.DB_DSN, autocommit=True, connect_timeout=8,
+                             options=f"-c statement_timeout={config.DB_STATEMENT_TIMEOUT_MS}",
+                             ) as conn:
             row = conn.execute(
                 f"select extract(epoch from (now() - max(ts))) / 3600 from {table}"  # noqa: S608
             ).fetchone()
@@ -81,8 +92,13 @@ def _count_since(table: str, hours: float) -> int | None:
     never falsely report '$0'). *table* is a fixed literal here, never user input."""
     import psycopg
 
+    if not _SAFE_TABLE.match(table or ""):
+        log.warning("revenue_heal: refused non-identifier table %r", table)
+        return None
     try:
-        with psycopg.connect(config.DB_DSN, autocommit=True, connect_timeout=8) as conn:
+        with psycopg.connect(config.DB_DSN, autocommit=True, connect_timeout=8,
+                             options=f"-c statement_timeout={config.DB_STATEMENT_TIMEOUT_MS}",
+                             ) as conn:
             row = conn.execute(
                 # NB: not make_interval(hours => %s) — that signature is integer-only and
                 # psycopg binds a Python float as double precision → "function does not

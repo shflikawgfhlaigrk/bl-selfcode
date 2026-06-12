@@ -9,6 +9,8 @@ explicit "I don't know".
 
 __version__ = "1.0.0"
 
+__all__ = ["UtahError", "__version__"]
+
 
 class UtahError(Exception):
     """Base class for every structured Utah failure.

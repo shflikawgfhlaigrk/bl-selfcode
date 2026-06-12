@@ -17,6 +17,7 @@ from utah import UtahError
 _SOL_LOCAL = 0  # macOS level for LOCAL_PEERCRED
 _LOCAL_PEERCRED = getattr(socket, "LOCAL_PEERCRED", 0x001)
 _SO_PEERCRED = getattr(socket, "SO_PEERCRED", None)
+_XUCRED_VERSION = 0  # the xucred layout we parse; any other version → deny
 
 
 class PeerAuthError(UtahError):
@@ -33,9 +34,13 @@ def peer_uid(sock: socket.socket) -> int | None:
         # macOS: struct xucred { u_int cr_version; uid_t cr_uid; ... }
         raw = sock.getsockopt(_SOL_LOCAL, _LOCAL_PEERCRED, 76)
         if len(raw) >= 8:
-            _version, uid = struct.unpack_from("<II", raw, 0)
+            version, uid = struct.unpack_from("<II", raw, 0)
+            if version != _XUCRED_VERSION:
+                # Layout drift: our field offsets may be wrong, so the uid we
+                # just read cannot be trusted. Undetermined → caller denies.
+                return None
             return int(uid)
-    except OSError:
+    except (OSError, struct.error):
         return None
     return None
 

@@ -12,7 +12,7 @@ import msgspec
 
 from utah import UtahError
 from utah.daemon import frame
-from utah.daemon.rpc import RpcError
+from utah.daemon.rpc import PARSE_ERROR, RpcError
 from utah.daemon.runtime import CONTROL_SOCK
 
 _encode = msgspec.json.Encoder().encode
@@ -21,6 +21,15 @@ _decode = msgspec.json.Decoder().decode
 
 class DaemonNotRunning(UtahError):
     """The control socket is absent or refusing connections."""
+
+
+def _decode_response(payload: bytes) -> object:
+    """Decode a response frame; garbage from the peer is a typed RpcError
+    (PARSE_ERROR), never a raw msgspec exception the caller has no name for."""
+    try:
+        return _decode(payload)
+    except msgspec.DecodeError as exc:
+        raise RpcError(PARSE_ERROR, f"daemon sent a malformed response: {exc}") from exc
 
 
 async def call(
@@ -43,18 +52,20 @@ async def call(
         with anyio.fail_after(timeout):
             await frame.write_frame(stream, frame.KIND_JSON, request)
             _kind, payload = await frame.read_frame(stream)
-    resp = _decode(payload)
+    resp = _decode_response(payload)
     if isinstance(resp, dict) and resp.get("error"):
         e = resp["error"]
         raise RpcError(e.get("code", -32603), e.get("message", "error"), e.get("data"))
     return resp.get("result") if isinstance(resp, dict) else None
 
 
-async def subscribe(channels=None, *, sock_path=CONTROL_SOCK):
+async def subscribe(channels=None, *, sock_path=CONTROL_SOCK, ack_timeout: float = 10.0):
     """Async-iterate bus events pushed by the daemon. Yields ``{channel, event}``.
 
     The connection stays open and events are pushed (no polling). The first
-    frame is the subscribe ack; subsequent frames are ``event`` notifications.
+    frame is the subscribe ack — bounded by *ack_timeout* so a wedged daemon
+    can never hang the subscriber forever; the event stream itself is
+    deliberately unbounded (push channel, events arrive whenever they arrive).
     """
     try:
         stream = await anyio.connect_unix(str(sock_path))
@@ -64,11 +75,12 @@ async def subscribe(channels=None, *, sock_path=CONTROL_SOCK):
     if channels:
         env["params"] = {"channels": list(channels)}
     async with stream:
-        await frame.write_frame(stream, frame.KIND_JSON, _encode(env))
-        await frame.read_frame(stream)  # subscribe ack
+        with anyio.fail_after(ack_timeout):
+            await frame.write_frame(stream, frame.KIND_JSON, _encode(env))
+            await frame.read_frame(stream)  # subscribe ack
         while True:
             _kind, payload = await frame.read_frame(stream)
-            msg = _decode(payload)
+            msg = _decode_response(payload)
             if isinstance(msg, dict) and msg.get("method") == "event":
                 yield msg.get("params")
 
@@ -90,9 +102,14 @@ async def tell_stream(text: str, *, sock_path=CONTROL_SOCK, timeout: float = 180
             while True:
                 try:
                     _kind, payload = await frame.read_frame(stream)
-                except Exception:  # noqa: BLE001 — stream closed (daemon restart / EOF):
-                    return        # the subscription simply ends; callers resubscribe
-                msg = _decode(payload)
+                except (frame.FrameError, anyio.BrokenResourceError,
+                        anyio.ClosedResourceError, OSError):
+                    # Stream closed (daemon restart / EOF, all wrapped in
+                    # FrameError on the read side; raw anyio/OS errors cover
+                    # the transport itself): the turn simply ends — callers
+                    # resubmit. Anything else is a real bug and propagates.
+                    return
+                msg = _decode_response(payload)
                 if isinstance(msg, dict) and msg.get("method") == "tell_event":
                     ev = msg.get("params") or {}
                     yield ev

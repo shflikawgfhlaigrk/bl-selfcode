@@ -98,3 +98,12 @@ def test_best_model_prefers_small_en(tmp_path, monkeypatch):
     (root / "ggml-small.en-q5_1.bin").write_bytes(b"s")
     monkeypatch.setattr(stt.config, "WHISPERCPP_MODEL", str(root / "ggml-small.en-q5_1.bin"))
     assert "small" in stt._best_whispercpp_model()
+
+
+def test_stranger_pids_excludes_own_child_and_self():
+    """Reap parser for the six-servers-on-8090 incident (2026-06-10): orphaned twins
+    are returned for killing; our live child and our own pid survive; junk ignored."""
+    from utah.voice.stt import _stranger_pids
+    out = "415\n728\n97702\njunk\n97751\n"
+    assert _stranger_pids(out, own_pid=415, self_pid=97702) == [728, 97751]
+    assert _stranger_pids("", own_pid=1, self_pid=2) == []

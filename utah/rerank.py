@@ -9,6 +9,7 @@ never silent, and never raises into the recall path.
 from __future__ import annotations
 
 import logging
+import math
 import threading
 from typing import Protocol, Sequence
 
@@ -83,7 +84,9 @@ def rerank(query: str, docs: Sequence[str]) -> list[float]:
     if not docs:
         return []
     try:
-        scores = get_reranker().rerank(query, docs)
+        # float() inside the try: a model returning the right COUNT of garbage values
+        # (non-numeric) must degrade exactly like a crash, not raise into recall.
+        scores = [float(s) for s in get_reranker().rerank(query, docs)]
     except Exception as exc:
         log.warning("reranker unavailable, falling back to fusion order: %s", exc)
         return [0.0] * len(docs)
@@ -92,4 +95,8 @@ def rerank(query: str, docs: Sequence[str]) -> list[float]:
             "reranker returned %d scores for %d docs; falling back", len(scores), len(docs)
         )
         return [0.0] * len(docs)
-    return [float(s) for s in scores]
+    if not all(math.isfinite(s) for s in scores):
+        # NaN/inf would silently poison the recall sort (NaN compares are always False).
+        log.warning("reranker returned non-finite scores; falling back to fusion order")
+        return [0.0] * len(docs)
+    return scores

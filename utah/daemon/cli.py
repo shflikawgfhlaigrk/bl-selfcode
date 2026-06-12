@@ -15,9 +15,26 @@ import subprocess
 import sys
 import time
 
+import anyio
+
+from utah import UtahError
 from utah.daemon import client as ctl, runtime
 from utah.daemon.lifecycle import live_pid
 from utah.daemon.supervisor import SUP_PID
+
+#: Everything a control-socket call can throw when the daemon is down, wedged,
+#: or dies mid-call: typed Utah errors (DaemonNotRunning/RpcError/FrameError),
+#: a fail_after timeout, raw socket errors, and an anyio stream that broke on
+#: the WRITE side (the read side is already wrapped in FrameError). Anything
+#: outside this set is a real bug and should traceback, not masquerade as
+#: "not running".
+_CTL_DOWN = (
+    UtahError,
+    TimeoutError,
+    OSError,
+    anyio.BrokenResourceError,
+    anyio.ClosedResourceError,
+)
 
 
 def _read_pid(path) -> int | None:
@@ -50,11 +67,13 @@ def cmd_start(_args) -> int:
         print(f"utah: already running (daemon pid {live_pid()})")
         return 0
     runtime.ensure_runtime()
-    out = open(runtime.LOG_DIR / "utah-sup.out", "a")
-    subprocess.Popen(
-        [sys.executable, "-m", "utah.daemon.supervisor"],
-        env={**os.environ}, stdout=out, stderr=out, start_new_session=True,
-    )
+    # The child inherits the fd at spawn; closing our copy right after Popen
+    # returns leaks nothing (and an unclosed handle here outlives the CLI).
+    with open(runtime.LOG_DIR / "utah-sup.out", "a") as out:
+        subprocess.Popen(
+            [sys.executable, "-m", "utah.daemon.supervisor"],
+            env={**os.environ}, stdout=out, stderr=out, start_new_session=True,
+        )
     deadline = time.monotonic() + 25.0
     while time.monotonic() < deadline:
         if _daemon_up(timeout=1.0):
@@ -74,13 +93,16 @@ def cmd_stop(_args) -> int:
                 print("utah: stopped")
                 return 0
             time.sleep(0.3)
-        print("utah: stop requested (still draining)")
-        return 0
+        # Exit 1, not 0: scripts read codes, not prose — "still draining"
+        # with a success code is a stop that silently didn't happen.
+        print("utah: stop FAILED — supervisor signalled but the daemon is "
+              "still up after 24s", file=sys.stderr)
+        return 1
     if _daemon_up():
         try:
             ctl.call_sync("shutdown", timeout=3.0)
-        except Exception:  # noqa: BLE001 — daemon may die mid-call (that IS a stop);
-            pass          # verify below instead of asserting success blindly
+        except _CTL_DOWN:  # daemon may die mid-call (that IS a stop);
+            pass           # verify below instead of asserting success blindly
         if _daemon_up():
             print("utah: shutdown failed — daemon still running")
             return 1
@@ -100,7 +122,7 @@ def cmd_status(_args) -> int:
     try:
         print(json.dumps(ctl.call_sync("status"), indent=2))
         return 0
-    except Exception:
+    except _CTL_DOWN:
         print("utah: not running")
         return 1
 
@@ -109,7 +131,7 @@ def cmd_ping(_args) -> int:
     try:
         print(ctl.call_sync("ping"))
         return 0
-    except Exception:
+    except _CTL_DOWN:
         print("utah: not running")
         return 1
 
@@ -124,16 +146,25 @@ def cmd_tell(args) -> int:
         # into recall (those diagnostic Q-strings echo future code questions and
         # out-rank real code chunks). Web/voice turns still persist.
         r = ctl.call_sync("tell", {"text": text, "persist": False}, timeout=180.0)
-    except Exception as exc:
+    except _CTL_DOWN as exc:
         print(f"utah: {exc}", file=sys.stderr)
         return 1
-    print(f"[{r['source']}] {r['text']}")
+    if not isinstance(r, dict):
+        # A daemon answering with the wrong shape is a bug report, not a
+        # KeyError traceback in the operator's face.
+        print(f"utah: unexpected reply shape: {r!r}", file=sys.stderr)
+        return 1
+    print(f"[{r.get('source', '?')}] {r.get('text', '')}")
     return 0
 
 
 def cmd_agent(args) -> int:
-    print(ctl.call_sync("agent", {"seconds": args.seconds}))
-    return 0
+    try:
+        print(ctl.call_sync("agent", {"seconds": args.seconds}))
+        return 0
+    except _CTL_DOWN as exc:  # same daemon-down reality as every other command
+        print(f"utah: {exc}", file=sys.stderr)
+        return 1
 
 
 def cmd_verify(_args) -> int:
@@ -151,19 +182,48 @@ def cmd_verify(_args) -> int:
     return 1 if d.get("state") == "red" and d.get("confirmed") else 0
 
 
+def _format_plan(rep: dict) -> str:
+    """Render a :func:`utah.integrations.discord.provision` report for a terminal.
+
+    Lives here on purpose: the CLI's only contract with the integration is the
+    report dict that ``provision()`` documents as its return value — not the
+    integration's private helpers. Rendering from the dict (with ``.get``
+    everywhere) also means a drifted/partial report degrades to blank fields
+    instead of a KeyError at the operator.
+    """
+    totals = rep.get("totals") or {}
+    lines = [
+        f"Server: {rep.get('guild_name', '?')}",
+        f"Roles ({totals.get('roles', 0)}): " + ", ".join(rep.get("created_roles") or []),
+        "",
+    ]
+    webhooks = rep.get("webhooks") or {}
+    current = None
+    for entry in rep.get("created_channels") or []:
+        cat, _, ch = entry.partition(" / ")
+        if cat != current:
+            lines.append(cat)
+            current = cat
+        lines.append(f"  📡 {ch}" if ch in webhooks else f"  • {ch}")
+    lines += ["", f"Totals: {totals.get('categories', 0)} categories, "
+                  f"{totals.get('channels', 0)} channels, {totals.get('roles', 0)} roles, "
+                  f"{totals.get('webhooks', 0)} feed webhooks."]
+    return "\n".join(lines)
+
+
 def cmd_discord(args) -> int:
     """Provision the Utah Discord server (mirrors the deck). ``--plan`` is a dry-run
     that needs no token; bare ``discord`` applies the blueprint idempotently."""
     from utah.integrations import discord as dc
 
     if args.plan:
-        print(dc._render_plan(dc.provision(dry_run=True)))
+        print(_format_plan(dc.provision(dry_run=True)))
         return 0
     rep = dc.provision(guild_id=args.guild, create=args.create)
     if rep.get("gated"):
         print(f"utah discord: GATED — no bot token. Add ~/.utah/secrets/discord.json "
               f"(see {dc.SECRET}.example) or set DISCORD_BOT_TOKEN, then re-run.")
-        print(dc._render_plan(dc.provision(dry_run=True)))
+        print(_format_plan(dc.provision(dry_run=True)))
         return 2
     dc.save_webhooks(rep)
     t = rep["totals"]
@@ -184,8 +244,12 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("restart", help="restart the daemon").set_defaults(fn=cmd_restart)
     sub.add_parser("status", help="live daemon status").set_defaults(fn=cmd_status)
     sub.add_parser("ping", help="liveness probe").set_defaults(fn=cmd_ping)
-    t = sub.add_parser("tell", help="ask the brain"); t.add_argument("text", nargs="+"); t.set_defaults(fn=cmd_tell)
-    a = sub.add_parser("agent", help="run a pool task"); a.add_argument("seconds", nargs="?", type=float, default=0.5); a.set_defaults(fn=cmd_agent)
+    t = sub.add_parser("tell", help="ask the brain")
+    t.add_argument("text", nargs="+")
+    t.set_defaults(fn=cmd_tell)
+    a = sub.add_parser("agent", help="run a pool task")
+    a.add_argument("seconds", nargs="?", type=float, default=0.5)
+    a.set_defaults(fn=cmd_agent)
     sub.add_parser("verify", help="Utah's own test health (from com.utah.verify)").set_defaults(fn=cmd_verify)
     d = sub.add_parser("discord", help="provision the Utah Discord server (mirrors the deck)")
     d.add_argument("--plan", action="store_true", help="dry-run the blueprint (no token needed)")

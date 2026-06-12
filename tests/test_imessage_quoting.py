@@ -33,7 +33,7 @@ def test_body_never_lands_in_script_source(body, monkeypatch):
 
         class P:
             returncode = 0
-            stdout = "sent:imessage"
+            stdout = "sent:sms"
             stderr = ""
 
         return P()

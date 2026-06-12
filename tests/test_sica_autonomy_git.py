@@ -1,0 +1,51 @@
+"""SICA autonomy git plumbing: every git call is time-bounded and a timeout degrades to
+a FAILED CompletedProcess (skip the cycle, never crash it), and propagate() reports a
+failed fetch HONESTLY instead of misdiagnosing it as a divergence."""
+from __future__ import annotations
+
+import subprocess
+
+from utah import sica_autonomy
+
+
+def _git(repo, *a):
+    return subprocess.run(["git", "-C", str(repo), *a], capture_output=True, text=True)
+
+
+def test_git_timed_returns_failed_process_on_timeout(monkeypatch):
+    monkeypatch.setattr(sica_autonomy, "GIT_TIMEOUT_S", 0.05)
+    r = sica_autonomy._git_timed(["sleep", "5"], capture_output=True, text=True)
+    assert r.returncode != 0                       # failed, so callers skip the cycle
+    assert "timed out" in (r.stderr or "")
+
+
+def test_git_timed_passes_through_success():
+    r = sica_autonomy._git_timed(["git", "--version"], capture_output=True, text=True)
+    assert r.returncode == 0 and "git version" in r.stdout
+
+
+def test_propagate_missing_repos_is_honest(tmp_path):
+    r = sica_autonomy.propagate(live=tmp_path / "a", clone=tmp_path / "b")
+    assert r["propagated"] is False and "missing" in r["reason"]
+
+
+def test_propagate_reports_fetch_failure_honestly(tmp_path):
+    """A clone whose main can't be fetched (here: an empty repo with no commits) must
+    surface as a FETCH failure — the old path fell through to a misleading
+    'not a fast-forward' diagnosis."""
+    live, clone = tmp_path / "live", tmp_path / "clone"
+    live.mkdir(), clone.mkdir()
+    _git(live, "init", "-q", "-b", "main")
+    _git(live, "config", "user.email", "t@t")
+    _git(live, "config", "user.name", "t")
+    (live / "f.txt").write_text("1")
+    _git(live, "add", "-A")
+    _git(live, "commit", "-qm", "base")
+    _git(clone, "init", "-q", "-b", "main")        # no commits → fetch main fails
+    r = sica_autonomy.propagate(live=live, clone=clone)
+    assert r["propagated"] is False
+    assert "fetch" in r["reason"].lower()
+
+
+def test_sync_repo_false_when_not_a_git_repo(tmp_path):
+    assert sica_autonomy.sync_repo(tmp_path) is False

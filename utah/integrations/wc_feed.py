@@ -25,15 +25,41 @@ import urllib.request
 
 log = logging.getLogger("utah.integrations.wc_feed")
 
+
+def _env_int(name: str, default: int) -> int:
+    """Integer env tunable — garbage falls back to the default instead of crashing the
+    import (a typo'd launchd plist must not take the whole feed daemon down)."""
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    try:
+        return int(raw)
+    except ValueError:
+        log.warning("wc_feed: env %s=%r is not an int — using %d", name, raw, default)
+        return default
+
+
+def _env_float(name: str, default: float) -> float:
+    """Float env tunable — same fallback contract as :func:`_env_int`."""
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    try:
+        return float(raw)
+    except ValueError:
+        log.warning("wc_feed: env %s=%r is not a float — using %s", name, raw, default)
+        return default
+
+
 #: Utah's OWN CDP port. NOT 9222: old Ace's bridge (and its leftover chromes) own :9222, and
 #: a port shared across profiles means the probe can reach the WRONG chrome — proven live
 #: 2026-06-10 (old-Ace chrome held IPv4 :9222 with zero tabs; Utah's logged-in chrome could
 #: only bind [::1]; the loop relaunched flag-less Chrome every cycle = 21 piled-up WC tabs).
-CDP_PORT = int(os.environ.get("UTAH_WC_CDP_PORT", "9223"))
+CDP_PORT = _env_int("UTAH_WC_CDP_PORT", 9223)
 #: Chrome binds whichever loopback is free — probe both (IPv4 first, then IPv6).
 CDP_HOSTS = ("127.0.0.1", "[::1]")
 WC_HOST = "app.wealthcharts.com"
-CHROME = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+CHROME_APP = "/Applications/Google Chrome.app"  # for `open -g -a` (background launch, no focus steal)
 #: The WC Chrome profile lives under ~/.utah now (binding rule M: the runtime never reads
 #: ~/.ace). The legacy ~/.ace/chrome-wc login is forward-migrated ONCE by ensure_chrome_wc.
 WC_PROFILE = os.path.expanduser(os.environ.get("UTAH_WC_PROFILE", "~/.utah/chrome-wc"))
@@ -56,7 +82,7 @@ def _migrate_wc_profile_once() -> None:
         log.debug("wc_feed: WC profile migrate skipped: %s", exc)
 #: Bar size in seconds (the feed is ~1s candles; 15s bars + lookback 20 = a 5-minute
 #: breakout — a real intraday timeframe, not tick jitter). Tune with UTAH_WC_BAR_SECONDS.
-BAR_SECONDS = int(os.environ.get("UTAH_WC_BAR_SECONDS", "15"))
+BAR_SECONDS = _env_int("UTAH_WC_BAR_SECONDS", 15)
 MAX_BARS = 400
 
 
@@ -91,6 +117,30 @@ def parse_candle(payload: str) -> dict | None:
         return None
     return {"symbol": symbol, "close": close, "open": _f(candle.get("co")),
             "high": _f(candle.get("cM")), "low": _f(candle.get("cm")), "epoch": int(epoch)}
+
+
+def _frame_candle(raw) -> dict | None:
+    """One CDP envelope string → candle dict or None. PURE and junk-proof: the old
+    inline ``json.loads(raw)`` + ``m["params"]["response"]["payloadData"]`` ran BARE
+    inside the stream loop, so a single malformed CDP frame killed the WHOLE
+    persistent hook (caught only by the outer hook-dropped handler = full re-attach).
+    Every malformed variant must be a quiet None, never an exception."""
+    try:
+        m = json.loads(raw)
+    except (TypeError, ValueError):
+        return None
+    if not isinstance(m, dict) or m.get("method") != "Network.webSocketFrameReceived":
+        return None
+    params = m.get("params")
+    if not isinstance(params, dict):
+        return None
+    response = params.get("response")
+    if not isinstance(response, dict):
+        return None
+    payload = response.get("payloadData")
+    if not isinstance(payload, str):
+        return None
+    return parse_candle(payload)
 
 
 def normalize_epoch(epoch: int, arrival: float, *, step: int = 900) -> int:
@@ -236,10 +286,7 @@ def collect_ticks(seconds: float = 30.0, *, page=None) -> dict[str, list[tuple[i
                     raw = await asyncio.wait_for(ws.recv(), timeout=2)
                 except asyncio.TimeoutError:
                     continue
-                m = json.loads(raw)
-                if m.get("method") != "Network.webSocketFrameReceived":
-                    continue
-                cd = parse_candle(m["params"]["response"]["payloadData"])
+                cd = _frame_candle(raw)
                 if cd:
                     ep = normalize_epoch(cd["epoch"], _time.time())
                     series.setdefault(cd["symbol"], []).append((ep, cd["close"]))
@@ -378,12 +425,19 @@ CHROME_WINDOW_FLAGS = ("--window-position=1100,760", "--window-size=700,480")
 
 
 def _spawn_chrome() -> bool:
-    """Fresh chrome-wc with the CDP flag. Callers must ensure no chrome owns the profile."""
+    """Fresh chrome-wc with the CDP flag. Callers must ensure no chrome owns the profile.
+
+    Launched via ``open -g`` (background, NEVER raised to the foreground) so respawning the
+    feed window can never steal Michael's keyboard focus mid-typing — directly Popen-ing the
+    Chrome binary activates the app every time, which (with the heal-loop respawning on a
+    dropped feed) was yanking the caret away repeatedly. ``-n`` forces a separate instance on
+    the chrome-wc profile; the CDP/no-throttle/window flags pass through after ``--args``."""
     import subprocess
 
     try:
         subprocess.Popen(
-            [CHROME, f"--remote-debugging-port={CDP_PORT}", "--remote-allow-origins=*",
+            ["open", "-g", "-n", "-a", CHROME_APP, "--args",
+             f"--remote-debugging-port={CDP_PORT}", "--remote-allow-origins=*",
              f"--user-data-dir={WC_PROFILE}", "--no-first-run", "--no-default-browser-check",
              *CHROME_NO_THROTTLE_FLAGS, *CHROME_WINDOW_FLAGS, f"https://{WC_HOST}/"],
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -607,15 +661,13 @@ def stream(ledger, *, interval: float = 30.0, bar_seconds: int = BAR_SECONDS,
                 except asyncio.TimeoutError:
                     raw = None
                 if raw is not None:
-                    m = json.loads(raw)
-                    if m.get("method") == "Network.webSocketFrameReceived":
-                        cd = parse_candle(m["params"]["response"]["payloadData"])
-                        if cd:
-                            ep = normalize_epoch(cd["epoch"], _time.time())
-                            if bs.feed(cd["symbol"], ep, cd["close"]):
-                                # a bar just CLOSED — persist + evaluate NOW (ms after
-                                # the roll), not at the next wall-timer flush.
-                                bs.flush()
+                    cd = _frame_candle(raw)
+                    if cd:
+                        ep = normalize_epoch(cd["epoch"], _time.time())
+                        if bs.feed(cd["symbol"], ep, cd["close"]):
+                            # a bar just CLOSED — persist + evaluate NOW (ms after
+                            # the roll), not at the next wall-timer flush.
+                            bs.flush()
                 if _time.monotonic() - last >= interval:
                     r = bs.flush()
                     log.info("wcfeed flush: %s", r)
@@ -685,8 +737,8 @@ def main() -> int:
     from utah.product.ledger import Ledger
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
-    interval = float(os.environ.get("UTAH_WC_INTERVAL", "30"))
-    lookback = int(os.environ.get("UTAH_WC_LOOKBACK", "20"))
+    interval = _env_float("UTAH_WC_INTERVAL", 30.0)
+    lookback = _env_int("UTAH_WC_LOOKBACK", 20)
     ledger = Ledger()
     try:
         ledger.init_schema()   # bars table + fires.symbol exist before the first persist

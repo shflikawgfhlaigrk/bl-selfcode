@@ -190,3 +190,80 @@ def test_run_scheduled_skips_when_substrate_red():
     )
     assert r["status"] == "substrate_red"
     assert r["capability"] == "leads"
+
+
+# ── Overpass 429 failover + backoff (real rate-limit handling, offline) ───────
+import urllib.error  # noqa: E402
+
+
+def _http_error(code: int) -> urllib.error.HTTPError:
+    return urllib.error.HTTPError(
+        url="http://test", code=code, msg="rate limited", hdrs=None, fp=None)
+
+
+def test_http_fetch_fails_over_to_next_mirror_on_429_immediately():
+    """A 429 is a PER-MIRROR throttle — fail over to a sibling mirror instead of
+    hammering the throttled one (measured live: hammering the throttled primary cost
+    ~25s/tile, failover to a healthy mirror ~0.5s). The second mirror serves the tile,
+    with no inter-sweep backoff because a sibling answered on the first sweep."""
+    calls: list[str] = []
+    naps: list[float] = []
+
+    def opener(url, data, headers, timeout):
+        calls.append(url)
+        if url == leads.OVERPASS_URLS[0]:
+            raise _http_error(429)
+        return '{"elements": []}'
+
+    out = leads._http_fetch("q", opener=opener, sleep=naps.append)
+    assert out == '{"elements": []}'
+    # quick same-mirror retries on the throttled primary, then failover to mirror #2
+    assert calls.count(leads.OVERPASS_URLS[0]) == leads.OVERPASS_MAX_RETRIES + 1
+    assert calls[-1] == leads.OVERPASS_URLS[1]
+    assert naps == []  # a sibling mirror answered the first sweep — no backoff
+
+
+def test_http_fetch_fails_over_to_next_mirror_on_non_429_error():
+    """A connection error (not 429) means the mirror is down — move on immediately,
+    with NO same-mirror retry (retrying a dead mirror is pure waste)."""
+    calls: list[str] = []
+
+    def opener(url, data, headers, timeout):
+        calls.append(url)
+        if url == leads.OVERPASS_URLS[0]:
+            raise OSError("connection refused")
+        return '{"ok": 1}'
+
+    out = leads._http_fetch("q", opener=opener, sleep=lambda _s: None)
+    assert out == '{"ok": 1}'
+    assert calls[0] == leads.OVERPASS_URLS[0] and calls[1] == leads.OVERPASS_URLS[1]
+    assert calls.count(leads.OVERPASS_URLS[0]) == 1  # dead mirror not retried
+
+
+def test_http_fetch_backs_off_and_resweeps_when_all_mirrors_throttled_once():
+    """If EVERY mirror 429s in a sweep, exponential-backoff and re-sweep — recovery
+    is gated on a real inter-sweep backoff having happened, so a mirror only 'recovers'
+    after the first sleep. Proves the backoff path runs exactly once."""
+    naps: list[float] = []
+
+    def opener(url, data, headers, timeout):
+        if not naps:           # no backoff has happened yet → still in the first sweep
+            raise _http_error(429)
+        return '{"recovered": 1}'   # after one inter-sweep backoff, a mirror recovers
+
+    out = leads._http_fetch("q", opener=opener, sleep=naps.append)
+    assert out == '{"recovered": 1}'
+    assert len(naps) == 1 and naps[0] > 0        # exactly one inter-sweep backoff
+
+
+def test_http_fetch_raises_when_all_mirrors_throttled_every_sweep():
+    def opener(url, data, headers, timeout):
+        raise _http_error(429)
+
+    import pytest
+
+    naps: list[float] = []
+    with pytest.raises(RuntimeError):
+        leads._http_fetch("q", opener=opener, sleep=naps.append)
+    # backed off between sweeps, capped at OVERPASS_MIRROR_SWEEPS-1 backoffs
+    assert len(naps) == leads.OVERPASS_MIRROR_SWEEPS - 1

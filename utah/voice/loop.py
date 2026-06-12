@@ -66,7 +66,51 @@ _HPF_HZ = float(os.environ.get("UTAH_VOICE_HPF_HZ", "120"))
 # wake itself is the gate; Whisper returning "" (noise/false-fire) is a harmless
 # no-op. Disable with UTAH_VOICE_FORCE_CAPTURE=0.
 _FORCE_CAPTURE = os.environ.get("UTAH_VOICE_FORCE_CAPTURE", "1") == "1"
-_FORCE_CAPTURE_S = float(os.environ.get("UTAH_VOICE_FORCE_CAPTURE_S", "4.0"))
+_FORCE_CAPTURE_S = float(os.environ.get("UTAH_VOICE_FORCE_CAPTURE_S", "5.5"))
+# Pause after the wake hit before recording the command — without this the 4s window
+# starts on "hey ace" itself and Whisper often sees only silence → transcript=''.
+_FORCE_CAPTURE_DELAY_S = float(os.environ.get("UTAH_VOICE_FORCE_CAPTURE_DELAY", "0.5"))
+#: Wake-storm guard: a wake hit only counts within this window of genuinely LOUD
+#: audio. 2026-06-10: openWakeWord fired ~3×/s on near-silent frames (AGC-amplified
+#: hiss, rms ≈0.001) — 174 hits/min, each arming a capture + a Whisper pass, and the
+#: bare-wake ack turned the storm audible ("Yeah?" on loop). Real speech on this mic
+#: runs rms ≥0.03; 0.012 sits safely between hiss and voice. Silence cannot wake Ace.
+_WAKE_MIN_RMS = float(os.environ.get("UTAH_VOICE_WAKE_MIN_RMS", "0.012"))
+_WAKE_LOUD_WINDOW_S = float(os.environ.get("UTAH_VOICE_WAKE_LOUD_WINDOW_S", "2.0"))
+
+# ── Barge-in ("no time to stop") ─────────────────────────────────────────────
+# While Ace is SPEAKING, the mic callback normally drops every frame (the echo guard:
+# Ace's replies say "Ace", so an open mic re-fires the wake word on his own voice). That
+# guard also made interruption impossible. Barge-in re-opens that window safely: during
+# playback we keep measuring the mic and, on SUSTAINED genuinely-loud speech (a run of
+# frames above an elevated threshold set well above Ace's own echo-bleed level), we cut
+# the voice INSTANTLY (tts.stop_speaking) and arm capture for the new utterance. The
+# threshold is measured on the RAW (pre-AGC) HPF'd signal so the AGC can't inflate echo
+# into a false barge. Real speech on the built-in mic runs rms ≥0.03; Ace's playback
+# bleed measures lower at the mic, so 0.10 with a 5-frame (~160 ms) run sits clear of
+# echo while a real interruption (the user leaning in to talk over him) trips at once.
+# Disable with UTAH_VOICE_BARGE=0.
+_BARGE_ON = os.environ.get("UTAH_VOICE_BARGE", "1") == "1"
+_BARGE_RMS = float(os.environ.get("UTAH_VOICE_BARGE_RMS", "0.10"))
+_BARGE_MIN_FRAMES = int(os.environ.get("UTAH_VOICE_BARGE_MIN_FRAMES", "5"))  # ~160 ms @ 32 ms/frame
+# After a barge cut, record a fixed window of the interrupting utterance and hand it
+# straight to Whisper (same VAD-bypass path the wake uses on this noisy mic).
+_BARGE_CAPTURE_S = float(os.environ.get("UTAH_VOICE_BARGE_CAPTURE_S", "5.0"))
+
+
+def _on_playback_frame(rms: float, detector, stop_fn) -> bool:
+    """Loop glue for one mic frame heard WHILE Ace is speaking. Feeds *rms* to the
+    barge *detector*; on the frame that fires the barge, calls *stop_fn* (cut the voice)
+    exactly once and returns True. Returns False otherwise (echo / quiet / already
+    latched). Pure of audio I/O so it is unit-tested; the loop passes the real
+    ``tts.stop_speaking`` as *stop_fn*."""
+    if detector.feed(rms):
+        try:
+            stop_fn()
+        except Exception as exc:  # noqa: BLE001 — a stop hiccup must not crash the loop
+            log.warning("voice: barge stop failed: %s", exc)
+        return True
+    return False
 
 
 def _rms(pcm: bytes) -> float:
@@ -74,6 +118,118 @@ def _rms(pcm: bytes) -> float:
 
     a = np.frombuffer(pcm, dtype="int16").astype("float32")
     return float((a * a).mean() ** 0.5) / 32768.0 if a.size else 0.0
+
+
+class GatedAGC:
+    """Gated automatic gain control over int16 PCM blocks (pure, unit-tested).
+
+    Tracks a fast-attack/slow-release peak envelope and boosts ONLY blocks whose
+    envelope sits above the noise gate, toward the target peak. Quiet speech
+    becomes reliably detectable; silence/hiss is left ALONE — amplified hiss is
+    what openWakeWord false-fired on (the 2026-06-10 wake storm, 174 hits/min).
+    Already-loud audio passes through untouched (gain never exceeds 1 downward —
+    no re-encode loss), and output is clipped into int16 so boosted peaks can
+    never wrap.
+    """
+
+    def __init__(self, *, target: float = _AGC_TARGET, gate: float = _AGC_GATE,
+                 max_gain: float = _AGC_MAX_GAIN) -> None:
+        self._target = float(target)
+        self._gate = float(gate)
+        self._max_gain = float(max_gain)
+        self._env = self._gate  # running peak envelope
+
+    @property
+    def envelope(self) -> float:
+        """Current peak envelope (0-1) — exposed for diagnostics and tests."""
+        return self._env
+
+    def process(self, pcm: bytes) -> bytes:
+        import numpy as np
+
+        if len(pcm) % 2:           # torn frame — drop the dangling byte, never raise
+            pcm = pcm[:-1]
+        a = np.frombuffer(pcm, dtype="int16").astype("float32") / 32768.0
+        if a.size == 0:
+            return pcm
+        peak = float(np.abs(a).max())
+        # fast attack (jump up to a louder peak), slow release (decay gently)
+        self._env = peak if peak > self._env else self._env * 0.92 + peak * 0.08
+        if self._env < self._gate:         # silence/noise floor — do not amplify
+            return pcm
+        gain = min(self._target / self._env, self._max_gain)
+        if gain <= 1.0:                    # already at/above target — leave as-is
+            return pcm
+        out = np.clip(a * gain, -1.0, 1.0)
+        return (out * 32767.0).astype("int16").tobytes()
+
+
+class HighPass:
+    """Stateful 2nd-order Butterworth high-pass over int16 PCM blocks.
+
+    Strips the sub-``hz`` desk/chassis rumble (measured: 51% of capture energy
+    below 300 Hz on the built-in mic) that masks speech from Silero, while
+    preserving the voice band. Filter state carries across blocks so chunked
+    processing has no per-frame transients (clicks) at block seams.
+
+    Engine: scipy's ``lfilter`` when available (the live venv); otherwise an
+    equivalent pure-numpy biquad (RBJ bilinear transform, Q=1/√2 ≡ 2nd-order
+    Butterworth). The old implementation silently became a PASSTHROUGH when
+    scipy was missing — rumble then masked speech with no signal anything was
+    wrong; the fallback keeps the filter real everywhere.
+    """
+
+    def __init__(self, hz: float = _HPF_HZ, sample_rate: int = SAMPLE_RATE, *,
+                 use_scipy: bool | None = None) -> None:
+        import math
+
+        self._scipy: list | None = None   # [b, a, zi] when the scipy engine is active
+        self._z1 = 0.0                    # biquad state (numpy engine)
+        self._z2 = 0.0
+        # RBJ-cookbook high-pass biquad, Q = 1/sqrt(2) -> Butterworth response.
+        w0 = 2.0 * math.pi * float(hz) / float(sample_rate)
+        cosw, sinw = math.cos(w0), math.sin(w0)
+        alpha = sinw / (2.0 * (1.0 / math.sqrt(2.0)))
+        a0 = 1.0 + alpha
+        self._b0 = (1.0 + cosw) / 2.0 / a0
+        self._b1 = -(1.0 + cosw) / a0
+        self._b2 = self._b0
+        self._a1 = (-2.0 * cosw) / a0
+        self._a2 = (1.0 - alpha) / a0
+        if use_scipy is not False:
+            try:
+                from scipy.signal import butter, lfilter_zi
+
+                b, a = butter(2, float(hz) / (sample_rate / 2), btype="high")
+                self._scipy = [b, a, lfilter_zi(b, a).astype("float64")]
+            except Exception as exc:  # noqa: BLE001 — numpy biquad covers the gap
+                log.debug("voice loop: scipy HPF unavailable (%s) — numpy biquad engine", exc)
+
+    def process(self, pcm: bytes) -> bytes:
+        import numpy as np
+
+        if len(pcm) % 2:           # torn frame — drop the dangling byte, never raise
+            pcm = pcm[:-1]
+        x = np.frombuffer(pcm, dtype="int16").astype("float64")
+        if x.size == 0:
+            return pcm
+        if self._scipy is not None:
+            from scipy.signal import lfilter
+
+            b, a, zi = self._scipy
+            y, self._scipy[2] = lfilter(b, a, x, zi=zi)
+        else:
+            y = np.empty_like(x)
+            b0, b1, b2, a1, a2 = self._b0, self._b1, self._b2, self._a1, self._a2
+            z1, z2 = self._z1, self._z2
+            for i in range(x.size):       # direct form II transposed
+                xi = x[i]
+                yi = b0 * xi + z1
+                z1 = b1 * xi - a1 * yi + z2
+                z2 = b2 * xi - a2 * yi
+                y[i] = yi
+            self._z1, self._z2 = z1, z2
+        return np.clip(y, -32768, 32767).astype("int16").tobytes()
 
 
 def _write_wav(pcm: bytes) -> str:
@@ -116,6 +272,12 @@ def run() -> None:
 
     q: "queue.Queue[bytes]" = queue.Queue()
     processing = threading.Event()
+    # Barge-in: detector + event, shared between the mic callback (which detects the
+    # interruption during playback) and the main loop (which captures the new utterance).
+    # The detector latches after firing and is reset before each playback (see arming).
+    from utah.voice.barge import BargeDetector
+    _barge_det = BargeDetector(rms_threshold=_BARGE_RMS, min_frames=_BARGE_MIN_FRAMES)
+    barge_evt = threading.Event()
     level = {"max": 0.0}
     # Device liveness, measured on the RAW (pre-DSP) signal — the HPF strips the
     # sub-120Hz floor a quiet room still has, so post-filter "zeros" cannot tell a
@@ -125,62 +287,35 @@ def run() -> None:
     vstate = {"status": "starting", "listening": False, "speaking": False,
               "segments": 0, "last_transcript": None, "last_wake": None}
     armed_until = 0.0
-    _agc = {"env": _AGC_GATE}  # running peak envelope for gated AGC
-
-    # High-pass filter state (persisted across frames for continuity).
-    _hpf = {"b": None, "a": None, "zi": None}
-    if _HPF_ON:
-        try:
-            import numpy as _np
-            from scipy.signal import butter, lfilter_zi
-            _hpf["b"], _hpf["a"] = butter(2, _HPF_HZ / (SAMPLE_RATE / 2), btype="high")
-            _hpf["zi"] = lfilter_zi(_hpf["b"], _hpf["a"]).astype("float64")
-            log.info("voice loop: high-pass filter ON (%.0f Hz) — strips desk/rumble noise", _HPF_HZ)
-        except Exception as exc:  # noqa: BLE001
-            log.warning("voice loop: high-pass filter unavailable (%s) — continuing without", exc)
-            _hpf["b"] = None
-
-    def _apply_hpf(pcm: bytes) -> bytes:
-        if _hpf["b"] is None:
-            return pcm
-        import numpy as np
-        from scipy.signal import lfilter
-
-        x = np.frombuffer(pcm, dtype="int16").astype("float64")
-        if x.size == 0:
-            return pcm
-        y, _hpf["zi"] = lfilter(_hpf["b"], _hpf["a"], x, zi=_hpf["zi"])
-        return np.clip(y, -32768, 32767).astype("int16").tobytes()
-
-    def _apply_agc(pcm: bytes) -> bytes:
-        """Boost quiet speech toward a target peak; leave silence/noise alone."""
-        import numpy as np
-
-        a = np.frombuffer(pcm, dtype="int16").astype("float32") / 32768.0
-        if a.size == 0:
-            return pcm
-        peak = float(np.abs(a).max())
-        # fast attack (jump up to a louder peak), slow release (decay gently)
-        _agc["env"] = peak if peak > _agc["env"] else _agc["env"] * 0.92 + peak * 0.08
-        if _agc["env"] < _AGC_GATE:        # silence/noise floor — do not amplify
-            return pcm
-        gain = min(_AGC_TARGET / _agc["env"], _AGC_MAX_GAIN)
-        if gain <= 1.0:                    # already at/above target — leave as-is
-            return pcm
-        out = np.clip(a * gain, -1.0, 1.0)
-        return (out * 32767.0).astype("int16").tobytes()
+    agc = GatedAGC() if _AGC_ON else None
+    hpf = HighPass() if _HPF_ON else None
+    if hpf is not None:
+        log.info("voice loop: high-pass filter ON (%.0f Hz) — strips desk/rumble noise", _HPF_HZ)
 
     def _cb(indata, frames, t, status):  # noqa: ANN001
+        raw = bytes(indata)
+        # ── Barge-in window: Ace is SPEAKING right now ──────────────────────
+        # Keep LISTENING through playback so Michael can talk over Ace ("no time to
+        # stop"). The mic is otherwise muted while Ace speaks (echo guard). We measure
+        # the cleaned RAW signal (HPF, but NOT AGC — AGC would amplify Ace's own echo
+        # into a false barge) and fire only on sustained, genuinely-loud speech. On a
+        # barge: cut the voice instantly and flag the loop to capture the interruption.
+        if _BARGE_ON and tts.is_anything_playing():
+            liveness.feed_muted()   # intentionally muted — not deaf
+            bpcm = hpf.process(raw) if hpf is not None else raw
+            if _on_playback_frame(_rms(bpcm), _barge_det, tts.stop_speaking):
+                barge_evt.set()
+                log.info("voice: BARGE-IN — user spoke over Ace; cutting voice + capturing")
+            return
         if processing.is_set() or tts.is_anything_playing():
             liveness.feed_muted()   # intentionally muted — not deaf
             return
-        raw = bytes(indata)
         liveness.feed_frame(_rms(raw))   # liveness = RAW-signal question
         pcm = raw
-        if _HPF_ON:
-            pcm = _apply_hpf(pcm)   # strip sub-120Hz desk/rumble FIRST
-        if _AGC_ON:
-            pcm = _apply_agc(pcm)   # then boost the cleaned speech
+        if hpf is not None:
+            pcm = hpf.process(pcm)  # strip sub-120Hz desk/rumble FIRST
+        if agc is not None:
+            pcm = agc.process(pcm)  # then boost the cleaned speech
         r = _rms(pcm)
         if r > level["max"]:
             level["max"] = r
@@ -291,6 +426,7 @@ def run() -> None:
                 if wake_det is not None:
                     wake_det.reset()
                 armed_until = 0.0
+                wake_conf = 1.0          # peak oww confidence of the live arm window
                 vstate.update(status="listening", listening=True, speaking=False)
                 state.write(**vstate)
                 try:
@@ -304,16 +440,23 @@ def run() -> None:
                          vad.SPEECH_THRESHOLD)
 
                 def _on_speaking() -> None:
+                    # Playback is starting: re-arm barge-in for THIS turn (clear the
+                    # latch + any stale event + any half-run left from before) so the
+                    # very next loud frame from Michael can cut Ace off cleanly.
+                    _barge_det.reset()
+                    barge_evt.clear()
                     vstate.update(status="speaking", speaking=True, listening=False)
                     state.write(**vstate)
 
-                def _on_audio_wake() -> None:
-                    nonlocal armed_until
+                def _on_audio_wake(confidence: float = 1.0) -> None:
+                    nonlocal armed_until, wake_conf
                     armed_until = time.monotonic() + config.WAKE_ARM_S
+                    wake_conf = confidence          # peak confidence that armed this window
                     vstate["last_wake"] = "ace"
                     agent.pulse_wake("")
                     seg.arm()
-                    log.info("voice: audio wake armed (%.0fs capture window)", config.WAKE_ARM_S)
+                    log.info("voice: audio wake armed (%.0fs window, conf=%.2f)",
+                             config.WAKE_ARM_S, confidence)
 
                 def _process_segment(pcm: bytes, *, segment_armed: bool) -> None:
                     secs = len(pcm) / 2 / SAMPLE_RATE
@@ -332,12 +475,19 @@ def run() -> None:
                                 vstate["last_transcript"] = text[:120]
                             if not text and not segment_armed:
                                 return
+                            if not text and segment_armed and seg_rms < config.VOICE_SILENCE_RMS:
+                                log.info(
+                                    "voice: empty quiet segment after wake (rms=%.4f) — skip",
+                                    seg_rms,
+                                )
+                                return
                             if text and not _ECHO.allow(text):
                                 log.info("voice: echo-dropped duplicate transcript")
                                 return
                             result = agent.handle_utterance(
                                 text or "",
                                 audio_wake=segment_armed,
+                                wake_confidence=(wake_conf if segment_armed else None),
                                 on_speaking=_on_speaking,
                             )
                             cmd = result.get("command") if result else None
@@ -368,26 +518,56 @@ def run() -> None:
 
                 _collecting = False
                 _collect_frames: list[bytes] = []
+                _collect_start = 0.0
                 _collect_deadline = 0.0
+                _last_loud_at = 0.0
                 while True:
                     frame = q.get()
+                    if _rms(frame) >= _WAKE_MIN_RMS:
+                        _last_loud_at = time.monotonic()
+                    # ── Barge-in: the mic callback cut Ace's voice because Michael talked
+                    # over him. He is ALREADY speaking — start capturing the interruption
+                    # NOW (no wake word, no post-wake pause) and answer it. This is the
+                    # "no time to stop" path: interrupt freely, like a real conversation.
+                    if barge_evt.is_set():
+                        barge_evt.clear()
+                        _on_audio_wake(1.0)            # treat as an armed turn (orb pulse + arm)
+                        if _FORCE_CAPTURE:
+                            _collecting = True
+                            _collect_frames = []
+                            _collect_start = time.monotonic()   # no delay: he is mid-word
+                            _collect_deadline = _collect_start + _BARGE_CAPTURE_S
+                            log.info("voice: barge capture %.1fs (Whisper, VAD-bypass)",
+                                     _BARGE_CAPTURE_S)
                     if wake_det is not None:
                         for hit in wake_det.feed(frame):
+                            # Storm guard: no genuinely loud audio recently = the model
+                            # fired on hiss/echo, not a person. Ignore without arming.
+                            if time.monotonic() - _last_loud_at > _WAKE_LOUD_WINDOW_S:
+                                log.info("voice: oww hit %.2f ignored — no loud audio "
+                                         "in %.1fs (storm guard)",
+                                         hit.confidence, _WAKE_LOUD_WINDOW_S)
+                                continue
                             log.info("voice: openWakeWord hit %s=%.2f",
                                      hit.keyword, hit.confidence)
-                            _on_audio_wake()
+                            _on_audio_wake(hit.confidence)
                             if _FORCE_CAPTURE and not _collecting:
                                 _collecting = True
                                 _collect_frames = []
-                                _collect_deadline = time.monotonic() + _FORCE_CAPTURE_S
-                                log.info("voice: force-capture %.1fs (Whisper, VAD-bypass)",
-                                         _FORCE_CAPTURE_S)
+                                _collect_start = time.monotonic() + _FORCE_CAPTURE_DELAY_S
+                                _collect_deadline = _collect_start + _FORCE_CAPTURE_S
+                                log.info(
+                                    "voice: force-capture %.1fs after %.1fs pause (Whisper, VAD-bypass)",
+                                    _FORCE_CAPTURE_S,
+                                    _FORCE_CAPTURE_DELAY_S,
+                                )
 
                     if _FORCE_CAPTURE:
                         # VAD-bypass path: collect a fixed window after the wake, then
                         # hand it straight to Whisper (robust to the noisy built-in mic).
                         if _collecting:
-                            _collect_frames.append(frame)
+                            if time.monotonic() >= _collect_start:
+                                _collect_frames.append(frame)
                             if time.monotonic() >= _collect_deadline:
                                 _collecting = False
                                 armed_until = 0.0

@@ -52,10 +52,18 @@ class DataServer:
         try:
             if self._sock_path.exists():
                 self._sock_path.unlink()        # flock guarantees no live owner → stale
-        except OSError:
-            pass
-        listener = await anyio.create_unix_listener(str(self._sock_path))
-        os.chmod(self._sock_path, 0o600)
+        except OSError as exc:
+            # Not fatal by itself — but never silent: if the path is truly
+            # stuck the bind below fails loudly and this line says why.
+            log.warning("data: could not remove stale socket %s: %s", self._sock_path, exc)
+        # Bind under a restrictive umask so the socket is NEVER group/other
+        # accessible, even for the instant before the explicit chmod lands.
+        old_umask = os.umask(0o177)
+        try:
+            listener = await anyio.create_unix_listener(str(self._sock_path))
+        finally:
+            os.umask(old_umask)
+        os.chmod(self._sock_path, 0o600)        # owner-only, belt and braces
         log.info("data socket bound: %s", self._sock_path)
         task_status.started()
         try:
@@ -66,8 +74,12 @@ class DataServer:
     async def _handle_connection(self, stream) -> None:
         try:
             authorize(stream.extra(SocketAttribute.raw_socket))   # owner-only, fail-closed
-        except (PeerAuthError, Exception) as exc:
+        except PeerAuthError as exc:
             log.warning("data: rejected connection: %s", exc)
+            await stream.aclose()
+            return
+        except Exception as exc:  # cred lookup itself broke → fail CLOSED, not open
+            log.warning("data: peer-cred check failed (%s) — connection dropped", exc)
             await stream.aclose()
             return
         async with stream:

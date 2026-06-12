@@ -11,12 +11,15 @@ status/failure-count are injectable; detection is pure.
 from __future__ import annotations
 
 import logging
+import os
 
 from utah import failures
 
 log = logging.getLogger("utah.watchdog")
 
-LOAD_CRITICAL = 1.5  # per-core; matches the governor's max_load_per_core
+#: Per-core load that counts as a genuine anomaly; matches the governor's
+#: max_load_per_core. Env-tunable so the bar moves WITH the governor's, not after a deploy.
+LOAD_CRITICAL = float(os.environ.get("UTAH_WATCHDOG_LOAD_CRITICAL", "1.5"))
 
 
 def _live_status():
@@ -33,6 +36,18 @@ def _live_failcount() -> int:
     return store.count() if hasattr(store, "count") else 0
 
 
+def _load_per_core(status: dict) -> float | None:
+    """The governor's per-core load out of a status payload, or None when absent
+    or junk-typed (a malformed daemon reply must read as 'unknown', not crash)."""
+    gov = status.get("governor")
+    raw = gov.get("load_per_core") if isinstance(gov, dict) else None
+    try:
+        return float(raw) if raw is not None else None
+    except (TypeError, ValueError):
+        log.warning("watchdog: non-numeric load_per_core in status: %r", raw)
+        return None
+
+
 def check(*, status_fn=None, failure_count_fn=None) -> dict:
     """Snapshot Utah's health; record genuine anomalies. Returns
     ``{healthy, daemon_up, load_per_core, failures, anomalies}``. Never raises."""
@@ -45,14 +60,16 @@ def check(*, status_fn=None, failure_count_fn=None) -> dict:
         log.warning("watchdog: status probe raised: %s", exc)
         status = None
 
-    if status is None:
+    if not isinstance(status, dict):
+        # None OR garbage: a daemon that answers a non-dict is not answering.
+        # (.get() on a str/list here used to crash the watchdog itself.)
         failures.record("watchdog", "daemon_unreachable",
                         "control ping failed — daemon not responding to status")
         return {"healthy": False, "daemon_up": False, "load_per_core": None,
                 "failures": None, "anomalies": ["daemon_unreachable"]}
 
     anomalies: list[str] = []
-    load = (status.get("governor") or {}).get("load_per_core")
+    load = _load_per_core(status)
     if load is not None and load > LOAD_CRITICAL:
         anomalies.append("load_critical")
         failures.record("watchdog", "load_critical",

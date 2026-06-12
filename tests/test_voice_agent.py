@@ -53,6 +53,41 @@ def test_wake_runs_brain_speaks_and_publishes():
     assert any(ev.get("q") == "what is utah" for ch, ev in published)  # shown on deck
 
 
+def test_nonempty_brain_answer_is_spoken_without_a_second_brain_call():
+    """LATENCY: when tell() already produced a full BRAIN answer, voice must SPEAK that
+    answer — not throw it away and run tell_stream(), a SECOND full brain round-trip
+    (the measured ~1.4-5s of dead air). The duplicate call is the bug; one brain call
+    per turn is the fix. tell_stream must NOT be invoked here."""
+    spoken = []
+    def fake_tell(cmd):
+        return Reply(text="Utah is the clean-room rebuild.", source=ReplySource.BRAIN)
+    r = agent.handle_utterance(
+        "ace what is utah",
+        tell=fake_tell, tell_stream=_boom,            # _boom = a second brain call is forbidden
+        speak_stream=_collect(spoken), publish=lambda *a: None,
+    )
+    assert r["answer"] == "Utah is the clean-room rebuild."
+    assert r["source"] == "brain"
+    assert spoken == ["Utah is the clean-room rebuild."]   # the tell() answer was spoken
+
+
+def test_empty_brain_answer_falls_back_to_stream():
+    """If tell() comes back EMPTY (no answer yet), voice still streams the brain — the
+    stream is the fallback that actually produces the answer."""
+    spoken = []
+    def fake_tell(cmd):
+        return Reply(text="", source=ReplySource.BRAIN)
+    def fake_stream(cmd, want_thinking=True, voice=False):
+        return iter([("source", "brain"), ("answer", "Streamed answer.")])
+    r = agent.handle_utterance(
+        "ace what is utah",
+        tell=fake_tell, tell_stream=fake_stream,
+        speak_stream=_collect(spoken), publish=lambda *a: None,
+    )
+    assert r["answer"] == "Streamed answer."
+    assert spoken == ["Streamed answer."]
+
+
 def test_instant_capability_skips_tell_stream():
     """Weather/time/social go through tell() only — no stream generator on the hot path."""
     spoken = []
@@ -151,9 +186,33 @@ def test_bare_wake_still_pulses_the_orb():
 
 
 def test_bare_wake_does_not_call_brain():
-    r = agent.handle_utterance("ace", tell_stream=_boom, speak_stream=_boom,
+    """Bare TRANSCRIBED 'ace' speaks one local ack ('Yeah?') but NEVER reaches the
+    brain — tell_stream stays _boom. Repeats inside the ack cooldown stay SILENT
+    (the 2026-06-10 self-ack loop: Ace answered his own echo every ~25s)."""
+    agent._last_ack_at = 0.0
+    spoken = []
+    r = agent.handle_utterance("ace", tell_stream=_boom,
+                               speak_stream=_collect(spoken),
                                publish=lambda *a: None)
-    assert r is not None and r["command"] == "" and not r.get("answer")
+    assert r is not None and r["command"] == ""
+    assert r["answer"] == "Yeah?" and spoken == ["Yeah?"]
+    spoken2 = []
+    r2 = agent.handle_utterance("ace", tell_stream=_boom,
+                                speak_stream=_collect(spoken2),
+                                publish=lambda *a: None)
+    assert r2["answer"] == "" and spoken2 == []   # cooldown: no chatter
+
+
+def test_audio_wake_empty_transcript_is_silent():
+    """The self-ack loop fix (2026-06-10): openWakeWord fired on Ace's own 'Yeah?',
+    Whisper transcribed NOTHING — an empty transcript must never speak, ever."""
+    agent._last_ack_at = 0.0
+    spoken = []
+    r = agent.handle_utterance("", audio_wake=True, tell_stream=_boom,
+                               speak_stream=_collect(spoken),
+                               publish=lambda *a: None)
+    assert spoken == []
+    assert r is None or r.get("answer") == ""
 
 
 def test_empty_answer_is_not_spoken():

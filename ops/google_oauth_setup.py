@@ -23,6 +23,10 @@ RUN
 SCOPES (edit SCOPES below, or set GOOGLE_SCOPES space-separated):
     calendar.events  -> Utah daemon creates calendar events
     gmail.send       -> (optional) lets us power Gmail via the API instead of SMTP
+
+Outbound BLB mail uses info@blacklabelbots.com (see utah.config.BLB_FROM_EMAIL). If you
+enable gmail.send here, authorize that address in Google Workspace (Send mail as) or OAuth
+will send from the logged-in account only.
 """
 from __future__ import annotations
 

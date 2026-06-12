@@ -17,6 +17,14 @@ from pathlib import Path
 #: ``mthburnsbarber`` (stray ``h``); normalize every ingest path to this.
 OWNER_EMAIL: str = os.environ.get("UTAH_OWNER_EMAIL", "mtuburnsbarber@gmail.com")
 _OWNER_TYPO_EMAIL: str = "mthburnsbarber@gmail.com"
+#: Outbound Black Label Bots From/Reply-To (Google Workspace). Separate from
+#: :data:`OWNER_EMAIL` (OAuth login identity on personal Gmail).
+BLB_FROM_EMAIL: str = os.environ.get("UTAH_BLB_FROM_EMAIL", "info@blacklabelbots.com")
+_LEGACY_BLB_FROM = frozenset({
+    "michael@blacklabelbots.com",
+    "delivery@blacklabelbots.com",
+    "daily@blacklabelbots.com",
+})
 
 
 #: Postgres DSN. Production (Michael's Mac): socket at /tmp, cluster on :5433.
@@ -31,6 +39,14 @@ def normalize_owner_email(email: str | None) -> str:
     e = (email or "").strip()
     if e.lower() == _OWNER_TYPO_EMAIL.lower():
         return OWNER_EMAIL
+    return e
+
+
+def normalize_blb_from_email(email: str | None) -> str:
+    """Canonical BLB outbound From/Reply-To; maps legacy storefront addresses."""
+    e = (email or "").strip()
+    if not e or e.lower() in _LEGACY_BLB_FROM:
+        return BLB_FROM_EMAIL
     return e
 
 #: CAN-SPAM placeholder until Michael provides a real postal address.

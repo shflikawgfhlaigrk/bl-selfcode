@@ -77,6 +77,8 @@ def test_auto_channel_emails_and_texts_and_respects_combined_cap(monkeypatch):
     failures.set_store(FakeFailureStore())
     emails, texts = [], []
     monkeypatch.setattr(outreach, "default_footer", lambda: _FOOTER)
+    monkeypatch.setattr("utah.mail.inboxes_exhausted", lambda: False)
+    monkeypatch.setattr("utah.mail.sends_remaining", lambda: 999)
     monkeypatch.setattr("utah.mail.send",
                         lambda to, s, b: emails.append(to) or {"sent": True})
     monkeypatch.setattr("utah.sms.send",
@@ -101,6 +103,8 @@ def test_auto_channel_caps_total_at_limit(monkeypatch):
     """Combined email+text never exceeds the per-run (per-hour) cap."""
     failures.set_store(FakeFailureStore())
     monkeypatch.setattr(outreach, "default_footer", lambda: _FOOTER)
+    monkeypatch.setattr("utah.mail.inboxes_exhausted", lambda: False)
+    monkeypatch.setattr("utah.mail.sends_remaining", lambda: 999)
     monkeypatch.setattr("utah.mail.send", lambda to, s, b: {"sent": True})
     monkeypatch.setattr("utah.sms.send", lambda to, body: {"sent": True})
     email_leads = [{"id": i, "name": f"Biz{i}", "source": "osm",

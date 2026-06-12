@@ -20,6 +20,8 @@ from __future__ import annotations
 
 import re
 
+from utah import config
+
 #: Words the STT commonly pads the bare wake with. A whole filler word right before
 #: "ace" is swallowed into the wake so it never leaks out as a junk command.
 _FILLER = r"(?:hey|hay|say|says|save|saved|ok|okay|oh|a|ay|eh)"
@@ -57,7 +59,8 @@ def extract_command(transcript: str) -> str | None:
     return t[: m.start()].strip(_STRIP)  # wake at end → command precedes it
 
 
-def resolve_command(transcript: str, *, audio_wake: bool = False) -> str | None:
+def resolve_command(transcript: str, *, audio_wake: bool = False,
+                    wake_confidence: float | None = None) -> str | None:
     """Stage B wake gate — decide whether an utterance is addressed to Utah.
 
     * ``audio_wake=False`` (default): transcript regex only — room speech ignored.
@@ -74,4 +77,14 @@ def resolve_command(transcript: str, *, audio_wake: bool = False) -> str | None:
     t = (transcript or "").strip()
     if not t:
         return ""  # bare audio wake — orb pulse only
+    # CONFIDENCE BAND (2026-06-10): only a HIGH-confidence audio wake may accept a
+    # transcript that has NO literal "ace"/"utah" token as a command (Moonshine
+    # dropped the short syllable on a real call). In the medium band, a missing
+    # wake token means this was almost certainly room speech / TV — drop it, don't
+    # answer it. ``None`` confidence keeps legacy callers/tests permissive.
+    if wake_confidence is not None and wake_confidence < config.WAKE_TRUST_THRESHOLD:
+        return None
     return t.lstrip(_STRIP)
+
+
+__all__ = ["extract_command", "resolve_command"]

@@ -13,6 +13,7 @@ import importlib
 import logging
 import os
 import shutil
+import socket
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Protocol
@@ -25,6 +26,12 @@ log = logging.getLogger("utah.voice.oww")
 
 SAMPLE_RATE = 16_000
 CHUNK_SAMPLES = 1_280  # 80 ms @ 16 kHz — openWakeWord native chunk
+
+#: Bound for the one-time openWakeWord resource fetch. ``ou.download_file`` takes
+#: no timeout parameter, so the fetch runs under the socket default timeout (set
+#: around the downloads, restored after) — a hung CDN must not wedge the voice
+#: loop's startup forever.
+_FETCH_TIMEOUT_S = float(os.environ.get("UTAH_OWW_FETCH_TIMEOUT_S", "30"))
 
 
 class _ModelLike(Protocol):
@@ -48,7 +55,11 @@ def _import_openwakeword():  # type: ignore[no-untyped-def]
 
 
 def _bootstrap_oww_resources() -> bool:
-    """One-time fetch of melspectrogram/embedding ONNX (not bundled in pip wheel)."""
+    """One-time fetch of melspectrogram/embedding ONNX (not bundled in pip wheel).
+
+    Honest + bounded: ``True`` only when the required files actually exist on
+    disk afterwards; one dead URL never aborts the remaining downloads; every
+    download runs under the socket default timeout (restored after)."""
     try:
         import openwakeword
         import openwakeword.utils as ou
@@ -57,13 +68,31 @@ def _bootstrap_oww_resources() -> bool:
         need = [target / "melspectrogram.onnx", target / "embedding_model.onnx"]
         if all(p.is_file() for p in need):
             return True
-        target.mkdir(parents=True, exist_ok=True)
-        for feature in openwakeword.FEATURE_MODELS.values():
-            for url in (feature["download_url"], feature["download_url"].replace(".tflite", ".onnx")):
-                dest = target / url.rsplit("/", 1)[-1]
-                if not dest.is_file():
-                    ou.download_file(url, str(target))
-        return all(p.is_file() for p in need)
+        try:
+            target.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            # download_file may create it itself; the final existence check decides.
+            log.debug("oww resource dir mkdir failed: %s", exc)
+        prev = socket.getdefaulttimeout()
+        socket.setdefaulttimeout(_FETCH_TIMEOUT_S)
+        try:
+            for feature in openwakeword.FEATURE_MODELS.values():
+                for url in (feature["download_url"],
+                            feature["download_url"].replace(".tflite", ".onnx")):
+                    dest = target / url.rsplit("/", 1)[-1]
+                    if dest.is_file():
+                        continue
+                    try:
+                        ou.download_file(url, str(target))
+                    except Exception as exc:  # noqa: BLE001 — one dead URL must not abort the rest
+                        log.warning("openwakeword resource %s failed: %s", url, exc)
+        finally:
+            socket.setdefaulttimeout(prev)
+        ok = all(p.is_file() for p in need)
+        if not ok:
+            log.warning("openwakeword resources incomplete under %s — audio arming "
+                        "will stay disabled until the fetch succeeds", target)
+        return ok
     except Exception as exc:  # noqa: BLE001
         log.warning("openwakeword resource download failed: %s", exc)
         return False
@@ -120,8 +149,12 @@ class OpenWakeWord:
         if self._model is not None:
             return True
         if self._model_factory is not None:
-            self._model = self._model_factory()
-            return True
+            try:
+                self._model = self._model_factory()
+            except Exception as exc:  # noqa: BLE001 — a blown factory must not kill voice startup
+                log.warning("wake model factory failed: %s — audio arming disabled", exc)
+                return False
+            return self._model is not None
         resolved = _ensure_wake_model(self._model_path)
         if not resolved:
             log.warning("wake model missing at %s — audio arming disabled", self._model_path)
@@ -160,6 +193,12 @@ class OpenWakeWord:
         """Score one 32 ms int16 frame; returns 0+ detections when a chunk completes."""
         if self._model is None:
             return []
+        if len(frame) % 2:
+            # torn frame from a glitching stream — drop the dangling byte; raising
+            # here would bubble into run()'s retry loop and bounce the whole mic.
+            frame = frame[:-1]
+        if not frame:
+            return []
         arr = np.frombuffer(frame, dtype=np.int16)
         self._buf = np.concatenate([self._buf, arr]) if self._buf.size else arr
         hits: list[Detection] = []
@@ -169,11 +208,15 @@ class OpenWakeWord:
             idx = self._chunks_seen * CHUNK_SAMPLES
             self._chunks_seen += 1
             scores = self._model.predict(chunk) or {}
-            chunk_hits = [
-                Detection(keyword=k, confidence=float(c), sample_index=idx)
-                for k, c in scores.items()
-                if float(c) >= self.threshold
-            ]
+            chunk_hits = []
+            for k, c in scores.items():
+                try:
+                    conf = float(c)
+                except (TypeError, ValueError):
+                    continue   # a misbehaving model's garbage score is not a detection
+                if conf >= self.threshold:   # NaN fails this comparison by design
+                    chunk_hits.append(
+                        Detection(keyword=k, confidence=conf, sample_index=idx))
             if not chunk_hits:
                 continue
             chunk_idx = self._chunks_seen - 1

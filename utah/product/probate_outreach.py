@@ -11,8 +11,8 @@ unlock); until then it writes a ready-to-mail letter file and never fakes a send
 """
 from __future__ import annotations
 
-import json
 import logging
+import os
 import re
 
 from utah import config, failures
@@ -22,7 +22,7 @@ from utah.product.ledger import PROBATE_OUTREACH_CAMPAIGN
 log = logging.getLogger("utah.product.probate_outreach")
 
 #: Per-run cap on letters generated/sent.
-DAILY_PROBATE_MAIL = int(__import__("os").environ.get("UTAH_PROBATE_MAIL_DAILY", "20"))
+DAILY_PROBATE_MAIL = int(os.environ.get("UTAH_PROBATE_MAIL_DAILY", "20"))
 #: Gated on a print-mail provider (Lob etc.). Absent → letters are generated + queued for
 #: Michael to mail, never faked as "sent". Present → the provider actually mails them.
 MAIL_SERVICE_CREDS = runtime.UTAH_HOME / "secrets" / "lob.json"
@@ -103,7 +103,7 @@ def queue(ledger, cases: list[dict], *, can_send: bool = False, send_fn=None) ->
     (never the same estate twice) ONLY on a real send — a queued/gated letter keeps the
     estate's one shot. Never fabricates. Returns counts."""
     sender = send_fn or _provider_send
-    sent = queued = suppressed = no_addr = 0
+    sent = queued = suppressed = no_addr = errors = 0
     letters: list[str] = []
     for case in cases:
         hc = case.get("heir_contact") or {}
@@ -112,35 +112,50 @@ def queue(ledger, cases: list[dict], *, can_send: bool = False, send_fn=None) ->
             no_addr += 1
             continue
         recipient = case.get("case_name") or mail.get("full")
-        if getattr(ledger, "is_contacted", lambda r, c: False)(recipient, PROBATE_OUTREACH_CAMPAIGN):
-            suppressed += 1
-            continue
-        letter = compose_letter(case)
-        if can_send:
-            res = sender(letter)
-            if res.get("sent"):
-                ledger.log_outreach(recipient, PROBATE_OUTREACH_CAMPAIGN, "mail")  # suppress
-                sent += 1
+        try:
+            if getattr(ledger, "is_contacted", lambda r, c: False)(recipient, PROBATE_OUTREACH_CAMPAIGN):
+                suppressed += 1
                 continue
-        # gated or queue-only: write the letter for Michael to mail; do NOT suppress yet.
-        path = _write_letter_file(case, letter)
-        if path:
-            letters.append(path)
-            queued += 1
+            letter = compose_letter(case)
+            if can_send:
+                try:
+                    res = sender(letter)
+                except Exception as exc:  # noqa: BLE001 — a raising print-mail provider is a
+                    # FAILED send, not a crash: document it and fall through to the letter
+                    # file so the estate's letter still exists for Michael to mail by hand.
+                    failures.record("probate_outreach", "provider_send_failed",
+                                    f"{recipient}: {exc}")
+                    res = {"sent": False, "error": str(exc)}
+                if res.get("sent"):
+                    ledger.log_outreach(recipient, PROBATE_OUTREACH_CAMPAIGN, "mail")  # suppress
+                    sent += 1
+                    continue
+            # gated or queue-only: write the letter for Michael to mail; do NOT suppress yet.
+            path = _write_letter_file(case, letter)
+            if path:
+                letters.append(path)
+                queued += 1
+        except Exception as exc:  # noqa: BLE001 — one bad case (ledger blow-up mid-commit)
+            # never blocks the rest of the batch; the failure log keeps the audit trail.
+            errors += 1
+            failures.record("probate_outreach", "case_failed", f"{recipient}: {exc}")
     if queued and not MAIL_SERVICE_CREDS.exists():
         failures.record("probate_outreach", "send_gated",
                         f"{queued} probate letters written to {LETTERS_DIR} (ready to mail); "
                         f"wire a print-mail service ({MAIL_SERVICE_CREDS}) to auto-send")
-    log.info("probate_outreach: sent=%d queued=%d suppressed=%d no_addr=%d",
-             sent, queued, suppressed, no_addr)
+    log.info("probate_outreach: sent=%d queued=%d suppressed=%d no_addr=%d errors=%d",
+             sent, queued, suppressed, no_addr, errors)
     return {"sent": sent, "queued": queued, "suppressed": suppressed, "no_addr": no_addr,
-            "letters": letters, "campaign": PROBATE_OUTREACH_CAMPAIGN}
+            "errors": errors, "letters": letters, "campaign": PROBATE_OUTREACH_CAMPAIGN}
 
 
 def run_scheduled(limit: int = DAILY_PROBATE_MAIL, *, ledger=None, can_send: bool = True,
                   send_fn=None, foundation_gate=None) -> dict:
     """``com.utah.probate-outreach`` cron — direct-mail the heirs of enriched probate cases.
-    Skips on a red substrate. SMB outreach NEVER enters here; this is the separate track."""
+    Skips on a red substrate. SMB outreach NEVER enters here; this is the separate track.
+
+    Launchd entrypoint (``print(run_scheduled())``): NEVER raises — a dead store degrades
+    to ``{"sent": 0, "queued": 0, "error": ...}`` with a recorded failure."""
     from utah import foundation
 
     skip = (foundation.gate_cron if foundation_gate is None else foundation_gate)("probate_outreach")
@@ -149,7 +164,13 @@ def run_scheduled(limit: int = DAILY_PROBATE_MAIL, *, ledger=None, can_send: boo
     if ledger is None:
         from utah.product.ledger import Ledger
         ledger = Ledger()
-    cases = ledger.probate_uncontacted_with_mail(limit)
+    try:
+        cases = ledger.probate_uncontacted_with_mail(limit)
+    except Exception as exc:  # noqa: BLE001 — cron boundary: dead store degrades, never raises
+        failures.record("probate_outreach", "store_unreachable",
+                        f"probate-outreach candidate read failed: {exc}")
+        log.warning("probate_outreach store unreachable: %s", exc)
+        return {"sent": 0, "queued": 0, "status": "store_unreachable", "error": str(exc)}
     if not cases:
         return {"sent": 0, "queued": 0, "reason": "no probate cases with a resolved mailing address"}
     return queue(ledger, cases, can_send=can_send, send_fn=send_fn)

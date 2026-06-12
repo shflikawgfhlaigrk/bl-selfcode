@@ -24,6 +24,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import os
 import pathlib
 import re
 import subprocess
@@ -42,6 +43,23 @@ AUTOMERGE_FLAG = runtime.RUN_DIR / "selfcode.automerge"
 #: Bound a single coding run. Kept tight: the live proof showed an unbounded Claude+Bash
 #: run can hang (it ran `uv` and timed out at 600s), so the gate must cut it off.
 CODE_TIMEOUT_S = 300
+
+#: Bound EVERY git call: `git push origin` is a network op that can hang forever (the
+#: same failure class CODE_TIMEOUT_S exists for) — an unbounded push would freeze the
+#: coding gate, and with it the whole autonomous loop. 120s is generous for this repo.
+GIT_TIMEOUT_S = float(os.environ.get("UTAH_SELFCODE_GIT_TIMEOUT", "120"))
+
+
+def _git(repo: str, *args: str) -> subprocess.CompletedProcess:
+    """One bounded git call in *repo*. A timeout or spawn failure degrades to a FAILED
+    CompletedProcess (rc 124, empty stdout) so every caller's existing rc/stdout logic
+    reads it as "that op did not happen" — never an exception out of the gate."""
+    try:
+        return subprocess.run(["git", *args], cwd=repo, capture_output=True,
+                              text=True, timeout=GIT_TIMEOUT_S)
+    except (subprocess.TimeoutExpired, OSError) as exc:
+        log.warning("selfcode git %s failed/timed out (%ss): %s", args[:2], GIT_TIMEOUT_S, exc)
+        return subprocess.CompletedProcess(["git", *args], 124, "", str(exc))
 
 #: Count of supervised green proposals (human-reviewed) — gates Tier-A autonomy.
 SUPERVISED_STATE = runtime.RUN_DIR / "selfcode.supervised"
@@ -158,10 +176,8 @@ def _bump_supervised() -> None:
 def _real_changed_files(repo: str = ".") -> list[str]:
     """Files the coding run produced (tracked diff vs HEAD + new untracked). Reliable
     on the auto-merge path because a clean tree is enforced before the run."""
-    def git(*a):
-        return subprocess.run(["git", *a], cwd=repo, capture_output=True, text=True).stdout
-    tracked = git("diff", "--name-only", "HEAD").split()
-    untracked = git("ls-files", "--others", "--exclude-standard").split()
+    tracked = _git(repo, "diff", "--name-only", "HEAD").stdout.split()
+    untracked = _git(repo, "ls-files", "--others", "--exclude-standard").stdout.split()
     return [*tracked, *untracked]
 
 
@@ -210,13 +226,11 @@ def _real_commit_proposal(task: str, *, repo: str = ".") -> str | None:
     is REAL and SURVIVES the next sync. Without this, a propose-only (auto_merge=False)
     edit left the change uncommitted — the page showed a branch name but an empty diff, and
     the next ``checkout -f`` discarded it. Returns the short sha, or None if nothing changed."""
-    def git(*a):
-        return subprocess.run(["git", *a], cwd=repo, capture_output=True, text=True)
     try:
-        git("add", "-A")
-        if git("commit", "-m", f"selfcode(proposal): {task[:72]}").returncode != 0:
-            return None  # nothing to commit
-        return git("rev-parse", "--short", "HEAD").stdout.strip()
+        _git(repo, "add", "-A")
+        if _git(repo, "commit", "-m", f"selfcode(proposal): {task[:72]}").returncode != 0:
+            return None  # nothing to commit (or the commit op failed/timed out)
+        return _git(repo, "rev-parse", "--short", "HEAD").stdout.strip() or None
     except Exception as exc:  # noqa: BLE001 — best-effort; a bad repo path must never raise
         log.warning("selfcode proposal commit skipped: %s", exc)
         return None
@@ -267,11 +281,15 @@ def propose(task: str, *, run_claude=None, run_tests=None, branch_fn=None,
 
     # Byte-check before-image of the off-limits (Tier-D) files. Captured around the run
     # so it is robust to an already-dirty tree (unlike a diff-vs-HEAD).
-    before = None
-    if safety_intact_fn is None:
-        before = (safety_snapshot_fn or (lambda: safety_snapshot(repo or ".")))()
-
-    branch = branch_fn(_slug(task))   # isolated; _real_branch refuses main
+    try:
+        before = None
+        if safety_intact_fn is None:
+            before = (safety_snapshot_fn or (lambda: safety_snapshot(repo or ".")))()
+        branch = branch_fn(_slug(task))   # isolated; _real_branch refuses main
+    except Exception as exc:  # noqa: BLE001 — pre-run setup failed; honor "never raises"
+        rec("selfcode", "setup_failed", f"{task[:80]}: {exc}")
+        return {"task": task, "applied": False, "tests_passed": False,
+                "branch": None, "reason": f"pre-run setup failed: {exc}"}
     try:
         run_claude(task)
     except Exception as exc:  # noqa: BLE001 — coding run failed (timeout/nonzero/etc.)
@@ -421,25 +439,24 @@ def _safe(fn) -> None:
 
 def _real_branch(slug: str, *, repo: str = ".") -> str:
     name = f"selfcode/{slug}"
-    cur = subprocess.run(["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=repo,
-                         capture_output=True, text=True).stdout.strip()
+    cur = _git(repo, "rev-parse", "--abbrev-ref", "HEAD").stdout.strip()
     if cur in ("main", "master"):  # never code on the trunk
-        subprocess.run(["git", "checkout", "-B", name], cwd=repo,
-                       capture_output=True, text=True)
+        _git(repo, "checkout", "-B", name)
     return name
 
 
 def _real_discard(*, repo: str = ".") -> None:
     # Roll back tracked edits AND remove untracked files. The live proof showed a timed-out
     # run leaves untracked artifacts (uv.lock) that `git reset --hard` alone won't clear.
-    subprocess.run(["git", "reset", "--hard"], cwd=repo, capture_output=True, text=True)
-    subprocess.run(["git", "clean", "-fd"], cwd=repo, capture_output=True, text=True)
+    _git(repo, "reset", "--hard")
+    _git(repo, "clean", "-fd")
 
 
 def _tree_clean(repo: str = ".") -> bool:
     """True when the working tree has no uncommitted changes — the precondition for a safe
-    auto-merge (so the autonomous commit captures ONLY what the coding run produced)."""
-    out = subprocess.run(["git", "status", "--porcelain"], cwd=repo, capture_output=True, text=True)
+    auto-merge (so the autonomous commit captures ONLY what the coding run produced).
+    A failed/timed-out status read is never "clean": auto-merge must refuse."""
+    out = _git(repo, "status", "--porcelain")
     return out.returncode == 0 and not out.stdout.strip()
 
 
@@ -449,19 +466,18 @@ def _real_merge(branch: str, task: str, *, repo: str = ".") -> tuple[str, bool]:
     message is prefixed ``selfcode(auto):`` + a Claude co-author trailer, so autonomous
     commits are greppable and distinguishable from human ones. A rejected push (e.g. a
     concurrent commit advanced origin) is reported as ``pushed=False`` — the merge is
-    local on main and recoverable, never silently lost."""
-    def git(*a):
-        return subprocess.run(["git", *a], cwd=repo, capture_output=True, text=True)
+    local on main and recoverable, never silently lost. Every call is time-bounded: a
+    hung push reports ``pushed=False`` instead of freezing the gate."""
     msg = (f"selfcode(auto): {task[:68]}\n\n"
            "Autonomous self-code change — full test suite green before merge.\n\n"
            "Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>")
-    git("add", "-A")
-    git("commit", "-m", msg)                  # no-op if Claude changed nothing
-    git("checkout", "main")
-    git("merge", "--no-ff", branch, "-m", f"selfcode(auto) merge: {task[:60]}")
-    pushed = git("push", "origin", "main").returncode == 0
-    git("branch", "-D", branch)
-    return git("rev-parse", "--short", "HEAD").stdout.strip(), pushed
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-m", msg)           # no-op if Claude changed nothing
+    _git(repo, "checkout", "main")
+    _git(repo, "merge", "--no-ff", branch, "-m", f"selfcode(auto) merge: {task[:60]}")
+    pushed = _git(repo, "push", "origin", "main").returncode == 0
+    _git(repo, "branch", "-D", branch)
+    return _git(repo, "rev-parse", "--short", "HEAD").stdout.strip(), pushed
 
 
 def kill_switch_smoke() -> dict:

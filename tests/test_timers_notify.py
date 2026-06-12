@@ -51,3 +51,14 @@ def test_notify_gated_without_perms(monkeypatch):
     r = notify.notify("hi")
     assert r["sent"] is False and r["gated"] is True
     assert any("gated" in row[2] for row in store.rows)
+
+
+def test_applescript_string_escaping_survives_quotes():
+    """AppleScript literals are double-quoted ONLY — the old ``!r`` single-quote repr
+    was a syntax error on every send (2026-06-10: all trade alerts died at noon).
+    Apostrophes, double quotes, and backslashes must all survive."""
+    from utah.integrations.notify import _as_str
+    assert _as_str("MEANREV SHORT @ 28676.25") == '"MEANREV SHORT @ 28676.25"'
+    assert _as_str("it's a trap") == '"it\'s a trap"'
+    assert _as_str('say "go" now') == '"say \\"go\\" now"'
+    assert _as_str("back\\slash") == '"back\\\\slash"'

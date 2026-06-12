@@ -67,7 +67,7 @@ def ping_probe(timeout: float = 2.0) -> Probe:
         try:
             ctl.call_sync("ping", timeout=timeout)
             return True
-        except Exception:
+        except Exception:  # noqa: BLE001 — unreachable IS the signal a probe exists to report
             return False
     return _p
 
@@ -78,7 +78,7 @@ def http_probe(url: str, timeout: float = 2.0) -> Probe:
         try:
             with urllib.request.urlopen(url, timeout=timeout) as resp:
                 return 200 <= getattr(resp, "status", 200) < 500
-        except Exception:
+        except Exception:  # noqa: BLE001 — unreachable IS the signal a probe exists to report
             return False
     return _p
 
@@ -143,16 +143,27 @@ class _ManagedChild:
         self._restarts: collections.deque[float] = collections.deque()
         self._spawned_at = 0.0
 
-    def spawn(self) -> None:
+    def spawn(self) -> bool:
+        """Start the child. NEVER raises — a missing/broken binary must count as
+        a failed start (toward the circuit-breaker), not crash the supervisor
+        itself: the net must not die of the failure it exists to catch."""
         env = {**os.environ, **(self.spec.env or {})}
-        self.proc = subprocess.Popen(list(self.spec.argv), env=env)
+        try:
+            self.proc = subprocess.Popen(list(self.spec.argv), env=env)
+        except (OSError, ValueError) as exc:  # missing binary, bad argv, EPERM
+            self.proc = None
+            log.error("spawn %s failed: %s", self.spec.name, exc)
+            return False
         self._spawned_at = time.monotonic()
         log.info("spawned %s pid=%d", self.spec.name, self.proc.pid)
+        return True
 
     def ready(self) -> bool:
+        if self.proc is None:
+            return False  # never spawned — don't probe on behalf of a ghost
         deadline = time.monotonic() + self._ready_timeout
         while time.monotonic() < deadline:
-            if self.proc and self.proc.poll() is not None:
+            if self.proc.poll() is not None:
                 return False  # died during boot
             if self.spec.probe():
                 return True
@@ -191,7 +202,12 @@ class _ManagedChild:
                 self.proc.wait(timeout=5.0)
             except subprocess.TimeoutExpired:
                 self.proc.kill()
-                self.proc.wait()
+                try:
+                    self.proc.wait(timeout=5.0)  # bounded even post-SIGKILL —
+                    # an uninterruptible-sleep child must not hang the loop
+                except subprocess.TimeoutExpired:
+                    log.error("%s ignored SIGKILL (disk-wait?) — moving on",
+                              self.spec.name)
 
     def drain(self, drain_timeout: float = 12.0) -> None:
         if not self.proc or self.proc.poll() is not None:
@@ -201,8 +217,10 @@ class _ManagedChild:
                 self.spec.drain()
                 self.proc.wait(timeout=drain_timeout)
                 return
-            except Exception:
-                pass
+            except Exception as exc:  # noqa: BLE001 — escalate, but say so: a child
+                # that never drains cleanly is a bug worth seeing, not hiding in kill
+                log.warning("%s: drain failed (%s) — escalating to kill",
+                            self.spec.name, exc)
         self.kill()
 
 
@@ -293,7 +311,10 @@ class Supervisor:
         except lifecycle.AlreadyRunning as exc:
             print(f"supervisor already running (pid {exc.pid})", file=sys.stderr)
             return 1
-        SUP_PID.write_text(f"{os.getpid()}\n")
+        try:
+            SUP_PID.write_text(f"{os.getpid()}\n")
+        except OSError:  # introspection only — never a boot crash
+            log.warning("could not write %s", SUP_PID)
         for sig in (signal.SIGINT, signal.SIGTERM):
             signal.signal(sig, lambda *_: self._stop.set())
 
@@ -361,6 +382,18 @@ def _voice_spec() -> ChildSpec:
             )
     except Exception:  # noqa: BLE001
         log.warning("voice: bundle setup failed — using sys.executable", exc_info=True)
+    # Voice tuning must reach the UtahVoice child — launchd plist env alone does not
+    # propagate through the signed macapp wrapper.
+    from utah import config as utah_config
+
+    voice_env = {
+        "UTAH_WAKE_THRESHOLD": str(utah_config.WAKE_THRESHOLD),
+        "UTAH_VOICE_FORCE_CAPTURE": "1" if utah_config.VOICE_FORCE_CAPTURE else "0",
+        "UTAH_VOICE_FORCE_CAPTURE_S": str(utah_config.VOICE_FORCE_CAPTURE_S),
+        "UTAH_VOICE_FORCE_CAPTURE_DELAY": str(utah_config.VOICE_FORCE_CAPTURE_DELAY),
+        "UTAH_VOICE_SILENCE_RMS": str(utah_config.VOICE_SILENCE_RMS),
+    }
+    env = {**(env or {}), **voice_env}
     # B15: a real audio-liveness probe — a deaf-but-alive loop is restarted, not left deaf.
     return ChildSpec("voice", argv, env=env, probe=voice_audio_probe())
 

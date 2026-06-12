@@ -9,7 +9,9 @@ import importlib.util
 import json
 import logging
 import os
+import re
 import select
+import signal
 import subprocess
 import sys
 import threading
@@ -150,7 +152,10 @@ class SubprocessSTT:
                 if self._proc is None or self._proc.poll() is not None:
                     self._kill()
                     self._spawn()
-                assert self._proc is not None and self._proc.stdin is not None
+                if self._proc is None or self._proc.stdin is None:
+                    # explicit (not assert — asserts vanish under -O) so the outer
+                    # handler resets + arms the cooldown like any other worker fault
+                    raise RuntimeError("STT worker has no stdin after spawn")
                 self._proc.stdin.write(wav_path + "\n")
                 self._proc.stdin.flush()
                 line = self._readline(config.STT_HANG_TIMEOUT_S)
@@ -181,8 +186,6 @@ def clean_transcript(text: str) -> str:
     '[Music]' … — so silence NEVER becomes a question (live 2026-06-10: Ace answered
     '[BLANK_AUDIO]' as if Michael had said it). Bracketed/parenthesised segments are
     annotations, not speech; if nothing real remains, there was no utterance."""
-    import re
-
     if not text:
         return ""
     out = re.sub(r"[\[\(][^\]\)]{0,60}[\]\)]", " ", text)
@@ -190,6 +193,21 @@ def clean_transcript(text: str) -> str:
     if not re.search(r"[A-Za-z0-9]", out):
         return ""                      # only annotations/punctuation = no utterance
     return out
+
+
+def _stranger_pids(pgrep_out: str, *, own_pid: int, self_pid: int) -> list[int]:
+    """PIDs from ``pgrep -f`` output that are NOT our live child and NOT ourselves —
+    the orphans :meth:`WhisperCppSTT._reap_strangers` must kill. Pure; junk tokens
+    are ignored (pgrep output is line-oriented pids, but never trust a parser)."""
+    pids: list[int] = []
+    for tok in pgrep_out.split():
+        try:
+            pid = int(tok)
+        except ValueError:
+            continue
+        if pid not in (own_pid, self_pid):
+            pids.append(pid)
+    return pids
 
 
 class WhisperCppSTT:
@@ -225,7 +243,28 @@ class WhisperCppSTT:
     def _alive(self) -> bool:
         return self._proc is not None and self._proc.poll() is None
 
+    def _reap_strangers(self) -> None:
+        """Kill ORPHANED whisper-servers holding our port before we spawn ours.
+        Live 2026-06-10: voice-loop respawns orphaned SIX servers to PPID 1, all
+        LISTENing on 8090 at once (SO_REUSEPORT stacks binds) — requests round-robined
+        onto stale twins and STT went intermittently deaf while a healthy twin answered
+        probes. A spawn must own its port; reaping is best-effort and never raises."""
+        try:
+            out = subprocess.run(
+                ["pgrep", "-f", f"whisper-server.*--port {self._port}"],
+                capture_output=True, text=True, timeout=5).stdout
+        except Exception:  # noqa: BLE001 — best-effort; spawn proceeds regardless
+            return
+        own = self._proc.pid if self._proc is not None else -1
+        for pid in _stranger_pids(out, own_pid=own, self_pid=os.getpid()):
+            try:
+                os.kill(pid, signal.SIGKILL)
+                log.warning("reaped orphan whisper-server pid=%d (port %d)", pid, self._port)
+            except Exception:  # noqa: BLE001 — already gone / not ours to kill
+                pass
+
     def _spawn(self) -> None:
+        self._reap_strangers()
         self._proc = subprocess.Popen(
             [self._bin, "-m", self._model, "--host", "127.0.0.1",
              "--port", str(self._port), "-t", "4"],
@@ -358,4 +397,5 @@ def transcribe(wav_path: str) -> str:
         return ""
 
 
-__all__ = ["STT", "MoonshineSTT", "MLXWhisperSTT", "get_stt", "set_stt", "transcribe"]
+__all__ = ["STT", "MoonshineSTT", "MLXWhisperSTT", "SubprocessSTT", "WhisperCppSTT",
+           "clean_transcript", "get_stt", "set_stt", "transcribe"]

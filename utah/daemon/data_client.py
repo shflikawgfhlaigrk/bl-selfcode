@@ -2,7 +2,10 @@
 reply array back (docs 3 & 8). Mirror of :mod:`utah.daemon.client`, but binary.
 
 Fail-loud: if the server answers with a JSON error frame (a malformed payload),
-this raises :class:`~utah.win.WinCodecError` rather than returning garbage.
+this raises :class:`~utah.win.WinCodecError` rather than returning garbage; a
+missing/refusing socket raises the same typed
+:class:`~utah.daemon.client.DaemonNotRunning` as the control plane (callers
+handle one error, not a grab-bag of raw OSErrors).
 """
 from __future__ import annotations
 
@@ -10,12 +13,21 @@ import anyio
 
 from utah import win
 from utah.daemon import frame, runtime
+from utah.daemon.client import DaemonNotRunning
 
 
 async def send_array(arr, name: str = "", *, sock_path=runtime.DATA_SOCK,
                      timeout: float = 30.0):
-    """Round-trip *arr* through the data plane → the server's reply ndarray."""
-    stream = await anyio.connect_unix(str(sock_path))
+    """Round-trip *arr* through the data plane → the server's reply ndarray.
+
+    Raises :class:`DaemonNotRunning` when the data socket is absent/refusing,
+    :class:`TimeoutError` when the server accepts but never answers within
+    *timeout*, and :class:`~utah.win.WinCodecError` on any non-binary reply.
+    """
+    try:
+        stream = await anyio.connect_unix(str(sock_path))
+    except (FileNotFoundError, ConnectionRefusedError, OSError) as exc:
+        raise DaemonNotRunning(f"data plane not reachable at {sock_path}: {exc}") from exc
     async with stream:
         with anyio.fail_after(timeout):
             await frame.write_frame(stream, frame.KIND_BINARY, win.encode_array(arr, name))

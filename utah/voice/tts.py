@@ -81,23 +81,54 @@ def stop_speaking() -> dict:
     return {"stopped": True, "killed_clip": killed}
 
 
+#: Bound on WAITING for another process's playback. A wedged holder (the live
+#: mic_silent class) must never park a speaker forever — past this, the speaker
+#: proceeds UNSERIALIZED (logged loudly): overlapping audio is an audible,
+#: recoverable degradation; a silently mute voice loop is not. Sized well above
+#: one clip's AFPLAY_TIMEOUT_S so legitimate queueing never trips it.
+PLAY_LOCK_TIMEOUT_S = float(os.environ.get("UTAH_PLAY_LOCK_TIMEOUT", "120"))
+
+
+def _flock_bounded(fd: int, timeout: float) -> bool:
+    """Acquire an exclusive flock with a deadline (non-blocking poll loop — flock
+    itself has no native timeout). True = acquired; False = timed out."""
+    deadline = time.monotonic() + timeout
+    while True:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            return True
+        except OSError:
+            if time.monotonic() >= deadline:
+                return False
+            time.sleep(0.05)
+
+
 @contextlib.contextmanager
 def _system_play_lock():
-    """Exclusive cross-process playback lock (flock). Blocks until no other process is
-    playing, so the voice loop and chat-speak never overlap into garble."""
+    """Exclusive cross-process playback lock (flock), so the voice loop and
+    chat-speak never overlap into garble. The wait is BOUNDED by
+    ``PLAY_LOCK_TIMEOUT_S``: on timeout we log and play anyway rather than
+    deadlocking behind a wedged holder (see the constant's rationale)."""
     runtime.RUN_DIR.mkdir(parents=True, exist_ok=True)
     fd = os.open(_PLAY_LOCKFILE, os.O_CREAT | os.O_RDWR, 0o600)
+    got = False
     try:
-        fcntl.flock(fd, fcntl.LOCK_EX)
+        got = _flock_bounded(fd, PLAY_LOCK_TIMEOUT_S)
+        if not got:
+            log.warning(
+                "tts: play-lock not acquired within %.0fs (wedged holder?) — "
+                "playing unserialized so the voice stays alive", PLAY_LOCK_TIMEOUT_S)
         yield
     finally:
         try:
-            fcntl.flock(fd, fcntl.LOCK_UN)
+            if got:
+                fcntl.flock(fd, fcntl.LOCK_UN)
         finally:
             os.close(fd)
 
 
 _CHECK_FD: int | None = None
+_CHECK_FD_LOCK = threading.Lock()  # guards the one-time probe-fd open (no fd leak on a race)
 
 
 def is_anything_playing() -> bool:
@@ -110,8 +141,10 @@ def is_anything_playing() -> bool:
     global _CHECK_FD
     try:
         if _CHECK_FD is None:
-            runtime.RUN_DIR.mkdir(parents=True, exist_ok=True)
-            _CHECK_FD = os.open(_PLAY_LOCKFILE, os.O_CREAT | os.O_RDWR, 0o600)
+            with _CHECK_FD_LOCK:
+                if _CHECK_FD is None:
+                    runtime.RUN_DIR.mkdir(parents=True, exist_ok=True)
+                    _CHECK_FD = os.open(_PLAY_LOCKFILE, os.O_CREAT | os.O_RDWR, 0o600)
         fcntl.flock(_CHECK_FD, fcntl.LOCK_SH | fcntl.LOCK_NB)
         fcntl.flock(_CHECK_FD, fcntl.LOCK_UN)
         return False          # acquired freely → nobody is playing
@@ -337,4 +370,5 @@ def speak_stream(chunks: Iterable[str], on_start: Callable[[], None] | None = No
         return ""
 
 
-__all__ = ["TTS", "PiperTTS", "get_tts", "set_tts", "speak", "speak_stream"]
+__all__ = ["TTS", "PiperTTS", "get_tts", "set_tts", "speak", "speak_stream",
+           "stop_speaking", "is_anything_playing"]

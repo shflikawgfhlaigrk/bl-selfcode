@@ -110,38 +110,45 @@ def sync_business_from_memory() -> str | None:
         r"(\d+\s+[A-Za-z0-9\s.'-]+(?:Rd|Road|St|Street|Ave|Avenue|Dr|Drive|Blvd|Lane|Ln|Way)\.?)",
         re.I,
     )
-    for q in (
-        "Michael business address CAN-SPAM mailing",
-        "business address Michael Barber",
-        "28 dogwood",
-    ):
-        for hit in memory.recall(q, k=8) or []:
-            if hit.source not in ("user", "fact", "consolidation"):
-                continue
-            m = pat.search(hit.content)
-            if m:
-                addr = m.group(1).strip()
-                if _is_real(addr):
-                    return addr
+    try:
+        for q in (
+            "Michael business address CAN-SPAM mailing",
+            "business address Michael Barber",
+            "28 dogwood",
+        ):
+            for hit in memory.recall(q, k=8) or []:
+                if getattr(hit, "source", None) not in ("user", "fact", "consolidation"):
+                    continue
+                m = pat.search(getattr(hit, "content", "") or "")
+                if m:
+                    addr = m.group(1).strip()
+                    if _is_real(addr):
+                        return addr
+    except Exception as exc:  # noqa: BLE001 — boundary: a dead recall degrades to "not found",
+        # it must never raise into the foundation probe loop that calls sync_all every cycle.
+        log.warning("memory recall failed for business-address sync: %s", exc)
     return None
 
 
+#: The owner-email typo (a missing 'u') in ANY casing — the live config had it mixed-case,
+#: which the old exact-string replace missed while the lowercase *detector* matched it.
+_TYPO_EMAIL = re.compile(re.escape("mthburnsbarber@gmail.com"), re.I)
+
+
 def _fix_ace_outreach_email() -> bool:
-    """Rewrite Ace outreach-config if it still has the mthburnsbarber typo."""
+    """Rewrite the Utah outreach-config if it still has the mthburnsbarber typo
+    (case-insensitive). Returns True iff the file was rewritten. Never raises."""
     if not OUTREACH_CFG.is_file():
         return False
     try:
         raw = OUTREACH_CFG.read_text(encoding="utf-8")
-        if "mthburnsbarber@gmail.com" not in raw.lower():
-            return False
-        fixed = raw.replace("mthburnsbarber@gmail.com", config.OWNER_EMAIL)
-        fixed = fixed.replace("mthburnsbarber@GMAIL.COM", config.OWNER_EMAIL)
+        fixed = _TYPO_EMAIL.sub(config.OWNER_EMAIL, raw)
         if fixed != raw:
             OUTREACH_CFG.write_text(fixed, encoding="utf-8")
             log.info("secrets_sync: fixed mthburnsbarber typo in %s", OUTREACH_CFG)
             return True
-    except OSError:
-        pass
+    except OSError as exc:
+        log.warning("secrets_sync: typo fix skipped (%s): %s", OUTREACH_CFG, exc)
     return False
 
 
@@ -156,10 +163,10 @@ def sync_business(*, write: bool = True) -> dict[str, Any]:
     if _is_real(ace.get("from_name")) and not _is_real(biz.get("from_name")):
         biz["from_name"] = ace["from_name"]
         updates.append("from_name←ace")
-    reply = config.normalize_owner_email(
-        gmail.get("from") or ace.get("from_address") or config.OWNER_EMAIL
+    reply = config.normalize_blb_from_email(
+        gmail.get("from") or ace.get("from_address") or config.BLB_FROM_EMAIL
     )
-    if _is_real(reply) and config.normalize_owner_email(biz.get("reply_to")) != reply:
+    if _is_real(reply) and config.normalize_blb_from_email(biz.get("reply_to")) != reply:
         biz["reply_to"] = reply
         updates.append("reply_to←gmail/ace")
     ace_addr = (ace.get("physical_address") or "").strip()
@@ -177,11 +184,17 @@ def sync_business(*, write: bool = True) -> dict[str, Any]:
     if not _is_real(biz.get("physical_address")):
         missing.append("physical_address")
 
+    out: dict[str, Any] = {"updated": updates, "missing": missing, "configured": not missing}
     if write and updates:
-        _save_json(BUSINESS, biz)
-        log.info("secrets_sync business: %s", ", ".join(updates))
-
-    return {"updated": updates, "missing": missing, "configured": not missing}
+        try:
+            _save_json(BUSINESS, biz)
+            log.info("secrets_sync business: %s", ", ".join(updates))
+        except OSError as exc:
+            # Honest degrade: report the failed write instead of claiming the merge
+            # landed — a read-only disk must not look like a configured business.
+            log.warning("secrets_sync: business.json write failed: %s", exc)
+            out["write_failed"] = str(exc)
+    return out
 
 
 def sync_google(*, write: bool = True) -> dict[str, Any]:
@@ -212,20 +225,36 @@ def sync_google(*, write: bool = True) -> dict[str, Any]:
     if not g.get("client_secret"):
         g["client_secret"] = client_secret
         changed.append("client_secret←ace")
+    out: dict[str, Any] = {"updated": changed, "missing": []}
     if write and changed:
-        _save_json(GOOGLE, g)
-        log.info("secrets_sync google: %s", ", ".join(changed))
+        try:
+            _save_json(GOOGLE, g)
+            log.info("secrets_sync google: %s", ", ".join(changed))
+        except OSError as exc:
+            log.warning("secrets_sync: google.json write failed: %s", exc)
+            out["write_failed"] = str(exc)
     if not g.get("refresh_token"):
-        return {"updated": changed, "missing": ["google refresh_token (OAuth flow once)"]}
-    return {"updated": changed, "missing": []}
+        out["missing"] = ["google refresh_token (OAuth flow once)"]
+    return out
+
+
+def _safe_section(fn, *, write: bool) -> dict[str, Any]:
+    """Run one sync section; a crash degrades to an honest ``{"error": ...}`` report.
+    sync_all is called from the foundation probe loop every cycle — one broken section
+    (bad disk, corrupt file, dead memory) must never take the whole pass down."""
+    try:
+        return fn(write=write)
+    except Exception as exc:  # noqa: BLE001 — boundary: report, never raise into foundation
+        log.warning("secrets_sync section %s failed: %s", getattr(fn, "__name__", fn), exc)
+        return {"updated": [], "missing": [], "error": str(exc)}
 
 
 def sync_all(*, write: bool = True) -> dict[str, Any]:
-    """Idempotent hydrate pass. Never raises."""
+    """Idempotent hydrate pass. Never raises (each section degrades independently)."""
     _migrate_legacy_once()   # one-time ~/.ace → ~/.utah; runtime reads only ~/.utah after
     report = {
-        "business": sync_business(write=write),
-        "google": sync_google(write=write),
+        "business": _safe_section(sync_business, write=write),
+        "google": _safe_section(sync_google, write=write),
         "present": {
             "gmail": GMAIL.is_file(),
             "pushover": (SECRETS / "pushover.json").is_file(),

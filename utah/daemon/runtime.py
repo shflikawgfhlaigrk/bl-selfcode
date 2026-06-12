@@ -41,7 +41,15 @@ def assert_isolated(*paths: Path) -> None:
 
 
 def ensure_runtime() -> None:
-    """Create the runtime directories (0700). Idempotent; isolation-checked."""
+    """Create the runtime directories and ENFORCE owner-only (0700).
+
+    ``mkdir(mode=...)`` only applies at creation — a pre-existing 0755 tree
+    (built before the invariant, or loosened by hand) would stay
+    world-traversable forever, exposing the vault and the control socket dir.
+    Idempotent; isolation-checked.
+    """
     assert_isolated()
     for d in (UTAH_HOME, RUN_DIR, LOG_DIR, VAULT_DIR):
         d.mkdir(mode=0o700, parents=True, exist_ok=True)
+        if (d.stat().st_mode & 0o777) != 0o700:
+            os.chmod(d, 0o700)

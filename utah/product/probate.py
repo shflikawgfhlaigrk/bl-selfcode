@@ -306,13 +306,25 @@ def scout(ledger, category: str = "probate", counties=None, days: int = 60,
     return {"found": len(findings), "new": new, "region": region}
 
 
-#: ``com.utah.probate`` cron knobs — statewide daily catch.
+#: ``com.utah.probate`` cron knobs — statewide daily catch. max_pages raised 12→25
+#: (live-measured 2026-06-11: ~10 notices/page newest-first; 12 pages→81 named, 25 pages→
+#: 153 named/132 distinct decedents in ONE run — the depth that lifts daily NEW toward 200).
 DAILY_DAYS = 45
-DAILY_MAX_PAGES = 12
+DAILY_MAX_PAGES = 25
+
+#: GPN popular-search categories swept every cron run. LIVE-MEASURED 2026-06-11: only the
+#: ``probate`` stream (code 23) carries extractable decedent names — public_sale/foreclosure/
+#: sheriff/tax_sale return 80 raw notices/run but ~0 named estates (their prose isn't an
+#: "Estate of …" notice, so the decedent extractor finds nothing). ``estate`` is the SAME
+#: code 23 as ``probate`` (pure dedup, 0 new). So the honest volume lever is DEPTH, not a
+#: category fan-out: this list stays ["probate"] and the gain comes from DAILY_MAX_PAGES.
+#: The sweep loop is kept (multi-category capable) so adding a productive code is one edit.
+DAILY_CATEGORIES = ("probate",)
 
 
 def run_scheduled(days: int = DAILY_DAYS, max_pages: int = DAILY_MAX_PAGES,
-                  ledger=None, fetch: FetchPages | None = None) -> dict:
+                  ledger=None, fetch: FetchPages | None = None,
+                  categories: tuple[str, ...] = DAILY_CATEGORIES) -> dict:
     """``com.utah.probate`` cron entry — capture ALL Georgia probate notices, daily.
 
     STATEWIDE (``counties=set()`` → no filter): GPN's county checkbox doesn't bind over
@@ -320,17 +332,38 @@ def run_scheduled(days: int = DAILY_DAYS, max_pages: int = DAILY_MAX_PAGES,
     ``max_pages`` deep for coverage and write EVERY actionable estate (the ledger dedups
     on case_name+county, so daily overlap never double-writes). The Coweta-ring filter
     that zeroed older runs is intentionally dropped here — the county is still stored per
-    row, so the deck can narrow to the market. Real GPN only; degrades honestly."""
+    row, so the deck can narrow to the market. Real GPN only; degrades honestly.
+
+    VOLUME: sweeps every category in ``categories`` (probate + sibling estate/public-sale
+    streams) so a single exhausted stream no longer caps daily NEW. Each category's findings
+    are written to the SAME probate table and the ledger dedups across categories — so the
+    returned ``new`` is the real count of DISTINCT decedents captured this run."""
     if ledger is None:
         from utah.product.ledger import Ledger
         ledger = Ledger()
-    res = scout(ledger, category="probate", counties=set(), days=days,
-                max_pages=max_pages, fetch=fetch)
-    log.info("probate cron (statewide): %s", res)
+    total_found = total_new = total_raw = 0
+    per_cat: dict[str, dict] = {}
+    last_error = None
+    for cat in categories:
+        res = scout(ledger, category=cat, counties=set(), days=days,
+                    max_pages=max_pages, fetch=fetch)
+        per_cat[cat] = {"found": res.get("found", 0), "new": res.get("new", 0)}
+        total_found += res.get("found", 0)
+        total_new += res.get("new", 0)
+        total_raw += res.get("raw_notices", 0)
+        if res.get("error"):
+            last_error = res["error"]
+    region = "Georgia (statewide)"
+    out = {"found": total_found, "new": total_new, "region": region,
+           "categories": per_cat, "raw_notices": total_raw}
+    if last_error and total_found == 0:
+        out["error"] = last_error
+    log.info("probate cron (statewide, %d categories): %s", len(categories), out)
     from utah import alerts
-    alerts.leads_probate(res, kind="probate")   # daily pipeline push (never raises)
-    return res
+    alerts.leads_probate(out, kind="probate")   # daily pipeline push (never raises)
+    return out
 
 
 __all__ = ["find_probate", "scout", "run_scheduled", "DEFAULT_COUNTIES",
+           "DAILY_CATEGORIES", "DAILY_MAX_PAGES",
            "_extract_name", "_county_from_text", "_parse_notices"]

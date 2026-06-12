@@ -38,6 +38,7 @@ horizon has elapsed.
 from __future__ import annotations
 
 import logging
+import math
 from datetime import timedelta
 
 from utah import failures
@@ -62,8 +63,17 @@ def grade(direction: str, entry: float, prior_closes, post_closes, *,
     if direction not in ("long", "short"):
         return {"outcome": "ungradable", "pnl": None,
                 "reason": f"unknown direction {direction!r}"}
-    if entry is None:
-        return {"outcome": "ungradable", "pnl": None, "reason": "fire has no entry price"}
+    if entry is None or not isinstance(entry, (int, float)) or not math.isfinite(entry):
+        # A NaN/inf entry (corrupt fires row) would poison every comparison in the
+        # walk — NaN compares false everywhere, so it would "time out" and write a
+        # NaN pnl to the ledger. Refuse instead of mis-grading.
+        return {"outcome": "ungradable", "pnl": None,
+                "reason": f"fire has no usable entry price ({entry!r})"}
+    if not (isinstance(target_r, (int, float)) and math.isfinite(target_r) and target_r > 0):
+        # target_r <= 0 inverts the target THROUGH the entry: a losing trade would
+        # grade 'target'. Parameter abuse, not data — refuse loudly.
+        return {"outcome": "ungradable", "pnl": None,
+                "reason": f"non-positive target_r ({target_r!r}) would invert the target"}
     prior = list(prior_closes)
     if len(prior) < lookback:
         return {"outcome": "ungradable", "pnl": None,
@@ -72,9 +82,11 @@ def grade(direction: str, entry: float, prior_closes, post_closes, *,
     window = prior[-lookback:]
     stop = min(window) if direction == "long" else max(window)
     risk = abs(entry - stop)
-    if risk <= 0:
+    if risk <= 0 or not math.isfinite(risk):
+        # zero-width window OR a non-finite prior close leaking into the stop —
+        # either way the R-math is meaningless, so the fire stays ungraded.
         return {"outcome": "ungradable", "pnl": None,
-                "reason": "zero-risk breakout window (stop == entry)"}
+                "reason": "zero-risk or non-finite breakout window (stop vs entry)"}
     post = list(post_closes)
     if not post:
         return {"outcome": "ungradable", "pnl": None,

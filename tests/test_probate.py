@@ -92,3 +92,56 @@ def test_zero_findings_is_documented():
     r = probate.scout(lg, fetch=lambda **k: ["<html>no notices</html>"])
     assert r["found"] == 0
     assert any("zero" in row[2] for row in store.rows)   # 0-notices reason recorded
+
+
+# --- VOLUME — capture toward 200/day across multiple notice categories --------
+
+def test_daily_max_pages_raised_for_deeper_capture():
+    """Live-measured 2026-06-11: GPN returns ~10 notices/page newest-first; 12 pages
+    yielded 81 named, 25 pages yielded 153 named in one run. Walk deeper for volume."""
+    assert probate.DAILY_MAX_PAGES >= 25
+
+
+def test_run_scheduled_default_category_is_probate_only():
+    """LIVE-MEASURED 2026-06-11: only GPN code 23 (probate) carries extractable decedent
+    names — the other popular codes return raw notices but ~0 named estates. So the honest
+    default sweeps probate ONLY; the volume lever is DEPTH (DAILY_MAX_PAGES), not a fan-out
+    over unproductive categories that would just burn fetches for nothing."""
+    assert probate.DAILY_CATEGORIES == ("probate",)
+    failures.set_store(FakeFailureStore())
+    lg = _RecLedger()
+    seen_cats = []
+
+    def fake_fetch(**k):
+        seen_cats.append(k.get("category"))
+        return ['<td class="info x">County: Coweta <br/></td>'
+                '<td colspan="3">Estate of JANE DOE, deceased, late of Coweta County.</td>']
+
+    res = probate.run_scheduled(ledger=lg, fetch=fake_fetch)
+    assert seen_cats == ["probate"]                  # one productive stream, no waste
+    assert res["new"] == 1 and res["found"] == 1
+
+
+def test_run_scheduled_sweep_loop_accumulates_and_dedups_across_categories():
+    """The sweep LOOP must stay multi-category-capable (adding a productive GPN code is a
+    one-line edit). Given two categories with distinct estates it accumulates; given the
+    SAME estate under both it dedups to one (the ledger never double-writes)."""
+    failures.set_store(FakeFailureStore())
+    lg = _RecLedger()
+
+    names = {"probate": "ALICE PROBATE", "public_sale": "BORIS SALE"}
+
+    def distinct(**k):
+        nm = names[k.get("category")]
+        return ['<td class="info x">County: Coweta <br/></td>'
+                f'<td colspan="3">Estate of {nm}, deceased, late of Coweta County.</td>']
+    res = probate.run_scheduled(ledger=lg, fetch=distinct,
+                                categories=("probate", "public_sale"))
+    assert res["found"] == 2 and res["new"] == 2     # distinct estates accumulate
+
+    lg2 = _RecLedger()
+    same = ('<td class="info x">County: Coweta <br/></td>'
+            '<td colspan="3">Estate of SAME PERSON, deceased, late of Coweta County.</td>')
+    res2 = probate.run_scheduled(ledger=lg2, fetch=lambda **k: [same],
+                                 categories=("probate", "public_sale"))
+    assert res2["new"] == 1                           # one decedent, swept twice -> still 1

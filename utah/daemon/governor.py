@@ -17,9 +17,12 @@ up pool threads) and sheds only in a genuine storm.
 from __future__ import annotations
 
 import contextlib
+import logging
 import os
 
 from utah.daemon.rpc import OVERLOADED, RpcError
+
+log = logging.getLogger("utah.daemon.governor")
 
 #: Cheap-read shed threshold — on 18 cores this means load1 > 216. Heavy work
 #: sheds at 1.5×cores long before reads do; by the time reads shed, the box is
@@ -41,13 +44,34 @@ class Governor:
         self._max_load_per_core = max_load_per_core
         self._max_inflight = max_inflight
         self._inflight = 0
+        self._gauge_warned = False
+
+    def _load1(self) -> float | None:
+        """The live 1-minute load, or ``None`` when the gauge itself is down.
+
+        ``os.getloadavg`` can raise ``OSError`` ("load average unobtainable").
+        A dead gauge must not become a permanent outage (degrade OPEN — the
+        in-flight cap still bounds work) and must never be fabricated as 0.0,
+        which would read as "box idle" on the deck.
+        """
+        try:
+            return os.getloadavg()[0]
+        except OSError as exc:
+            if not self._gauge_warned:  # once per process, not once per call
+                self._gauge_warned = True
+                log.warning(
+                    "load gauge down (%s) — load gate degrades open; "
+                    "in-flight cap still bounds heavy work", exc,
+                )
+            return None
 
     def snapshot(self) -> dict:
-        """Live gauges for ``status`` (never cached)."""
-        load1 = os.getloadavg()[0]
+        """Live gauges for ``status`` (never cached). A down load gauge is
+        reported honestly as ``None``, never a fabricated 0.0."""
+        load1 = self._load1()
         return {
-            "load1": round(load1, 2),
-            "load_per_core": round(load1 / self._ncpu, 3),
+            "load1": None if load1 is None else round(load1, 2),
+            "load_per_core": None if load1 is None else round(load1 / self._ncpu, 3),
             "max_load_per_core": self._max_load_per_core,
             "inflight": self._inflight,
             "max_inflight": self._max_inflight,
@@ -63,8 +87,8 @@ class Governor:
                 {"inflight": self._inflight},
             )
         limit = self._max_load_per_core if max_load_per_core is None else max_load_per_core
-        load1 = os.getloadavg()[0]
-        if load1 / self._ncpu > limit:
+        load1 = self._load1()
+        if load1 is not None and load1 / self._ncpu > limit:
             raise RpcError(
                 OVERLOADED,
                 f"shed: load {load1:.1f} over {limit}×{self._ncpu} cores",

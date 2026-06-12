@@ -18,6 +18,10 @@ log = logging.getLogger("utah.failures")
 
 MAX_DETAIL = 2000
 
+#: Upper bound for ``recent`` — a deck/RPC bug asking for 10**9 rows must not
+#: turn into a full-table scan on the live failures table.
+MAX_RECENT = 1000
+
 
 class FailureRow(NamedTuple):
     source: str
@@ -144,9 +148,16 @@ def record_silent(source: str, detail: str = "") -> None:
 
 
 def recent(limit: int = 20) -> list[FailureRow]:
-    """Most-recent-first failures for the deck. Empty (never fabricated) on error."""
+    """Most-recent-first failures for the deck. Empty (never fabricated) on error.
+
+    *limit* is clamped to [1, MAX_RECENT]: a zero/negative ask still returns one
+    row (not an error), and an absurd ask never becomes a full-table scan."""
     try:
-        return get_store().recent(limit)
+        bounded = max(1, min(int(limit), MAX_RECENT))
+    except (TypeError, ValueError):
+        bounded = 20  # garbage limit → the deck's default page size
+    try:
+        return get_store().recent(bounded)
     except Exception:  # noqa: BLE001
         log.debug("failure-recent swallowed", exc_info=True)
         return []

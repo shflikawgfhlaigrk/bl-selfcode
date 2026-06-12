@@ -49,6 +49,10 @@ _RED_FLAGS: dict[str, int] = {
 }
 SPAM_BLOCK_THRESHOLD = 6
 
+#: Michael's business site — goes in every outreach email (proof of work + a real web
+#: presence makes a cold pitch credible; same domain as the sending identity).
+BUSINESS_SITE = "https://blacklabelbots.com"
+
 
 #: One short, business-type-aware relevance line, keyed by the lead's ``kind``. Keeps
 #: Michael's pitch but makes each email genuinely about THAT business — and, because the
@@ -124,9 +128,11 @@ def compose(lead: dict, campaign: str, footer: dict | None = None) -> dict:
         "standard. I could put a sample website together for you, and you could tell me "
         "what customizations you'd like — calendar integrations, Google Maps, and pricing "
         "automations are all easy, and this can be done within a day.\n\n"
+        f"You can see examples of my work at {BUSINESS_SITE}.\n\n"
         "Let me know if you're interested.\n\n"
         "Best regards,\n"
         "Michael Barber\n"
+        f"{BUSINESS_SITE}\n"
         "678-876-1170\n\n"
         f"—\n{f['address']}\n{f['unsubscribe']}"
     )
@@ -169,6 +175,7 @@ def compose_followup(lead: dict, *, final: bool = False, footer: dict | None = N
         f"{greeting}\n\n{middle}"
         "Best regards,\n"
         "Michael Barber\n"
+        f"{BUSINESS_SITE}\n"
         "678-876-1170\n\n"
         f"—\n{f['address']}\n{f['unsubscribe']}"
     )
@@ -275,7 +282,8 @@ def _is_smb_lead(lead: dict) -> bool:
 
 
 def queue(ledger, campaign: str, leads: list[dict], footer: dict | None = None,
-          can_send: bool = False, send_fn=None, prefer: str | None = None) -> dict:
+          can_send: bool = False, send_fn=None, prefer: str | None = None,
+          verify_fn=None) -> dict:
     """Compose + lint + suppression-queue each lead, and (when allowed) SEND. The send
     is gated: with ``can_send=False`` nothing is sent and the gate is documented. With
     ``can_send=True`` an EMAIL lead is sent via ``mail.send`` (real SMTP if creds are
@@ -295,6 +303,14 @@ def queue(ledger, campaign: str, leads: list[dict], footer: dict | None = None,
     if campaign == SMB_OUTREACH_CAMPAIGN:
         leads = [l for l in leads if _is_smb_lead(l)]
     sender = send_fn or mail.send
+    # Deliverability gate: only ever send to an address that can actually RECEIVE mail.
+    # An unverified guess that hard-bounces is precisely what blacklists the sending domain,
+    # so a non-deliverable email is counted + skipped, never sent. enrich.verify_email does
+    # MX/syntax/role checks (NOT a RCPT-TO probe — that gets the prober blocklisted and breaks
+    # on catch-all domains). Safe by default; injectable so tests never touch real DNS.
+    if verify_fn is None:
+        from utah.product import enrich
+        verify_fn = enrich.verify_email
     # Address gate: never SEND with a placeholder CAN-SPAM physical address — that is a
     # non-compliant email that burns the prospect. Refuse, document it, and fall through to
     # queue-only (the lead stays, never sent). (Creds are separately gated in mail.send.)
@@ -304,66 +320,95 @@ def queue(ledger, campaign: str, leads: list[dict], footer: dict | None = None,
         addr_gated = ("send refused: CAN-SPAM physical address not configured "
                       "(Michael's business input) — leads stay queued, never sent")
         failures.record("outreach", "send_gated", f"{campaign}: {addr_gated}")
-    queued = suppressed = needs_contact = blocked = sent = 0
+    n = {"queued": 0, "suppressed": 0, "needs_contact": 0, "blocked": 0,
+         "sent": 0, "unverified": 0, "errors": 0}
     for lead in leads:
-        channel = pick_channel(lead.get("contact"), prefer)
-        if channel is None:
-            needs_contact += 1
+        try:
+            verdict = _queue_one(ledger, campaign, lead, footer, do_send, sender,
+                                 prefer, verify_fn)
+        except Exception as exc:  # noqa: BLE001 — one bad lead/ledger row/sender must
+            # never abort the rest of the batch (the remaining sends are real work);
+            # a raise commits NOTHING, so the prospect keeps their one shot.
+            n["errors"] += 1
+            failures.record("outreach", "lead_failed",
+                            f"{lead.get('name') or 'unnamed lead'}: {exc} — batch continued")
             continue
-        msg = compose_sms(lead, campaign, footer) if channel == "sms" else compose(lead, campaign, footer)
-        if content_score(msg.get("subject", "") + " " + msg["body"])["block"]:
-            blocked += 1
-            failures.record("outreach", "content_blocked",
-                            f"{lead.get('name')}: pitch tripped the spam-content gate")
-            continue
-        recipient = _recipient(lead.get("contact", {}), channel)
-        if do_send and channel == "email":
-            # SEND-NOW: don't burn the prospect's one shot on a gated/failed send. Check
-            # suppression read-only, send, and commit the never-twice row ONLY on success.
-            if getattr(ledger, "is_contacted", lambda r, c: False)(recipient, campaign):
-                suppressed += 1
-                continue
-            res = sender(recipient, msg["subject"], msg["body"])
-            if res.get("sent"):
-                ledger.log_outreach(recipient, campaign, channel)   # commit suppression
-                # Record the actual email in the mail ledger so the deck MAIL panel shows it
-                # (caller-side: outreach already holds the ledger). Defensive getattr keeps
-                # test fakes / minimal ledgers working — same pattern as is_contacted above.
-                getattr(ledger, "record_mail", lambda *a, **k: None)(
-                    recipient, msg["subject"], status="sent", channel="email")
-                queued += 1
-                sent += 1
-            else:
-                failures.record("outreach", "send_failed",
-                                f"{recipient}: {res.get('error') or 'gated'}")
-        elif do_send and channel == "sms":
-            if getattr(ledger, "is_contacted", lambda r, c: False)(recipient, campaign):
-                suppressed += 1
-                continue
-            res = sms.send(recipient, msg["body"])
-            if res.get("sent"):
-                ledger.log_outreach(recipient, campaign, channel)
-                queued += 1
-                sent += 1
-            else:
-                failures.record("outreach", "send_failed",
-                                f"{recipient}: {res.get('error') or res.get('reason') or 'gated'}")
-                # do NOT log_outreach — Twilio may land later; prospect keeps their one shot
-        elif ledger.log_outreach(recipient, campaign, channel):
-            queued += 1             # queue-only (no creds / SMS): queuing IS the action
-        else:
-            suppressed += 1         # already contacted for this campaign — never twice
+        if verdict == "sent":
+            n["sent"] += 1
+            n["queued"] += 1        # a landed send is also an actioned (queued) lead
+        elif verdict != "send_failed":   # send_failed is documented, lead stays for retry
+            n[verdict] += 1
 
     gated = addr_gated
-    if queued and not can_send:
+    if n["queued"] and not can_send:
         gated = ("outreach send is gated: needs sending creds (SMS/email) + a real "
                  "CAN-SPAM physical address (Michael's business inputs)")
         failures.record("outreach", "send_gated",
-                        f"{campaign}: {queued} queued, 0 sent — {gated}")
-    log.info("outreach %s: queued=%d suppressed=%d needs_contact=%d blocked=%d sent=%d",
-             campaign, queued, suppressed, needs_contact, blocked, sent)
-    return {"campaign": campaign, "queued": queued, "suppressed": suppressed,
-            "needs_contact": needs_contact, "blocked": blocked, "sent": sent, "gated": gated}
+                        f"{campaign}: {n['queued']} queued, 0 sent — {gated}")
+    log.info("outreach %s: queued=%d suppressed=%d needs_contact=%d blocked=%d sent=%d "
+             "unverified=%d errors=%d", campaign, n["queued"], n["suppressed"],
+             n["needs_contact"], n["blocked"], n["sent"], n["unverified"], n["errors"])
+    return {"campaign": campaign, "queued": n["queued"], "suppressed": n["suppressed"],
+            "needs_contact": n["needs_contact"], "blocked": n["blocked"], "sent": n["sent"],
+            "unverified": n["unverified"], "errors": n["errors"], "gated": gated}
+
+
+def _queue_one(ledger, campaign: str, lead: dict, footer: dict | None, do_send: bool,
+               sender, prefer: str | None, verify_fn) -> str:
+    """Compose + lint + (when allowed) SEND one lead. Returns the counter to bump:
+    ``needs_contact | blocked | suppressed | unverified | sent | send_failed | queued``.
+    May raise on a store/sender bug — :func:`queue` isolates that per lead, so a raise
+    here never commits a suppression row (the prospect keeps their one shot)."""
+    channel = pick_channel(lead.get("contact"), prefer)
+    if channel is None:
+        return "needs_contact"
+    msg = compose_sms(lead, campaign, footer) if channel == "sms" else compose(lead, campaign, footer)
+    if content_score(msg.get("subject", "") + " " + msg["body"])["block"]:
+        failures.record("outreach", "content_blocked",
+                        f"{lead.get('name')}: pitch tripped the spam-content gate")
+        return "blocked"
+    recipient = _recipient(lead.get("contact", {}), channel)
+    if do_send and channel == "email":
+        # SEND-NOW: don't burn the prospect's one shot on a gated/failed send. Check
+        # suppression read-only, send, and commit the never-twice row ONLY on success.
+        if getattr(ledger, "is_contacted", lambda r, c: False)(recipient, campaign):
+            return "suppressed"
+        verdict = verify_fn(recipient)
+        if not verdict.get("deliverable"):
+            failures.record("outreach", "unverified_email",
+                            f"{recipient}: {verdict.get('reason', 'unverifiable')} — "
+                            "not sent (protects sender reputation)")
+            return "unverified"         # never burn reputation on a hard bounce
+        res = sender(recipient, msg["subject"], msg["body"])
+        if res.get("sent"):
+            ledger.log_outreach(recipient, campaign, channel)   # commit suppression
+            # Record the actual email in the mail ledger so the deck MAIL panel shows it
+            # (caller-side: outreach already holds the ledger). Defensive getattr keeps
+            # test fakes / minimal ledgers working — same pattern as is_contacted above.
+            getattr(ledger, "record_mail", lambda *a, **k: None)(
+                recipient, msg["subject"], status="sent", channel="email")
+            # Funnel truth: the lead row flips new→contacted ONLY on a landed send
+            # (same defensive getattr — minimal test fakes keep working).
+            getattr(ledger, "mark_lead_contacted", lambda r: 0)(recipient)
+            return "sent"
+        failures.record("outreach", "send_failed",
+                        f"{recipient}: {res.get('error') or 'gated'}")
+        return "send_failed"
+    if do_send and channel == "sms":
+        if getattr(ledger, "is_contacted", lambda r, c: False)(recipient, campaign):
+            return "suppressed"
+        res = sms.send(recipient, msg["body"])
+        if res.get("sent"):
+            ledger.log_outreach(recipient, campaign, channel)
+            getattr(ledger, "mark_lead_contacted", lambda r: 0)(recipient)
+            return "sent"
+        failures.record("outreach", "send_failed",
+                        f"{recipient}: {res.get('error') or res.get('reason') or 'gated'}")
+        # NOT log_outreach — Twilio may land later; prospect keeps their one shot
+        return "send_failed"
+    if ledger.log_outreach(recipient, campaign, channel):
+        return "queued"             # queue-only (no creds / SMS): queuing IS the action
+    return "suppressed"             # already contacted for this campaign — never twice
 
 
 #: Email domains owned by large corporations — a no-website SMB never has one. Skip them so
@@ -373,7 +418,31 @@ _CORP_EMAIL_DOMAINS: frozenset[str] = frozenset({
     "tesla.com", "walmart.com", "mcdonalds.com", "starbucks.com", "amazon.com", "target.com",
     "homedepot.com", "lowes.com", "fedex.com", "ups.com", "att.com", "verizon.com",
     "comcast.com", "cvs.com", "walgreens.com", "costco.com", "google.com", "apple.com",
+    "statefarm.com", "allstate.com", "geico.com", "progressive.com", "farmers.com",
+    "schlotzskys.com", "jamesavery.com", "nothingbundtcakes.com", "pita.com",
+    "pitastreetfood.com", "fashionten.com", "aircraftspruce.com", "adesa.com",
+    "frontierautosalesga.com",  # dealer group inbox, not local SMB owner
 })
+#: Role inboxes at franchises / big brands — never the owner reading cold outreach.
+_CORP_LOCAL_PARTS: frozenset[str] = frozenset({
+    "customerservice", "customer.service", "corporate", "support", "help", "careers",
+    "hr", "recruiting", "franchise", "orders", "order", "billing", "accounts",
+    "reception", "frontdesk", "administrator", "webmaster", "marketing", "media",
+    "press", "legal", "compliance", "donotreply", "noreply", "no-reply", "wecare",
+    "service", "info desk", "store",
+})
+
+
+def _is_corporate_inbox(email: str) -> bool:
+    """Franchise HQs, national-brand service desks, and role inboxes — not local owners."""
+    email = (email or "").lower().strip()
+    if "@" not in email:
+        return True
+    local, _, domain = email.partition("@")
+    if domain in _CORP_EMAIL_DOMAINS:
+        return True
+    local_norm = re.sub(r"[^a-z0-9]", "", local)
+    return local_norm in {re.sub(r"[^a-z0-9]", "", p) for p in _CORP_LOCAL_PARTS}
 
 
 def _is_emailable_prospect(lead: dict) -> bool:
@@ -385,22 +454,35 @@ def _is_emailable_prospect(lead: dict) -> bool:
         return False
     email = ((lead.get("contact") or {}).get("email") or "").lower()
     domain = email.rsplit("@", 1)[-1] if "@" in email else ""
-    return bool(domain) and domain not in _CORP_EMAIL_DOMAINS
+    if not domain or _is_corporate_inbox(email):
+        return False
+    return True
 
 
 def _is_phone_prospect(lead: dict) -> bool:
-    """Genuine local SMB worth cold-texting — not a national chain."""
+    """Genuine local SMB worth cold-texting — not a national chain or toll-free line."""
     from utah.product import leads as leads_mod
 
     if leads_mod.is_national_chain(lead.get("name") or ""):
         return False
     phone = ((lead.get("contact") or {}).get("phone") or "").strip()
-    return bool(phone) and len(re.sub(r"\D", "", phone)) >= 10
+    if not phone:
+        return False
+    digits = re.sub(r"\D", "", phone)
+    if len(digits) == 11 and digits.startswith("1"):
+        digits = digits[1:]
+    if len(digits) != 10 or digits[0] not in "23456789":
+        return False
+    # Toll-free / premium — never a local owner's cell (88885091616 leaked from Maps).
+    if digits[0:3] in {"800", "888", "877", "866", "855", "844", "833", "822", "900"}:
+        return False
+    return True
 
 
 def run_scheduled(campaign: str = DEFAULT_CAMPAIGN, limit: int = DAILY_OUTREACH, *,
                   ledger=None, foundation_gate=None, send_fn=None,
-                  channel: str | None = None, now_hour: int | None = None) -> dict:
+                  channel: str | None = None, now_hour: int | None = None,
+                  verify_fn=None) -> dict:
     """``com.utah.outreach`` cron — SMB small-business outreach only (OSM + Maps).
     Probate heirs are in the ``probate`` table and never enter this path.
 
@@ -438,7 +520,7 @@ def run_scheduled(campaign: str = DEFAULT_CAMPAIGN, limit: int = DAILY_OUTREACH,
             return {"campaign": campaign, "channel": "sms", "sent": 0, "queued": 0,
                     "reason": "no phone SMB prospects (chains filtered)"}
         result = queue(ledger, campaign, leads, footer=default_footer(),
-                       can_send=True, send_fn=send_fn, prefer="sms")
+                       can_send=True, send_fn=send_fn, prefer="sms", verify_fn=verify_fn)
         result["channel"] = "sms"
     elif ch == "email":
         candidates = ledger.uncontacted_email_leads(campaign, max(limit * 4, limit))
@@ -450,10 +532,10 @@ def run_scheduled(campaign: str = DEFAULT_CAMPAIGN, limit: int = DAILY_OUTREACH,
                       "reason": "no emailable SMB prospects (chains/corporate filtered)"}
         else:
             result = queue(ledger, campaign, leads, footer=default_footer(),
-                           can_send=True, send_fn=send_fn, prefer="email")
+                           can_send=True, send_fn=send_fn, prefer="email", verify_fn=verify_fn)
             result["channel"] = "email"
     else:  # auto — email-first, then fill the remaining quota with text (SMS/iMessage)
-        result = _run_auto(ledger, campaign, limit, send_fn)
+        result = _run_auto(ledger, campaign, limit, send_fn, verify_fn=verify_fn)
 
     # Follow-ups ride every email-capable run: due day-3/day-7 nudges go out FIRST in
     # spirit (warmer than cold) but are accounted separately so the cold quota and the
@@ -474,13 +556,16 @@ def run_scheduled(campaign: str = DEFAULT_CAMPAIGN, limit: int = DAILY_OUTREACH,
     return result
 
 
-def _run_auto(ledger, campaign: str, limit: int, send_fn) -> dict:
+def _run_auto(ledger, campaign: str, limit: int, send_fn, *, verify_fn=None) -> dict:
     """Email-first, text-fallback: send emailable leads via email, then fill the rest
-    of *limit* with phone-only leads via text (SMS→iMessage). One combined cap so the
-    run honours the per-hour rate while reaching both email and phone prospects."""
+    of *limit* with phone-only leads via text (SMS→iMessage). When every inbox has hit
+    its daily cap, the full quota shifts to SMS so the day isn't dead after 8am."""
     footer = default_footer()
+    mail_exhausted = mail.inboxes_exhausted()
+    email_budget = 0 if mail_exhausted else min(limit, mail.sends_remaining())
+
     email_cand = ledger.uncontacted_email_leads(campaign, max(limit * 4, limit))
-    email_leads = [l for l in email_cand if _is_emailable_prospect(l)][:limit]
+    email_leads = [l for l in email_cand if _is_emailable_prospect(l)][:email_budget]
     seen_ids = {l.get("id") for l in email_leads if l.get("id") is not None}
 
     remaining = limit - len(email_leads)
@@ -489,20 +574,23 @@ def _run_auto(ledger, campaign: str, limit: int, send_fn) -> dict:
         phone_cand = ledger.uncontacted_phone_leads(campaign, max(remaining * 4, remaining))
         for l in phone_cand:
             if l.get("id") is not None and l.get("id") in seen_ids:
-                continue   # already in the email batch — never double-contact one lead
+                continue
             if _is_phone_prospect(l):
                 phone_leads.append(l)
             if len(phone_leads) >= remaining:
                 break
 
     if not email_leads and not phone_leads:
+        reason = ("no textable SMB prospects (mail capped, SMS pool empty)"
+                  if mail_exhausted else
+                  "no emailable or textable SMB prospects (chains/corporate filtered)")
         return {"campaign": campaign, "channel": "auto", "sent": 0, "queued": 0,
-                "reason": "no emailable or textable SMB prospects (chains/corporate filtered)"}
+                "reason": reason, "mail_exhausted": mail_exhausted}
 
-    er = queue(ledger, campaign, email_leads, footer=footer,
-               can_send=True, send_fn=send_fn, prefer="email") if email_leads else {}
-    sr = queue(ledger, campaign, phone_leads, footer=footer,
-               can_send=True, send_fn=send_fn, prefer="sms") if phone_leads else {}
+    er = queue(ledger, campaign, email_leads, footer=footer, can_send=True,
+               send_fn=send_fn, prefer="email", verify_fn=verify_fn) if email_leads else {}
+    sr = queue(ledger, campaign, phone_leads, footer=footer, can_send=True,
+               send_fn=send_fn, prefer="sms", verify_fn=verify_fn) if phone_leads else {}
     return {
         "campaign": campaign, "channel": "auto",
         "sent": er.get("sent", 0) + sr.get("sent", 0),
@@ -510,6 +598,8 @@ def _run_auto(ledger, campaign: str, limit: int, send_fn) -> dict:
         "suppressed": er.get("suppressed", 0) + sr.get("suppressed", 0),
         "blocked": er.get("blocked", 0) + sr.get("blocked", 0),
         "needs_contact": er.get("needs_contact", 0) + sr.get("needs_contact", 0),
+        "unverified": er.get("unverified", 0) + sr.get("unverified", 0),
+        "mail_exhausted": mail_exhausted,
         "email": {"pulled": len(email_leads), "sent": er.get("sent", 0)},
         "text": {"pulled": len(phone_leads), "sent": sr.get("sent", 0)},
     }

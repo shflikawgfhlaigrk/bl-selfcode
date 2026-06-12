@@ -1,11 +1,20 @@
 """Postgres + pgvector store — production memory backend."""
 from __future__ import annotations
 
+import logging
+import os
 from typing import Sequence
+
+log = logging.getLogger("utah.memory.store")
 
 from utah import config, entities
 from utah.memory.exceptions import MemoryUnavailable
 from utah.memory.types import DenseRow, Neighbor, SparseRow
+
+#: Ceiling for the deck drill-down queries (list_memories/list_entities). The daemon
+#: handlers clamp user input already; this is defense-in-depth so a hostile or buggy
+#: limit can never reach Postgres unbounded. Env-tunable, never config-coupled.
+_LIST_MAX = int(os.environ.get("UTAH_MEMORY_LIST_MAX", "1000"))
 
 _DDL = f"""
 CREATE EXTENSION IF NOT EXISTS vector;
@@ -93,8 +102,6 @@ class PostgresStore:
         memory/entity tables — a stray call (a misrouted test, an accidental --reset) once
         wiped 9k migrated facts. The wipe now cannot happen without an explicit opt-in.
         """
-        import os
-
         if os.environ.get("UTAH_ALLOW_RESET") != "1":
             raise MemoryUnavailable(
                 "reset_schema refused: this DROPs all memory. Set UTAH_ALLOW_RESET=1 "
@@ -107,22 +114,24 @@ class PostgresStore:
     # -- reads -------------------------------------------------------------------
 
     def nearest(self, embedding: Sequence[float], limit: int) -> list[Neighbor]:
+        vec = self._vec(embedding)
         with self._tx() as conn:
             rows = conn.execute(
                 "SELECT id, content, 1 - (embedding <=> %s) AS sim, source FROM memory "
                 "WHERE superseded_by IS NULL AND NOT archived AND embedding IS NOT NULL "
                 "ORDER BY embedding <=> %s LIMIT %s",
-                (self._vec(embedding), self._vec(embedding), limit),
+                (vec, vec, limit),
             ).fetchall()
         return [Neighbor(int(r[0]), r[1], float(r[2]), r[3]) for r in rows]
 
     def dense_search(self, embedding: Sequence[float], limit: int) -> list[DenseRow]:
+        vec = self._vec(embedding)
         with self._tx() as conn:
             rows = conn.execute(
                 "SELECT id, content, source, 1 - (embedding <=> %s) AS sim FROM memory "
                 "WHERE superseded_by IS NULL AND NOT archived AND embedding IS NOT NULL "
                 "ORDER BY embedding <=> %s LIMIT %s",
-                (self._vec(embedding), self._vec(embedding), limit),
+                (vec, vec, limit),
             ).fetchall()
         return [DenseRow(int(r[0]), r[1], r[2], float(r[3])) for r in rows]
 
@@ -133,13 +142,14 @@ class PostgresStore:
         (identity + the books) always get a fair shot at the reranker."""
         if not sources:
             return []
+        vec = self._vec(embedding)
         with self._tx() as conn:
             rows = conn.execute(
                 "SELECT id, content, source, 1 - (embedding <=> %s) AS sim FROM memory "
                 "WHERE superseded_by IS NULL AND NOT archived AND embedding IS NOT NULL "
                 "AND source = ANY(%s) "
                 "ORDER BY embedding <=> %s LIMIT %s",
-                (self._vec(embedding), list(sources), self._vec(embedding), limit),
+                (vec, list(sources), vec, limit),
             ).fetchall()
         return [DenseRow(int(r[0]), r[1], r[2], float(r[3])) for r in rows]
 
@@ -214,17 +224,26 @@ class PostgresStore:
                     "WHERE id = ANY(%s) AND superseded_by IS NULL",
                     (mem_id, list(supersede_ids)),
                 )
-            for name in entity_names:
-                ent_id = conn.execute(
-                    "INSERT INTO entity (name) VALUES (%s) "
+            names: list[str] = []
+            seen: set[str] = set()
+            for raw in entity_names:
+                norm = entities.normalize(raw)
+                if not norm or norm in seen:
+                    continue
+                seen.add(norm)
+                names.append(norm)
+            if names:
+                ent_rows = conn.execute(
+                    "INSERT INTO entity (name) SELECT unnest(%s::text[]) "
                     "ON CONFLICT (name) DO UPDATE SET mentions = entity.mentions + 1 "
                     "RETURNING id",
-                    (entities.normalize(name),),
-                ).fetchone()[0]
+                    (names,),
+                ).fetchall()
+                ent_ids = [int(r[0]) for r in ent_rows]
                 conn.execute(
-                    "INSERT INTO mem_entity (mem_id, ent_id) VALUES (%s, %s) "
-                    "ON CONFLICT DO NOTHING",
-                    (mem_id, ent_id),
+                    "INSERT INTO mem_entity (mem_id, ent_id) "
+                    "SELECT %s, unnest(%s::bigint[]) ON CONFLICT DO NOTHING",
+                    (mem_id, ent_ids),
                 )
         return mem_id
 
@@ -299,7 +318,13 @@ class PostgresStore:
         return {"total": int(total), "live": int(live), "entities": int(entities)}
 
     def list_memories(self, limit: int = 50, offset: int = 0) -> list[dict]:
-        """Live memory rows (newest first) behind the gauge — the deck drill-down."""
+        """Live memory rows (newest first) behind the gauge — the deck drill-down.
+
+        ``limit``/``offset`` are clamped to ``[0, _LIST_MAX]`` / ``>= 0`` here, not just in
+        the daemon handlers — defense-in-depth so a hostile value can never reach Postgres
+        unbounded through some future caller."""
+        limit = max(0, min(int(limit), _LIST_MAX))
+        offset = max(0, int(offset))
         with self._tx() as conn:
             rows = conn.execute(
                 "SELECT id, content, source, confidence, reinforcement, decay_score, "
@@ -316,7 +341,9 @@ class PostgresStore:
         ]
 
     def list_entities(self, limit: int = 100) -> list[dict]:
-        """Entities by live-link count — the deck drill-down for the entity gauge."""
+        """Entities by live-link count — the deck drill-down for the entity gauge.
+        ``limit`` is clamped to ``[0, _LIST_MAX]`` (same defense as :meth:`list_memories`)."""
+        limit = max(0, min(int(limit), _LIST_MAX))
         with self._tx() as conn:
             rows = conn.execute(
                 "SELECT e.name, count(me.mem_id) FROM entity e "
@@ -376,8 +403,8 @@ class _PgTransaction:
             if self._conn is not None and self._pool is not None:
                 try:
                     self._pool.putconn(self._conn)
-                except Exception:  # noqa: BLE001 — returning a conn must never raise on
-                    pass           # the caller's path; the pool reaps a broken conn itself
+                except Exception as put_exc:  # noqa: BLE001 — never raise on caller path
+                    log.debug("putconn failed for memory store connection: %s", put_exc)
             self._conn = None
 
 

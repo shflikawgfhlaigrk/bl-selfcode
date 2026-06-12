@@ -32,13 +32,18 @@ from utah.voice import state as voice_state
 
 log = logging.getLogger("utah.interface.web")
 DASH = pathlib.Path(__file__).resolve().parents[2] / "dashboard"
-LIVE = pathlib.Path(__file__).resolve().parent / "static" / "live.html"
+STATIC = pathlib.Path(__file__).resolve().parent / "static"
+LIVE = STATIC / "live.html"
+TERMINAL = STATIC / "terminal.html"
 
 
 async def _daemon_status() -> dict | None:
     try:
         return await ctl.call("status", timeout=5.0)
-    except Exception:
+    except Exception as exc:  # noqa: BLE001
+        # The deck's core-up probe: swallowing this silently made "CORE OFFLINE"
+        # untraceable (timeout-under-load vs daemon-dead vs bug all looked alike).
+        log.warning("daemon status probe failed: %s", exc)
         return None
 
 
@@ -59,14 +64,21 @@ _PWA_HEAD = (
 
 async def index(request):
     # Inject PWA tags into <head> at serve time (keeps live.html itself clean). Honest
-    # fallback: if the marker's missing, serve the file unchanged.
+    # fallback: if the read/decode fails, serve the file bytes unchanged.
     try:
         html = LIVE.read_text(encoding="utf-8")
         if "/manifest.webmanifest" not in html:
             html = html.replace("<head>", "<head>" + _PWA_HEAD, 1)
         return HTMLResponse(html)
-    except Exception:  # noqa: BLE001 — never let PWA injection break the deck
+    except (OSError, UnicodeDecodeError) as exc:  # never let PWA injection break the deck
+        log.warning("PWA injection skipped (%s) — serving live.html raw", exc)
         return FileResponse(LIVE)
+
+
+async def terminal(request):
+    """The standalone Ace Terminal — a dark monospace TUI into the same grounded brain
+    the deck uses (POSTs /api/tell, streams /api/tell/stream). No new brain; just a shell."""
+    return FileResponse(TERMINAL)
 
 
 def _png_icon(size: int) -> bytes:
@@ -184,13 +196,21 @@ async def api_memory(request):
         return JSONResponse({"error": str(exc)}, status_code=503)
 
 
+#: Hard ceiling on one memory drill-down page — the deck asks for 60; nothing
+#: should be able to point the daemon at a million-row read through this route.
+_MEMORY_LIST_MAX = 500
+
+
 async def api_memory_list(request):
-    """The actual live memory rows behind the gauge — deck drill-down (transparency)."""
+    """The actual live memory rows behind the gauge — deck drill-down (transparency).
+    ``limit``/``offset`` are clamped to sane bounds before they reach the daemon."""
     try:
         limit = int(request.query_params.get("limit", "60"))
         offset = int(request.query_params.get("offset", "0"))
     except ValueError:
         return JSONResponse({"error": "limit/offset must be integers"}, status_code=400)
+    limit = max(1, min(limit, _MEMORY_LIST_MAX))
+    offset = max(0, offset)
     try:
         return JSONResponse(await ctl.call("memory_list", {"limit": limit, "offset": offset}, timeout=8.0))
     except Exception as exc:
@@ -205,6 +225,17 @@ async def api_memory_entities(request):
         return JSONResponse({"error": str(exc)}, status_code=503)
 
 
+async def api_marketing_status(request):
+    """Marketing channel truth for the public site and operator console."""
+    from utah.integrations import social_post
+
+    payload = await run_in_threadpool(social_post.status)
+    return JSONResponse(
+        payload,
+        headers={"Access-Control-Allow-Origin": "*"},
+    )
+
+
 async def api_panel(request):
     """Real detail behind ANY deck panel — the transparency drill-down (every panel
     clickable -> underlying truth). pool/governor/spine/leads/probate/outreach/engines/
@@ -217,7 +248,10 @@ async def api_panel(request):
 
 
 async def api_tell(request):
-    body = await request.json()
+    try:
+        body = await request.json()
+    except Exception:  # noqa: BLE001 — malformed body is the CALLER's 400, never our 500
+        body = {}
     text = str(body.get("text", "")).strip()
     if not text:
         return JSONResponse({"error": "empty text"}, status_code=400)
@@ -275,6 +309,31 @@ async def api_speak_stop(request):
 # main. Jobs live in-process (the deck is single-owner, loopback-only); bounded count.
 _EDIT_JOBS: dict[str, dict] = {}
 _EDIT_JOBS_MAX = 40
+_EDIT_JOBS_LOCK = threading.Lock()  # enqueue/evict is a read-modify-write across requests
+
+
+def _enqueue_job(task: str, *, with_log: bool = False) -> dict:
+    """Register one self-code job in the bounded in-process table and return it.
+
+    When the table is full the oldest FINISHED jobs are evicted first; a table
+    full of still-running jobs sheds the longest-running instead (the worker
+    thread keeps its own dict reference, so an evicted job finishes harmlessly —
+    only its poll URL goes 404). The lock serializes concurrent enqueues so two
+    requests can't double-evict or race the insert."""
+    job: dict = {"id": uuid.uuid4().hex[:12], "task": task, "status": "queued",
+                 "started": time.time(), "result": None}
+    if with_log:
+        job["log"] = []
+    with _EDIT_JOBS_LOCK:
+        if len(_EDIT_JOBS) >= _EDIT_JOBS_MAX:
+            finished = sorted((k for k, j in _EDIT_JOBS.items() if "finished" in j),
+                              key=lambda k: _EDIT_JOBS[k].get("finished") or 0)
+            victims = finished[:10] or sorted(
+                _EDIT_JOBS, key=lambda k: _EDIT_JOBS[k].get("started", 0))[:10]
+            for k in victims:
+                _EDIT_JOBS.pop(k, None)
+        _EDIT_JOBS[job["id"]] = job
+    return job
 
 
 def _run_edit_job(job_id: str, text: str) -> None:
@@ -345,15 +404,9 @@ async def api_selfcode_edit(request):
     text = str(body.get("text", "")).strip()
     if not text:
         return JSONResponse({"error": "empty edit request"}, status_code=400)
-    # bound the job table: drop the oldest finished jobs first
-    if len(_EDIT_JOBS) >= _EDIT_JOBS_MAX:
-        for k in sorted(_EDIT_JOBS, key=lambda j: _EDIT_JOBS[j].get("finished", 0))[:10]:
-            _EDIT_JOBS.pop(k, None)
-    job_id = uuid.uuid4().hex[:12]
-    _EDIT_JOBS[job_id] = {"id": job_id, "task": text, "status": "queued",
-                          "started": time.time(), "result": None}
-    threading.Thread(target=_run_edit_job, args=(job_id, text), daemon=True).start()
-    return JSONResponse({"job": job_id, "status": "queued", "task": text})
+    job = _enqueue_job(text)
+    threading.Thread(target=_run_edit_job, args=(job["id"], text), daemon=True).start()
+    return JSONResponse({"job": job["id"], "status": "queued", "task": text})
 
 
 async def api_selfcode_job(request):
@@ -411,16 +464,11 @@ async def api_console(request):
                 from utah import sica_discover
 
                 sica_discover.mark_used(rec)
-            except Exception:  # noqa: BLE001
+            except Exception:  # noqa: BLE001 — usage telemetry is a nicety; the edit job already ran
                 pass
-        if len(_EDIT_JOBS) >= _EDIT_JOBS_MAX:
-            for k in sorted(_EDIT_JOBS, key=lambda j: _EDIT_JOBS[j].get("finished", 0))[:10]:
-                _EDIT_JOBS.pop(k, None)
-        job_id = uuid.uuid4().hex[:12]
-        _EDIT_JOBS[job_id] = {"id": job_id, "task": task, "status": "queued",
-                              "started": time.time(), "result": None, "log": []}
-        threading.Thread(target=_run_console_job, args=(job_id, task), daemon=True).start()
-        return JSONResponse({"kind": "job", "job": job_id, "status": "queued", "task": task})
+        job = _enqueue_job(task, with_log=True)
+        threading.Thread(target=_run_console_job, args=(job["id"], task), daemon=True).start()
+        return JSONResponse({"kind": "job", "job": job["id"], "status": "queued", "task": task})
 
     # FAST commands → inline terminal text.
     try:
@@ -468,7 +516,8 @@ async def events(request):
                 if await request.is_disconnected():
                     break
                 yield {"event": ev["channel"], "data": json.dumps(ev["event"])}
-        except Exception:
+        except Exception as exc:  # noqa: BLE001 — stream ends (client gone / daemon restart)
+            log.debug("SSE stream ended: %s", exc)
             return
 
     return EventSourceResponse(gen())
@@ -590,10 +639,13 @@ async def deck_data(request):
 def build_app() -> Starlette:
     routes = [
         Route("/", index),
+        Route("/terminal", terminal),
+        Route("/terminal.html", terminal),
         Route("/sim", sim),
         Route("/favicon.svg", favicon),
         Route("/discord", discord_redirect),
         Route("/api/discord", api_discord),
+        Route("/api/marketing/status", api_marketing_status),
         Route("/status", api_status),
         Route("/memory", api_memory),
         Route("/memory/list", api_memory_list),

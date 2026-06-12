@@ -36,14 +36,16 @@ USED_PATH = runtime.RUN_DIR / "discoveries-used.json"
 TRIGGER_PATH = runtime.RUN_DIR / "selfcode.trigger"
 
 
+BROWSER_DOMAINS = ("frontend", "research")
+
+
 def _touch_trigger() -> None:
     """Bump the edge-trigger sentinel so a filed repair wakes the self-coder. Best-effort."""
     try:
         TRIGGER_PATH.parent.mkdir(parents=True, exist_ok=True)
         TRIGGER_PATH.write_text(str(time.time()))
-    except Exception:  # noqa: BLE001 — the queue record already landed; the trigger is a nicety
+    except OSError:  # the queue record already landed; the trigger is a nicety
         pass
-BROWSER_DOMAINS = ("frontend", "research")
 
 _BRIEF_ASK = (
     "You are Utah's browser discovery pass (self-optimization ONLY — not marketing, "
@@ -75,14 +77,21 @@ def _load_used(used_path: Path | None = None) -> set[str]:
     try:
         data = json.loads(path.read_text())
         return set(data) if isinstance(data, list) else set()
-    except Exception:  # noqa: BLE001
+    except (OSError, ValueError, TypeError):  # absent/corrupt → nothing marked used
         return set()
 
 
-def _save_used(used: set[str], used_path: Path | None = None) -> None:
+def _save_used(used: set[str], used_path: Path | None = None) -> bool:
+    """Persist the used-set. Best-effort: a write failure is logged, never raised —
+    the worst case is a finding retried next cycle, not a crashed caller."""
     path = used_path or USED_PATH
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(sorted(used)))
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(sorted(used)))
+        return True
+    except OSError as exc:
+        log.warning("used-set write failed (%s): %s", path, exc)
+        return False
 
 
 def _append_record(rec: dict, log_path: Path | None = None) -> None:
@@ -94,16 +103,17 @@ def _append_record(rec: dict, log_path: Path | None = None) -> None:
 
 def write_finding(domain: str, signals: str, *, brain_fn, findings_dir=None,
                   log_path=None) -> dict | None:
-    """Signals → brain brief → markdown page + discoveries log row. Returns the record."""
-    brief = (brain_fn(_BRIEF_ASK.format(signals=signals)) or "").strip()
+    """Signals → brain brief → markdown page + discoveries log row. Returns the
+    record, or ``None`` when there is nothing real to record (empty/non-string
+    brief, unwritable findings dir) — an honest no-finding, never a raise."""
+    brief = brain_fn(_BRIEF_ASK.format(signals=signals))
+    brief = brief.strip() if isinstance(brief, str) else ""
     if not brief:
         return None
     task = _parse_task(brief)
     ts = time.time()
     fdir = Path(findings_dir) if findings_dir else FINDINGS_DIR
-    fdir.mkdir(parents=True, exist_ok=True)
     page = fdir / f"{int(ts)}-{domain}.md"
-    page.write_text(brief, encoding="utf-8")
     rec = {
         "ts": ts,
         "domain": domain,
@@ -111,7 +121,15 @@ def write_finding(domain: str, signals: str, *, brain_fn, findings_dir=None,
         "suggested_task": task,
         "chars": len(brief),
     }
-    _append_record(rec, log_path=log_path)
+    try:
+        fdir.mkdir(parents=True, exist_ok=True)
+        page.write_text(brief, encoding="utf-8")
+        _append_record(rec, log_path=log_path)
+    except OSError as exc:
+        # The queue record is the source of truth — if it can't land, there IS
+        # no finding to act on; report none rather than a half-written one.
+        log.warning("discover: could not persist %s finding: %s", domain, exc)
+        return None
     log.info("discover: wrote %s (%d chars, task=%r)", page.name, len(brief), task[:60])
     return rec
 
@@ -166,7 +184,14 @@ def harvest_failure_findings(*, recent_fn=None, log_path: Path | None = None,
             "failure": tag,
             "count": n,
         }
-        _append_record(rec, log_path=log_path)
+        try:
+            _append_record(rec, log_path=log_path)
+        except OSError as exc:
+            # The queue itself is broken — report it once and stop; later rows
+            # would hit the same wall ("never raises" is this function's contract).
+            out["error"] = f"findings queue unwritable: {exc}"
+            log.warning("selfheal harvest aborted: %s", out["error"])
+            return out
         out["harvested"] += 1
         log.info("selfheal finding: %s x%d -> pending task", tag, n)
     return out
@@ -195,18 +220,28 @@ def run_discover(*, brain_fn, domains=BROWSER_DOMAINS, gather_fn=None,
 
 
 def list_findings(*, log_path: Path | None = None) -> list[dict]:
+    """Every recorded finding, oldest first. Corrupt lines are skipped and an
+    unreadable log degrades to ``[]`` — the console/queue readers never crash
+    on a damaged journal."""
     path = log_path or DISCOVERIES_LOG
-    if not path.exists():
+    try:
+        text = path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return []
+    except OSError as exc:
+        log.warning("discoveries log unreadable (%s): %s", path, exc)
         return []
     out: list[dict] = []
-    for line in path.read_text(encoding="utf-8").splitlines():
+    for line in text.splitlines():
         line = line.strip()
         if not line:
             continue
         try:
-            out.append(json.loads(line))
+            rec = json.loads(line)
         except json.JSONDecodeError:
             continue
+        if isinstance(rec, dict):
+            out.append(rec)
     return out
 
 
@@ -235,10 +270,13 @@ def next_pending_task(*, log_path: Path | None = None, used_path: Path | None = 
     return None
 
 
-def mark_used(rec: dict, *, used_path: Path | None = None) -> None:
+def mark_used(rec: dict, *, used_path: Path | None = None) -> bool:
+    """Mark a finding consumed so the queue never re-serves it. Never raises
+    (the autonomous cycle calls this AFTER the work landed — a bookkeeping
+    failure must not crash the cycle); returns whether the mark persisted."""
     used = _load_used(used_path)
     used.add(_record_key(rec))
-    _save_used(used, used_path)
+    return _save_used(used, used_path)
 
 
 def file_task(domain: str, task: str, *, log_path: Path | None = None,
@@ -258,7 +296,13 @@ def file_task(domain: str, task: str, *, log_path: Path | None = None,
             return {"filed": False, "reason": "already pending", "rec": rec}
     rec = {"ts": time.time(), "domain": domain, "brief_path": "",
            "suggested_task": task, "source": "filed"}
-    _append_record(rec, log_path=log_path)
+    try:
+        _append_record(rec, log_path=log_path)
+    except OSError as exc:
+        # Never-raises boundary: revenue_heal/selfaudit call this mid-sweep — a
+        # broken queue dir must come back as an honest refusal, not crash the cron.
+        log.warning("file_task: queue write failed: %s", exc)
+        return {"filed": False, "reason": f"queue write failed: {exc}"}
     if log_path is None:        # real (not a test fixture) → edge-trigger a selfcode cycle
         _touch_trigger()
     log.info("file_task: queued self-code task (%s): %r", domain, task[:70])

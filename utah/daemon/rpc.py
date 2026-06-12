@@ -70,6 +70,9 @@ def parse(data: bytes) -> Request:
 
 
 def ok(request_id: int | str | None, result: object) -> bytes:
+    """Build a success envelope. Raises if *result* is not JSON-encodable —
+    deliberately: the SERVER owns that failure (it answers INTERNAL_ERROR),
+    because silently mangling a result would be a dishonest reply."""
     return _encoder.encode({"jsonrpc": "2.0", "id": request_id, "result": result})
 
 
@@ -81,7 +84,14 @@ def notify(method: str, params: object) -> bytes:
 def err(
     request_id: int | str | None, code: int, message: str, data: object | None = None
 ) -> bytes:
+    """Build a JSON-RPC error object. The error path must not have its own
+    error path: if *data* is not JSON-encodable it is dropped, so the peer
+    always receives code+message instead of a dead connection."""
     body: dict = {"code": code, "message": message}
     if data is not None:
         body["data"] = data
-    return _encoder.encode({"jsonrpc": "2.0", "id": request_id, "error": body})
+    try:
+        return _encoder.encode({"jsonrpc": "2.0", "id": request_id, "error": body})
+    except (TypeError, msgspec.EncodeError):
+        body.pop("data", None)
+        return _encoder.encode({"jsonrpc": "2.0", "id": request_id, "error": body})

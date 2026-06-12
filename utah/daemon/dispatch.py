@@ -8,6 +8,7 @@ methods are a typed ``METHOD_NOT_FOUND``, never a crash.
 """
 from __future__ import annotations
 
+import inspect
 import time
 from dataclasses import dataclass
 from typing import Awaitable, Callable
@@ -40,8 +41,17 @@ class Context:
 
 class Dispatcher:
     def __init__(self, ctx: Context, handlers: dict[str, Handler]) -> None:
+        # Validate at BOOT, not at the first 3am call: a sync function wired as
+        # a handler would only explode when its return value is awaited, which
+        # the server surfaces as a generic INTERNAL_ERROR. Fail loud here.
+        for name, fn in handlers.items():
+            if not inspect.iscoroutinefunction(fn):
+                raise TypeError(
+                    f"handler {name!r} must be an async function, "
+                    f"got {type(fn).__name__}"
+                )
         self._ctx = ctx
-        self._handlers = dict(handlers)
+        self._handlers = dict(handlers)  # snapshot: caller mutation can't rewire us
 
     @property
     def methods(self) -> list[str]:

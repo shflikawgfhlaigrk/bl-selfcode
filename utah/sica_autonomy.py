@@ -92,7 +92,13 @@ def propagate(live=None, clone=None) -> dict:
 
     if not (live / ".git").exists() or not (clone / ".git").exists():
         return {"propagated": False, "reason": "live or clone repo missing"}
-    g(live, "fetch", str(clone), "main")
+    fetched = g(live, "fetch", str(clone), "main")
+    if fetched.returncode != 0:
+        # Honest diagnosis: a failed/timed-out fetch used to fall through and read as
+        # "not a fast-forward" — a misleading reason that hid the real (network/empty
+        # clone) failure from the cycle log.
+        return {"propagated": False,
+                "reason": f"fetch from clone failed: {(fetched.stderr or '').strip()[:120]}"}
     before = g(live, "rev-parse", "HEAD").stdout.strip()
     target = g(live, "rev-parse", "FETCH_HEAD").stdout.strip()
     if before == target:

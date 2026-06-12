@@ -30,13 +30,27 @@ from utah.objects import Lead
 log = logging.getLogger("utah.product.leads")
 
 OVERPASS_URLS = (
+    "https://overpass.openstreetmap.fr/api/interpreter",
     "https://overpass-api.de/api/interpreter",
     "https://overpass.kumi.systems/api/interpreter",
-    "https://overpass.openstreetmap.fr/api/interpreter",
 )
 USER_AGENT = "Utah/1.0 leads-smb (educational)"
 QUERY_TIMEOUT_S = 30
 HTTP_TIMEOUT_S = 60.0
+#: Overpass rate-limiting (HTTP 429) is the #1 yield killer on a multi-tile burst.
+#: A 429 means "this mirror is throttling you", not "your query is bad" — and the
+#: throttle is PER MIRROR, so the fastest recovery is to FAIL OVER to a different
+#: mirror immediately (the others usually aren't throttling the same client). We
+#: keep ONE quick same-mirror retry (handles a transient blip) then move on, and
+#: only after ALL mirrors 429 in a pass do we exponential-backoff and re-sweep them.
+#: Measured live: retrying the throttled primary 3× cost ~25s/tile; fast failover to
+#: a healthy mirror is ~0.5s/tile. Honest yield = reach a working mirror fast.
+OVERPASS_MAX_RETRIES = 1          # quick same-mirror retry before failing over
+OVERPASS_BACKOFF_BASE_S = 2.0     # backoff between FULL all-mirror sweeps (× jitter)
+OVERPASS_MIRROR_SWEEPS = 4        # how many times to re-sweep all mirrors on total 429
+#: Polite pacing between consecutive tile fetches so a long sweep does not trip the
+#: rate limiter in the first place (Overpass asks for a gap between heavy requests).
+OVERPASS_TILE_PAUSE_S = 1.0
 
 #: Coweta County, GA — Michael's home region (kept for targeted single-county scans).
 COWETA_BBOX = (33.20, -84.95, 33.55, -84.55)
@@ -285,32 +299,89 @@ def build_query(bbox: tuple[float, float, float, float]) -> str:
     return f"[out:json][timeout:{QUERY_TIMEOUT_S}];(" + "".join(parts) + ");out tags center;"
 
 
-def _http_fetch(query: str) -> str:
-    """POST the query to Overpass (mirrors on failure). Raises on total failure."""
+def _is_rate_limit(exc: Exception) -> bool:
+    """True iff *exc* is an Overpass throttle (HTTP 429 / 504 gateway-timeout)."""
+    code = getattr(exc, "code", None)
+    return code in (429, 504)
+
+
+def _urlopen(url: str, data: bytes, headers: dict, timeout: float) -> str:
+    """Default opener: POST to Overpass, return decoded body. Raises on HTTP error.
+    Isolated so tests inject a fake opener and exercise the failover logic offline."""
+    req = urllib.request.Request(url, data=data, headers=headers)
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        return resp.read().decode("utf-8", "replace")
+
+
+def _try_mirror(do_open, url, data, headers):
+    """One quick same-mirror attempt + ``OVERPASS_MAX_RETRIES`` immediate retries (no
+    backoff — handles a transient blip). Returns the body, or raises the last error so
+    the caller can fail over to the next mirror. Same-mirror retries are immediate
+    because a throttle is PER MIRROR: real recovery comes from switching mirrors, not
+    from hammering a throttled one."""
     last: Exception | None = None
-    for url in OVERPASS_URLS:
+    for _ in range(OVERPASS_MAX_RETRIES + 1):
         try:
-            req = urllib.request.Request(
-                url, data=query.encode("utf-8"),
-                headers={"User-Agent": USER_AGENT, "Content-Type": "text/plain"},
-            )
-            with urllib.request.urlopen(req, timeout=HTTP_TIMEOUT_S) as resp:
-                return resp.read().decode("utf-8", "replace")
-        except Exception as exc:  # noqa: BLE001 — try the next mirror
+            return do_open(url, data, headers, HTTP_TIMEOUT_S)
+        except Exception as exc:  # noqa: BLE001
             last = exc
-            log.warning("overpass mirror failed (%s): %s", url, exc)
+            if not _is_rate_limit(exc):
+                raise  # mirror down / bad query → fail over immediately
+    raise last  # type: ignore[misc]
+
+
+def _http_fetch(query: str, *, opener=None, sleep=None) -> str:
+    """POST the query to Overpass with real rate-limit failover. Raises on total failure.
+
+    Strategy (measured live: throttled-primary retries cost ~25s/tile, healthy-mirror
+    failover ~0.5s/tile): SWEEP the mirror list, giving each one quick attempt; the
+    first success returns. A 429 fails over to the NEXT mirror immediately (the throttle
+    is per-mirror, so a sibling mirror usually isn't throttling the same client). Only
+    when EVERY mirror 429s in a full sweep do we exponential-backoff and re-sweep, up to
+    ``OVERPASS_MIRROR_SWEEPS`` times. ``opener``/``sleep`` are injectable so the failover
+    + backoff is unit-tested offline (``opener(url, data, headers, timeout) -> body``)."""
+    import random
+    import time
+
+    do_open = opener or _urlopen
+    nap = sleep if sleep is not None else time.sleep
+    data = query.encode("utf-8")
+    headers = {"User-Agent": USER_AGENT, "Content-Type": "text/plain"}
+    last: Exception | None = None
+    for sweep in range(OVERPASS_MIRROR_SWEEPS):
+        all_throttled = True
+        for url in OVERPASS_URLS:
+            try:
+                return _try_mirror(do_open, url, data, headers)
+            except Exception as exc:  # noqa: BLE001 — try the next mirror
+                last = exc
+                if not _is_rate_limit(exc):
+                    all_throttled = False
+                log.warning("overpass mirror failed (%s): %s", url, exc)
+        if not all_throttled or sweep == OVERPASS_MIRROR_SWEEPS - 1:
+            break  # a non-throttle error (mirror down) or out of sweeps → give up
+        delay = OVERPASS_BACKOFF_BASE_S * (2 ** sweep) * (1 + random.random())
+        log.warning("all overpass mirrors throttled (sweep %d), backing off %.1fs",
+                    sweep + 1, delay)
+        nap(delay)
     raise RuntimeError(f"all Overpass mirrors failed: {last}")
 
 
+#: Splits a captured phone string into its first usable number: OSM packs several
+#: numbers into one ``phone`` tag (``"+1-770-555-1234;+1-770-555-5678"``) and appends
+#: extensions (``" ext 5"`` / ``" x12"``). Concatenating all the digits would yield a
+#: value that never dedups, so we keep only what precedes the first separator/extension.
+_PHONE_SPLIT = re.compile(r"\s*[;,]\s*|\s+ext\.?\s*|\s+x(?=\d)", re.I)
+
+
 def normalize_phone(raw: str) -> str:
-    """US phone → E.164 ``+1XXXXXXXXXX``; empty string if unusable."""
-    digits = re.sub(r"\D", "", raw or "")
-    if len(digits) == 10:
-        return f"+1{digits}"
+    """Captured US phone → E.164 ``+1XXXXXXXXXX``; ``""`` if it isn't a valid US number."""
+    first = _PHONE_SPLIT.split(raw or "", maxsplit=1)[0]
+    digits = re.sub(r"\D", "", first)
     if len(digits) == 11 and digits.startswith("1"):
-        return f"+{digits}"
-    if len(digits) >= 10:
-        return f"+{digits}"
+        digits = digits[1:]
+    if len(digits) == 10 and digits[0] in "23456789":
+        return f"+1{digits}"
     return ""
 
 
@@ -395,7 +466,8 @@ def scout_frontier(ledger, bbox=METRO_BBOX, region="Atlanta Metro Ring",
 def _load_cursor() -> int:
     try:
         return int(json.loads(FRONTIER_STATE.read_text()).get("i", 0))
-    except Exception:  # noqa: BLE001 — absent/corrupt → start at 0
+    except (OSError, ValueError, TypeError) as exc:  # absent/corrupt → start at 0
+        log.debug("frontier cursor reset to 0 (%s)", exc)
         return 0
 
 
@@ -419,15 +491,25 @@ def purge_multi_location_chains(min_locations: int = 3, ledger=None) -> dict:
     regions is a chain (a genuine local SMB has ONE location). Deletes them — catching the
     chains the hardcoded NATIONAL_CHAINS denylist misses entirely (new brands) or misses
     via normalization gaps ("AT&T"→"at t"≠"att", "O'Reilly"→"oreilly"≠"o reilly"). Called
-    at the end of each frontier run so the table self-cleans. Returns ``{purged}``."""
+    at the end of each frontier run so the table self-cleans. BOUNDED (connect_timeout +
+    statement_timeout — house DB rule, same pattern as selfcode_web) and honest: a dead
+    store degrades to ``{"purged": 0, "error": ...}`` with a recorded failure, never a
+    raise out of the cron. Returns ``{purged}``."""
     import psycopg
 
-    from utah import config
+    from utah import config, failures
 
-    with psycopg.connect(config.DB_DSN, autocommit=True) as c:
-        n = c.execute(
-            "DELETE FROM leads WHERE name IN (SELECT name FROM leads GROUP BY name "
-            "HAVING count(DISTINCT region) >= %s)", (min_locations,)).rowcount
+    try:
+        with psycopg.connect(
+                config.DB_DSN, autocommit=True, connect_timeout=8,
+                options=f"-c statement_timeout={config.DB_STATEMENT_TIMEOUT_MS}") as c:
+            n = c.execute(
+                "DELETE FROM leads WHERE name IN (SELECT name FROM leads GROUP BY name "
+                "HAVING count(DISTINCT region) >= %s)", (min_locations,)).rowcount or 0
+    except psycopg.Error as exc:
+        failures.record("leads", "chain_purge_failed", f"chain purge skipped: {exc}")
+        log.warning("leads chain purge failed: %s", exc)
+        return {"purged": 0, "error": str(exc)}
     if n:
         log.info("leads: purged %d multi-location (chain) rows", n)
     return {"purged": n}
@@ -481,6 +563,10 @@ def run_scheduled(region: str = "Georgia Frontier", target: int = DAILY_TARGET,
     i = start
     found = new = scanned = 0
     hit: set[str] = set()
+    # Pace real network sweeps so a long burst doesn't trip Overpass rate-limiting in
+    # the first place (the backoff in _http_fetch is the safety net; this is prevention).
+    # Tests inject a `fetch`, so they never pause — the suite stays fast & offline.
+    paced = fetch is None
     while new < target and scanned < max_tiles and scanned < len(tagged):
         rname, tile = tagged[i % len(tagged)]
         try:
@@ -492,6 +578,9 @@ def run_scheduled(region: str = "Georgia Frontier", target: int = DAILY_TARGET,
             log.warning("leads tile %s failed, skipping: %s", tile, exc)
         scanned += 1
         i = (i + 1) % len(tagged)
+        if paced and scanned < max_tiles and new < target:
+            import time
+            time.sleep(OVERPASS_TILE_PAUSE_S)
     save(i)
     if bbox is None:  # production run — self-clean chains the name denylist missed
         try:
@@ -576,7 +665,8 @@ def find_maps_no_website_trades(text_query: str, lat: float, lng: float, *,
 def _load_maps_cursor() -> int:
     try:
         return int(json.loads(MAPS_SCOUT_STATE.read_text()).get("i", 0))
-    except Exception:  # noqa: BLE001
+    except (OSError, ValueError, TypeError) as exc:  # absent/corrupt → start at 0
+        log.debug("maps scout cursor reset to 0 (%s)", exc)
         return 0
 
 
@@ -704,6 +794,8 @@ def run_maps_bulk(*, target: int = MAPS_BULK_TARGET, queries: list[str] | None =
 
 __all__ = ["is_national_chain", "build_query", "find_no_website_smbs", "scout",
            "scout_frontier", "frontier_tiles", "run_scheduled", "_extract_contact",
+           "OVERPASS_MAX_RETRIES", "OVERPASS_BACKOFF_BASE_S", "OVERPASS_TILE_PAUSE_S",
+           "OVERPASS_MIRROR_SWEEPS",
            "normalize_phone", "parse_maps_place", "find_maps_no_website_trades",
            "scout_maps_trades", "run_maps_scheduled", "run_maps_bulk",
            "COWETA_BBOX", "METRO_BBOX", "FRONTIER_BBOX", "TILE_STEP", "DAILY_TARGET",

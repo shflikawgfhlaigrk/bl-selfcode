@@ -25,8 +25,14 @@ class WorkerPool:
         """Run a blocking callable off-loop, bounded by the pool's capacity.
 
         Backpressure is implicit: when all slots are busy the await suspends
-        until one frees — it never over-commits threads.
+        until one frees — it never over-commits threads. A worker exception
+        propagates to the awaiter (never swallowed in the thread), and the
+        slot is always returned.
         """
+        if not callable(func):
+            # Fail in the caller with a clear message — never borrow a slot
+            # just to discover the argument inside an anonymous worker thread.
+            raise TypeError(f"WorkerPool.run needs a callable, got {type(func).__name__}")
         return await anyio.to_thread.run_sync(
             func, *args, abandon_on_cancel=abandon_on_cancel, limiter=self._limiter
         )

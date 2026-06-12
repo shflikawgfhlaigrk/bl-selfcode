@@ -95,6 +95,18 @@ def test_transport_exception_never_raises(monkeypatch):
     assert any("send_failed" in row[2] for row in store.rows)
 
 
+def test_legacy_token_user_keys_from_file(tmp_path, monkeypatch):
+    """Ace/plan secret shape {token, user} normalizes on load."""
+    sec = tmp_path / "pushover.json"
+    sec.write_text('{"token":"tok","user":"USERKEY"}')
+    monkeypatch.setattr(pushover, "SECRET", sec)
+    c = pushover._load_creds()
+    assert c["api_token"] == "tok" and c["user_key"] == "USERKEY"
+    seen = {}
+    r = pushover.send("probe", http_post=lambda u, f, timeout=10.0: (seen.update(f), (200, '{"status":1}'))[1])
+    assert r["sent"] is True and seen["token"] == "tok" and seen["user"] == "USERKEY"
+
+
 def test_available_reflects_creds(monkeypatch):
     monkeypatch.setattr(pushover, "_load_creds", lambda: {"api_token": "t", "user_key": "u"})
     assert pushover.available() is True
@@ -102,3 +114,35 @@ def test_available_reflects_creds(monkeypatch):
     assert pushover.available() is False
     monkeypatch.setattr(pushover, "_load_creds", lambda: None)
     assert pushover.available() is False
+
+
+def test_e2ee_encrypts_fields_when_key_present(monkeypatch):
+    failures.set_store(FakeFailureStore())
+    key = "0" * 64
+    _creds(monkeypatch, encryption_key=key)
+    seen = {}
+    pushover.send("hello body", title="Hello", url="http://deck/", url_title="Open",
+                  http_post=lambda u, f, timeout=10.0: (seen.update(f), _ok())[1])
+    assert seen["encrypted"] == "1"
+    assert seen["message"] != "hello body"
+    assert seen["title"] != "Hello"
+    assert seen["url"] != "http://deck/"
+    assert seen["url_title"] != "Open"
+
+
+def test_e2ee_matches_openssl_reference():
+    key = "0123456789abcdef" * 4
+    iv = bytes.fromhex("00112233445566778899aabbccddeeff")
+    py = pushover.encrypt_field("This has been encrypted", key, iv=iv)
+    import subprocess
+    sh = f'''
+KEY="{key}"
+IV=00112233445566778899aabbccddeeff
+    CT=$(printf '%s' "This has been encrypted" | gzip -9 -n | \\
+  openssl enc -aes-256-cbc -K "$KEY" -iv "$IV" | xxd -p | tr -d '\\n')
+HMAC=$(printf '%s%s' "$IV" "$CT" | xxd -r -p | \\
+  openssl dgst -sha256 -mac HMAC -macopt hexkey:"$KEY" | awk '{{print $NF}}')
+printf '%s%s' "$IV" "$CT" "$HMAC" | xxd -r -p | openssl base64 -A
+'''
+    ref = subprocess.check_output(["bash", "-lc", sh], text=True).strip()
+    assert py == ref

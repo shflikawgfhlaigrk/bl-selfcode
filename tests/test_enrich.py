@@ -76,6 +76,17 @@ def test_entity_match_keeps_on_name_token_rejects_strangers():
     assert enrich._entity_match("chrissy.murray@ftr.com", "Weagle One Stop") is False
 
 
+def test_find_email_accepts_own_website_domain_without_name_token():
+    """Scraping the lead's own site: info@ domain match counts even when name tokens miss."""
+    lead = {"name": "The Spot", "region": "GA", "contact": {"website": "https://thespotga.com"}}
+    pages = {
+        "https://thespotga.com": '<a href="mailto:info@thespotga.com">email</a>',
+    }
+    r = enrich.find_email(lead, fetch_html=lambda u: pages.get(u, ""),
+                          verify_fn=lambda domain: domain == "thespotga.com")
+    assert r["email"] == "info@thespotga.com"
+
+
 def test_find_email_rejects_wrong_entity_match():
     """An email that doesn't share any business-name token is discarded (wrong business)."""
     lead = {"name": "Weagle One Stop", "region": "GA", "contact": {}}
@@ -116,3 +127,66 @@ def test_run_scheduled_enriches_and_writes():
                              foundation_gate=lambda cap: None)   # substrate green (hermetic)
     assert r["enriched"] == 1
     assert updated == [("A Co", "GA", {"email": "found@a.co"})]
+
+
+# --- deliverability gate: a domain must ACCEPT mail (MX), not just resolve ---
+# domain_resolves only proved an A-record (the business has a website); sending to a
+# domain with no mail server hard-bounces, and hard bounces are what blacklist a sender.
+# domain_accepts_mail is the real gate: MX record, with the RFC 5321 A-record fallback.
+
+def test_domain_accepts_mail_true_when_mx_present():
+    assert enrich.domain_accepts_mail("joesdiner.com",
+                                      mx_lookup=lambda d: ["10 mail.joesdiner.com"],
+                                      a_lookup=lambda d: False) is True
+
+
+def test_domain_accepts_mail_falls_back_to_a_record():
+    # RFC 5321 §5.1: no MX but an A-record host still accepts mail.
+    assert enrich.domain_accepts_mail("joesdiner.com",
+                                      mx_lookup=lambda d: [],
+                                      a_lookup=lambda d: True) is True
+
+
+def test_domain_accepts_mail_false_when_no_mx_no_a():
+    assert enrich.domain_accepts_mail("nonexistent-xyz.invalid",
+                                      mx_lookup=lambda d: [],
+                                      a_lookup=lambda d: False) is False
+
+
+def test_verify_email_rejects_role_and_junk_locals():
+    v = enrich.verify_email("noreply@joesdiner.com", mx_fn=lambda d: True)
+    assert v["deliverable"] is False
+    assert v["reason"] == "role-or-junk"
+
+
+def test_verify_email_rejects_bad_syntax():
+    assert enrich.verify_email("not-an-email", mx_fn=lambda d: True)["deliverable"] is False
+    assert enrich.verify_email("two@@at.com", mx_fn=lambda d: True)["deliverable"] is False
+
+
+def test_verify_email_deliverable_with_mx():
+    v = enrich.verify_email("owner@joesdiner.com", mx_fn=lambda d: True)
+    assert v["deliverable"] is True
+    assert v["confidence"] == "mx"
+
+
+def test_verify_email_not_deliverable_when_domain_refuses_mail():
+    v = enrich.verify_email("owner@joesdiner.com", mx_fn=lambda d: False)
+    assert v["deliverable"] is False
+    assert v["reason"] == "no-mail-server"
+
+
+def test_find_email_default_verify_requires_mail_accepting_domain():
+    # A real scraped address on a domain that doesn't accept mail must be dropped by the
+    # DEFAULT verify path (not just when a test injects verify_fn=False).
+    lead = {"name": "Joes Diner", "region": "GA", "contact": {"website": "https://joesdiner.com"}}
+    pages = {"https://joesdiner.com": "contact owner@joesdiner.com"}
+    # patch the module's mail check to refuse, leave everything else default
+    import utah.product.enrich as e
+    orig = e.domain_accepts_mail
+    e.domain_accepts_mail = lambda dom, **kw: False
+    try:
+        r = e.find_email(lead, fetch_html=lambda u: pages.get(u, ""))
+    finally:
+        e.domain_accepts_mail = orig
+    assert r["email"] is None

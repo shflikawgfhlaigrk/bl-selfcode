@@ -87,7 +87,11 @@ def test_probate_cron_pushes_its_daily_summary(monkeypatch):
     monkeypatch.setattr(probate, "scout", lambda *a, **k: {"found": 5, "new": 2})
     r = probate.run_scheduled(ledger=object(), fetch=lambda *a, **k: "")
     (name, a, k), = calls
-    assert a[0] == r == {"found": 5, "new": 2} and k.get("kind") == "probate"
+    # The same result dict is pushed to the pipeline alert with kind=probate. The dict now
+    # carries enrichment (categories/raw_notices/region) on top of the found/new the alert
+    # reads — so assert the alert-relevant contract, not exact dict identity.
+    assert a[0] is r and k.get("kind") == "probate"
+    assert r["found"] == 5 and r["new"] == 2
 
 
 def test_outreach_cron_pushes_its_daily_summary(monkeypatch):

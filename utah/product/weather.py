@@ -81,6 +81,22 @@ def _read_cache(path: str) -> dict | None:
         return None
 
 
+def _cache_fresh(cached: dict | None, lat: float, lon: float, now_ts: float, key: str) -> bool:
+    """True only when the cache is for the SAME point, actually CARRIES the payload
+    *key*, and is younger than the TTL. Never raises — a torn or hand-edited cache file
+    (missing payload, garbage ``fetched_at``) reads as STALE, because both current()
+    and forecast() promise "never raises" and a KeyError here broke that contract."""
+    if not isinstance(cached, dict) or not cached.get(key):
+        return False
+    if cached.get("lat") != lat or cached.get("lon") != lon:
+        return False
+    try:
+        age = now_ts - float(cached.get("fetched_at", 0))
+    except (TypeError, ValueError):
+        return False
+    return age < config.WEATHER_CACHE_SECONDS
+
+
 def _write_cache(path: str, obj: dict) -> None:
     try:
         os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
@@ -109,20 +125,14 @@ def current(
     cache_path = config.WEATHER_CACHE_PATH if cache_path is None else cache_path
 
     cached = _read_cache(cache_path)
-    fresh = (
-        cached is not None
-        and cached.get("lat") == lat
-        and cached.get("lon") == lon
-        and (now() - float(cached.get("fetched_at", 0))) < config.WEATHER_CACHE_SECONDS
-    )
-    if fresh:
-        return cached["text"]
+    if _cache_fresh(cached, lat, lon, now(), "text"):
+        return str(cached["text"])
 
     try:
         text = _describe(fetch(lat, lon), label)
     except Exception as exc:  # noqa: BLE001 — any fetch/parse failure degrades honestly
         failures.record("weather", "fetch_failed", str(exc))
-        if cached is not None:
+        if cached is not None and cached.get("text"):
             return f"{cached['text']} (cached; live fetch failed)"
         return "I don't know — weather is unavailable right now."
 
@@ -200,8 +210,7 @@ def _describe_forecast(daily: dict, label: str, query: str) -> str:
 
 
 def _forecast_cache_path(current_path: str) -> str:
-    head, tail = os.path.split(current_path)
-    return os.path.join(head or ".", "weather_forecast.json")
+    return os.path.join(os.path.dirname(current_path) or ".", "weather_forecast.json")
 
 
 def forecast(
@@ -222,14 +231,7 @@ def forecast(
     cache_path = _forecast_cache_path(config.WEATHER_CACHE_PATH) if cache_path is None else cache_path
 
     cached = _read_cache(cache_path)
-    fresh = (
-        cached is not None
-        and cached.get("daily")
-        and cached.get("lat") == lat
-        and cached.get("lon") == lon
-        and (now() - float(cached.get("fetched_at", 0))) < config.WEATHER_CACHE_SECONDS
-    )
-    if fresh:
+    if _cache_fresh(cached, lat, lon, now(), "daily"):
         return _describe_forecast(cached["daily"], label, query)
 
     try:

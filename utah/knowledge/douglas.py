@@ -87,11 +87,16 @@ def answer(query: str) -> str | None:
 
 def seed(*, store: Callable | None = None) -> int:
     """Admit every fact as durable memory. Returns the count stored. A single
-    admission failure is logged and skipped — never fatal (best-effort seed)."""
+    admission failure is logged and skipped, and a dead/unimportable memory
+    backend yields 0 — never a traceback (best-effort boundary)."""
     if store is None:
-        from utah import memory
+        try:
+            from utah import memory
 
-        store = memory.store
+            store = memory.store
+        except Exception as exc:  # noqa: BLE001 — boundary: a broken backend seeds 0
+            log.warning("douglas: memory backend unavailable, nothing seeded: %s", exc)
+            return 0
     stored = 0
     for fact in FACTS:
         try:
@@ -103,10 +108,12 @@ def seed(*, store: Callable | None = None) -> int:
 
 
 def main() -> int:
+    """CLI seed. Exit 0 only when EVERY fact landed — a partial or zero seed is a
+    nonzero exit, so cron/operators see the failure instead of a fake success."""
     logging.basicConfig(level=logging.INFO)
     n = seed()
     print(f"douglas: seeded {n}/{len(FACTS)} facts")
-    return 0
+    return 0 if n == len(FACTS) else 1
 
 
 if __name__ == "__main__":

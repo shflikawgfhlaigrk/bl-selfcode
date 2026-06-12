@@ -1,7 +1,11 @@
 """Memory types — the storage boundary and recall row shapes."""
 from __future__ import annotations
 
-from typing import NamedTuple, Protocol, Sequence
+from typing import NamedTuple, Protocol, Sequence, runtime_checkable
+
+# NOTE: field ORDER in these rows is load-bearing — they are constructed POSITIONALLY
+# from SQL SELECT lists in store.py and consumed by name in pipeline.py. Reordering a
+# field silently swaps content/source in every recall (test_memory_types pins this).
 
 
 class Neighbor(NamedTuple):
@@ -14,6 +18,8 @@ class Neighbor(NamedTuple):
 
 
 class DenseRow(NamedTuple):
+    """One dense-lane recall row (pgvector cosine): SELECT id, content, source, sim."""
+
     id: int
     content: str
     source: str
@@ -21,13 +27,20 @@ class DenseRow(NamedTuple):
 
 
 class SparseRow(NamedTuple):
+    """One sparse-lane recall row (Postgres FTS, rank-ordered — no similarity score)."""
+
     id: int
     content: str
     source: str
 
 
+@runtime_checkable
 class StoreBackend(Protocol):
-    """Storage boundary. Postgres in prod; a fake in unit tests."""
+    """Storage boundary. Postgres in prod; a fake in unit tests.
+
+    ``@runtime_checkable`` so a wiring bug (handing the pipeline a non-store) can be
+    caught with ``isinstance`` at the boundary instead of an AttributeError mid-recall.
+    """
 
     def init_schema(self) -> None: ...
     def reset_schema(self) -> None: ...

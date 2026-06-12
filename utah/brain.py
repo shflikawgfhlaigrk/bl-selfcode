@@ -14,7 +14,6 @@ import logging
 import re
 import subprocess
 import threading
-import time
 from typing import Callable, Iterable, Iterator, Protocol, Sequence
 
 from utah import UtahError, config
@@ -215,6 +214,14 @@ def _subprocess_stream_runner(argv: Sequence[str], timeout: int) -> Iterator[str
 
     Every failure mode (missing binary, OS error, timeout, non-zero exit) raises
     :class:`BrainUnavailable` — the caller degrades honestly, never fabricates.
+
+    The deadline is enforced by a watchdog TIMER, not just a check between lines:
+    the old in-loop check only ran when a line ARRIVED, so a CLI that hung silently
+    (zero output) blocked forever and then surfaced as an empty stream — no timeout,
+    no error, a silent blank. The watchdog kills the child at the deadline regardless
+    of output. Closing the generator early (caller abandoned the stream — voice
+    barge-in, dropped SSE) also kills the child, so no orphan CLI keeps burning the
+    paid lane with nobody reading it.
     """
     try:
         proc = subprocess.Popen(
@@ -230,20 +237,48 @@ def _subprocess_stream_runner(argv: Sequence[str], timeout: int) -> Iterator[str
     except OSError as exc:
         raise BrainUnavailable(f"brain could not start: {exc}") from exc
 
-    deadline = time.monotonic() + timeout
+    timed_out = threading.Event()
+
+    def _expire() -> None:
+        timed_out.set()
+        try:
+            proc.kill()
+        except OSError:  # already exited — the happy race
+            pass
+
+    watchdog = threading.Timer(timeout, _expire)
+    watchdog.daemon = True
+    watchdog.start()
     assert proc.stdout is not None
     try:
         for line in proc.stdout:
-            if time.monotonic() > deadline:
-                proc.kill()
-                raise BrainUnavailable(f"brain timed out after {timeout}s")
+            if timed_out.is_set():
+                break
             yield line
+    except GeneratorExit:
+        try:
+            proc.kill()
+        except OSError:
+            pass
+        try:
+            proc.wait(timeout=5)  # reap — no zombie
+        except subprocess.TimeoutExpired:  # pragma: no cover — kill always lands
+            pass
+        raise
     finally:
+        watchdog.cancel()
         try:
             proc.stdout.close()
-        except Exception:  # noqa: BLE001
+        except OSError:
             pass
-    rc = proc.wait()
+    if timed_out.is_set():
+        proc.wait()
+        raise BrainUnavailable(f"brain timed out after {timeout}s")
+    try:
+        rc = proc.wait(timeout=10)
+    except subprocess.TimeoutExpired:  # EOF but no exit (e.g. stderr-wedged child)
+        proc.kill()
+        rc = proc.wait()
     if rc:
         detail = (proc.stderr.read() if proc.stderr else "").strip()[-500:]
         raise BrainUnavailable(f"brain exited {rc}: {detail or 'no output'}")

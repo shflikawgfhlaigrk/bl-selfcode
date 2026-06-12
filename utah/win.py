@@ -35,8 +35,16 @@ class WinCodecError(UtahError):
 
 def encode_array(arr, name: str = "") -> bytes:
     """Serialize a numpy array to a WIN binary frame. One copy (serialization);
-    the zero-copy win is on :func:`decode_array`."""
-    a = np.ascontiguousarray(arr)
+    the zero-copy win is on :func:`decode_array`.
+
+    ``np.asarray`` (not ``ascontiguousarray``, which silently promotes 0-d scalars
+    to 1-d and broke shape-faithful round-trips) + ``tobytes`` (always C-order,
+    copies a strided view correctly). Object dtypes are refused outright: their
+    buffer is raw POINTERS, so framing one ships meaningless (and address-leaking)
+    bytes that can never decode."""
+    a = np.asarray(arr)
+    if a.dtype.hasobject:
+        raise WinCodecError("object dtypes cannot be framed (pointer-bearing, not raw numeric)")
     dts = a.dtype.str.encode("ascii")        # e.g. b'<f8' — carries exact byteorder
     nb = name.encode("utf-8")
     if len(dts) > 0xFF or len(nb) > 0xFFFF or a.ndim > 0xFF:
@@ -61,10 +69,17 @@ def decode_array(buf) -> tuple[str, np.ndarray]:
     dts = bytes(mv[off:off + dtype_len]); off += dtype_len
     name = bytes(mv[off:off + name_len]).decode("utf-8", "replace"); off += name_len
     shape = struct.unpack(f">{ndim}I", mv[off:off + 4 * ndim]); off += 4 * ndim
+    # The dtype string is wire data — hostile/garbage bytes raise the SAME codec
+    # error as every other malformed frame, never a UnicodeDecodeError/ValueError
+    # leaking out of numpy into the data server's frame loop.
     try:
         dt = np.dtype(dts.decode("ascii"))
-    except TypeError as exc:
+    except (TypeError, ValueError, UnicodeDecodeError) as exc:
         raise WinCodecError(f"unknown dtype {dts!r}") from exc
+    if dt.hasobject:
+        # An object buffer would be raw pointers — decoding one is interpreting
+        # arbitrary memory addresses. Refuse, mirroring encode_array.
+        raise WinCodecError(f"object dtype {dts!r} is not a frameable numeric type")
     count = 1
     for d in shape:
         count *= d
@@ -72,7 +87,10 @@ def decode_array(buf) -> tuple[str, np.ndarray]:
     if n - off != expected:
         raise WinCodecError(f"WIN body size {n - off} != expected {expected} (truncated/corrupt)")
     # Zero-copy: frombuffer with an offset views *buf* directly; reshape keeps the view.
-    arr = np.frombuffer(buf, dtype=dt, count=count, offset=off).reshape(shape)
+    try:
+        arr = np.frombuffer(buf, dtype=dt, count=count, offset=off).reshape(shape)
+    except ValueError as exc:  # numpy refused the buffer/shape — still a codec error
+        raise WinCodecError(f"WIN body does not decode as {dt}{shape}: {exc}") from exc
     return name, arr
 
 

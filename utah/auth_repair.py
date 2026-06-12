@@ -7,6 +7,7 @@ Never hands Michael JSON or "sign in as X" instructions.
 """
 from __future__ import annotations
 
+import http.client
 import json
 import logging
 import os
@@ -14,6 +15,7 @@ import secrets
 import subprocess
 import threading
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
 from pathlib import Path
@@ -42,7 +44,7 @@ def _migrate_chrome_once() -> None:
                             ignore=shutil.ignore_patterns("Singleton*", "*.lock"))
             log.info("auth_repair: migrated chrome profile %s → %s (one-time)",
                      _CHROME_LEGACY, WC_CHROME)
-    except Exception as exc:  # noqa: BLE001 — a copy hiccup just means Michael re-logs in
+    except (OSError, shutil.Error) as exc:  # a copy hiccup just means Michael re-logs in
         log.debug("auth_repair: chrome profile migrate skipped: %s", exc)
 
 
@@ -100,8 +102,8 @@ def open_chrome_ace(url: str) -> bool:
         from utah.integrations import browser
 
         chrome = browser.chrome_binary()
-    except Exception:  # noqa: BLE001
-        pass
+    except (ImportError, OSError) as exc:  # no browser module/binary → `open` fallback below
+        log.debug("auth_repair: chrome_binary unavailable: %s", exc)
     _migrate_chrome_once()
     if chrome and WC_CHROME.is_dir():
         try:
@@ -128,7 +130,10 @@ def normalize_gmail_json() -> bool:
         return False
     try:
         data = json.loads(GMAIL_CREDS.read_text(encoding="utf-8"))
-        fixed = config.normalize_owner_email(data.get("from"))
+        # Both known bad shapes: the mthburnsbarber owner typo AND legacy BLB
+        # storefront addresses (delivery@/daily@ → the canonical BLB From).
+        fixed = config.normalize_blb_from_email(
+            config.normalize_owner_email(data.get("from")))
         if fixed and fixed != data.get("from"):
             data["from"] = fixed
             GMAIL_CREDS.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
@@ -166,7 +171,13 @@ def _oauth_loopback_consent(*, scopes: list[str] | None = None) -> dict[str, Any
     scopes = scopes or GMAIL_SCOPES
     if not GOOGLE_CREDS.is_file():
         return {"ok": False, "error": "no google.json client creds"}
-    g = json.loads(GOOGLE_CREDS.read_text(encoding="utf-8"))
+    try:
+        g = json.loads(GOOGLE_CREDS.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        log.warning("auth_repair: google.json unreadable: %s", exc)
+        return {"ok": False, "error": f"google.json unreadable: {exc}"}
+    if not isinstance(g, dict):
+        return {"ok": False, "error": "google.json is not a JSON object"}
     client_id = g.get("client_id", "")
     client_secret = g.get("client_secret", "")
     if not (client_id and client_secret):
@@ -228,7 +239,8 @@ def _oauth_loopback_consent(*, scopes: list[str] | None = None) -> dict[str, Any
                 timeout=20,
             ) as resp:
                 tok = json.loads(resp.read().decode())
-        except Exception as exc:  # noqa: BLE001
+        except (urllib.error.URLError, OSError, http.client.HTTPException,
+                ValueError) as exc:  # URLError ⊂ OSError; ValueError = bad JSON body
             log.warning("auth_repair oauth token exchange failed: %s", exc)
             return
         refresh = tok.get("refresh_token")
@@ -303,11 +315,8 @@ def repair_gmail(*, notify_2fa_fn=None) -> dict[str, Any]:
     oauth_result = repair_gmail_oauth()
     report["oauth"] = oauth_result
     report["diag"] = diagnose_gmail()
-    report["ok"] = bool(smtp.get("ok")) or bool(
-        report["diag"].get("utah_oauth_email", "").lower() == config.OWNER_EMAIL.lower()
-        if report["diag"].get("utah_oauth_email")
-        else False
-    )
+    utah_oauth_email = (report["diag"].get("utah_oauth_email") or "").lower()
+    report["ok"] = bool(smtp.get("ok")) or utah_oauth_email == config.OWNER_EMAIL.lower()
 
     needs_2fa = (
         oauth_result.get("started")

@@ -130,7 +130,7 @@ def next_cycle_index() -> int:
     """Read + increment a persistent cycle counter (drives the domain rotation)."""
     try:
         n = int(json.loads(CYCLE_N.read_text()).get("n", 0))
-    except Exception:  # noqa: BLE001 - absent/corrupt → start at 0
+    except (OSError, ValueError, TypeError, AttributeError):  # absent/corrupt/wrong-shape → start at 0
         n = 0
     try:
         CYCLE_N.parent.mkdir(parents=True, exist_ok=True)
@@ -141,9 +141,16 @@ def next_cycle_index() -> int:
 
 
 # ── live signal readers (defensive; injectable) ──────────────────────────────
+#: Statement bound for the signal COUNT(*) queries — they normally return in ms;
+#: a wedged/bloated table must not stall the autonomous cycle (the connect_timeout
+#: alone only bounded a DEAD cluster, not a slow query on a live one).
+_SIGNAL_STMT_TIMEOUT_MS = int(os.environ.get("UTAH_SIGNAL_STMT_TIMEOUT_MS", "15000"))
+
+
 def _db_query(sql: str):
     import psycopg
-    with psycopg.connect(config.DB_DSN, connect_timeout=8) as conn:
+    with psycopg.connect(config.DB_DSN, connect_timeout=8,
+                         options=f"-c statement_timeout={_SIGNAL_STMT_TIMEOUT_MS}") as conn:
         conn.read_only = True
         with conn.cursor() as cur:
             cur.execute(sql)

@@ -23,7 +23,8 @@ import os
 log = logging.getLogger("utah.product.trade_lore")
 
 #: Legacy corpus location — read ONCE by the migration, never by the runtime loop.
-LEGACY_DB = os.path.expanduser("~/.ace/ace.db")
+#: Env-overridable (UTAH_LEGACY_ACE_DB) so the path is configuration, not a constant.
+LEGACY_DB = os.environ.get("UTAH_LEGACY_ACE_DB", os.path.expanduser("~/.ace/ace.db"))
 
 #: Per-cron-run cap on brain calls: each read is a real `claude -p` invocation.
 ASSESS_PER_RUN = 3
@@ -35,6 +36,7 @@ DISCLAIMER = "This is data, not a directive."
 def migrate_legacy(ledger, db_path: str = LEGACY_DB, limit: int = 10000) -> dict:
     """Forward-migrate ``engine_fire_commentary`` → ``trade_lore``. Re-runnable
     (dedup on engine+ts+kind). Returns counts; never raises."""
+    import contextlib
     import sqlite3
 
     out = {"read": 0, "migrated": 0, "skipped": 0}
@@ -43,12 +45,16 @@ def migrate_legacy(ledger, db_path: str = LEGACY_DB, limit: int = 10000) -> dict
         return out
     try:
         ledger.init_schema()
-        src = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
-        rows = src.execute(
-            "SELECT fire_ts, engine, fire_kind, commentary, confidence "
-            "FROM engine_fire_commentary WHERE commentary IS NOT NULL "
-            "AND length(commentary) > 20 ORDER BY fire_ts LIMIT ?", (limit,)).fetchall()
-        src.close()
+        # closing() releases the read-only handle even when the query raises (a
+        # bare connect+execute leaked it on the bad-schema path); timeout bounds
+        # the wait on a writer-locked legacy file instead of hanging the cron.
+        with contextlib.closing(
+                sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=5.0)) as src:
+            rows = src.execute(
+                "SELECT fire_ts, engine, fire_kind, commentary, confidence "
+                "FROM engine_fire_commentary WHERE commentary IS NOT NULL "
+                "AND length(commentary) > 20 ORDER BY fire_ts LIMIT ?",
+                (max(0, int(limit)),)).fetchall()
     except Exception as exc:  # noqa: BLE001 — a broken legacy store just means no lore
         out["error"] = str(exc)
         return out
@@ -69,6 +75,8 @@ def _prompt(fire: dict, scorecard: dict, lore: list[dict]) -> tuple[str, str]:
     voice = "\n".join(f"- ({r.get('engine')}/{r.get('kind')}) {r.get('content')}"
                       for r in lore[:5]) or "- (no historical commentary yet)"
     wr = scorecard.get("win_rate")
+    if not isinstance(wr, (int, float)) or isinstance(wr, bool):
+        wr = None   # jsonb drift ('n/a', None, lists) must never crash the read mid-cron
     context = (
         f"FIRE (graded, real): engine={fire.get('engine')} {fire.get('direction')} "
         f"entry={fire.get('entry')} symbol={fire.get('symbol') or '?'} "
@@ -112,6 +120,7 @@ def run_assessments(ledger=None, limit: int = ASSESS_PER_RUN, think_fn=None) -> 
         from utah import brain
         think_fn = brain.think
     out = {"checked": 0, "assessed": 0, "skipped": 0}
+    limit = max(0, int(limit))   # a negative caller limit must never reach the store
     try:
         fires = ledger.fires_missing_assessment(limit=limit)
     except Exception as exc:  # noqa: BLE001 — store down: report, don't crash the cron
