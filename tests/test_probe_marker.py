@@ -22,6 +22,15 @@ def test_module_imports_and_exposes_marker_docstring():
     assert mod.__doc__.splitlines()[0] == MARKER_LINE
 
 
+def test_docstring_is_nonempty_and_at_least_10_chars():
+    """A trivial stub docstring ("x", "todo") would defeat the marker's job of
+    documenting why the file exists — demand at least a sentence's worth."""
+    mod = importlib.import_module("utah._probe_marker")
+    assert mod.__doc__ is not None
+    assert mod.__doc__.strip()
+    assert len(mod.__doc__.strip()) >= 10
+
+
 def test_source_has_module_level_docstring():
     """The docstring must be a literal first statement in the source file,
     not merely a ``__doc__`` attribute set at import time — the file has been
