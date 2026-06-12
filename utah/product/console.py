@@ -109,11 +109,20 @@ def _status_text(*, selfcode=None, loadavg=None) -> str:
 
 def _findings_text(*, pending_fn=None, harvest_fn=None) -> str:
     try:
-        (harvest_fn or sica_discover.harvest_failure_findings)()   # self-heal refresh
-    except Exception as exc:  # noqa: BLE001 — harvest trouble never hides findings
-        log.debug("selfheal harvest skipped: %s", exc)
-    try:
         from utah import sica_discover
+    except Exception as exc:  # noqa: BLE001 — import boundary: honest, never raise
+        return f"(findings unavailable: {type(exc).__name__})"
+    # Self-heal refresh: recurring live failures become pending fix tasks. The default
+    # harvest only runs against the REAL pending source — an injected pending_fn (a test
+    # double) stays hermetic unless the test also injects harvest_fn.
+    harvest = harvest_fn or (
+        sica_discover.harvest_failure_findings if pending_fn is None else None)
+    if harvest is not None:
+        try:
+            harvest()
+        except Exception as exc:  # noqa: BLE001 — harvest trouble never hides findings
+            log.debug("selfheal harvest skipped: %s", exc)
+    try:
         pending = (pending_fn or sica_discover.pending_findings)()
     except Exception as exc:  # noqa: BLE001
         return f"(findings unavailable: {type(exc).__name__})"
@@ -121,8 +130,11 @@ def _findings_text(*, pending_fn=None, harvest_fn=None) -> str:
         return "No pending browser-agent findings. (Ace discovers them each self-code cycle:\n" \
                "  frontend = renders its OWN deck; research = web-searches its top failure.)"
     lines = [f"PENDING BROWSER-AGENT FINDINGS ({len(pending)}) — /do <n> to action one:", ""]
-    for i, (domain, task, _rec) in enumerate(pending, 1):
-        lines.append(f"  [{i}] ({domain}) {task[:140]}")
+    try:
+        for i, (domain, task, _rec) in enumerate(pending, 1):
+            lines.append(f"  [{i}] ({domain}) {str(task or '')[:140]}")
+    except (TypeError, ValueError) as exc:  # malformed record shape — honest, never raise
+        return f"(findings unavailable: {type(exc).__name__})"
     return "\n".join(lines)
 
 
@@ -139,11 +151,14 @@ def _cycles_text(arg: str, *, cycles_fn=None) -> str:
     if not rows:
         return "No self-code cycles logged yet."
     lines = [f"RECENT SELF-CODE CYCLES ({len(rows)}):", ""]
-    for c in rows:
-        u = c.get("utility")
-        flags = ("merged" if c.get("merged") else ("passed" if c.get("passed") else "—"))
-        lines.append(f"  {c.get('domain','?'):9} U={u if u is not None else '—':<6} {flags:7} "
-                     f"{(c.get('task') or '')[:90]}")
+    try:
+        for c in rows:
+            u = c.get("utility")
+            flags = ("merged" if c.get("merged") else ("passed" if c.get("passed") else "—"))
+            lines.append(f"  {c.get('domain','?'):9} U={u if u is not None else '—':<6} {flags:7} "
+                         f"{(c.get('task') or '')[:90]}")
+    except (AttributeError, TypeError, ValueError) as exc:  # degenerate row — honest
+        return f"(cycles unavailable: {type(exc).__name__})"
     return "\n".join(lines)
 
 
@@ -156,9 +171,16 @@ def _goals_text(*, goals_fn=None) -> str:
     if not gs:
         return "(no goals)"
     lines = ["SELF-CODE GOALS (real counts):", ""]
-    for g in gs:
-        bar = "█" * (g.get("pct", 0) // 10) + "░" * (10 - g.get("pct", 0) // 10)
-        lines.append(f"  {g.get('name',''):22} [{bar}] {g.get('pct',0):3}%  {g.get('detail','')}")
+    try:
+        for g in gs:
+            try:
+                pct = max(0, min(100, int(g.get("pct") or 0)))  # None/overflow-safe bar
+            except (TypeError, ValueError):
+                pct = 0
+            bar = "█" * (pct // 10) + "░" * (10 - pct // 10)
+            lines.append(f"  {g.get('name',''):22} [{bar}] {pct:3}%  {g.get('detail','')}")
+    except (AttributeError, TypeError, ValueError) as exc:  # degenerate row — honest
+        return f"(goals unavailable: {type(exc).__name__})"
     return "\n".join(lines)
 
 
@@ -236,14 +258,14 @@ def _skills_text() -> str:
         if domains:
             parts += ["", f"selfcode domains ({len(domains)}):",
                       "  " + " · ".join(sorted(domains))]
-    except Exception:  # noqa: BLE001
-        pass
+    except Exception as exc:  # noqa: BLE001 — optional section; skipped but never silent
+        log.debug("skills: selfcode domains unavailable: %s", exc)
     try:
         from utah.daemon.handlers.panels import PANEL_REGISTRY
         parts += ["", f"deck panels ({len(PANEL_REGISTRY)}):",
                   "  " + " · ".join(sorted(PANEL_REGISTRY))]
-    except Exception:  # noqa: BLE001
-        pass
+    except Exception as exc:  # noqa: BLE001 — optional section; skipped but never silent
+        log.debug("skills: deck panels unavailable: %s", exc)
     parts += ["", f"console commands ({len(COMMANDS)}):",
               "  " + " · ".join("/" + c for c in COMMANDS)]
     return "\n".join(parts)
@@ -253,14 +275,16 @@ def _history_text(arg: str, *, turns_fn=None) -> str:
     """The recent conversation (voice + deck chat), newest LAST — the whole-chat view."""
     try:
         n = max(1, min(int(arg or 12), 40))
-    except ValueError:
+    except (TypeError, ValueError):
         n = 12
     if turns_fn is None:
         def turns_fn(limit):
             import psycopg
 
             from utah import config
-            with psycopg.connect(config.DB_DSN, autocommit=True) as c:
+            with psycopg.connect(
+                    config.DB_DSN, autocommit=True, connect_timeout=8,
+                    options=f"-c statement_timeout={config.DB_STATEMENT_TIMEOUT_MS}") as c:
                 return [(str(r[0])[:16], r[1]) for r in c.execute(
                     "SELECT ts, content FROM memory WHERE source='turn' "
                     "ORDER BY ts DESC LIMIT %s", (limit,))]
@@ -284,7 +308,8 @@ def run_fast(cmd: str, arg: str = "", **inject) -> dict:
     if cmd == "status":
         return {"output": _status_text(selfcode=inject.get("selfcode"), loadavg=inject.get("loadavg"))}
     if cmd == "findings":
-        return {"output": _findings_text(pending_fn=inject.get("pending_fn"))}
+        return {"output": _findings_text(pending_fn=inject.get("pending_fn"),
+                                         harvest_fn=inject.get("harvest_fn"))}
     if cmd == "cycles":
         return {"output": _cycles_text(arg, cycles_fn=inject.get("cycles_fn"))}
     if cmd == "goals":
@@ -393,37 +418,86 @@ def run_claude_streamed(task: str, *, cwd: str, on_line, timeout: float = 600.0,
     """Run ``claude -p`` WITH coding tools and STREAM its live actions to ``on_line(str)`` —
     assistant text + every Bash/Read/Write/Edit. Bounded by *timeout* (kill + TimeoutExpired
     so the SICA τ-penalty applies); RuntimeError on a non-zero exit so the gate discards the
-    change. The genuine agentic terminal: you SEE Ace work, including when he runs bash."""
+    change. The genuine agentic terminal: you SEE Ace work, including when he runs bash.
+
+    Every boundary is REALLY bounded: a watchdog timer kills a silent child (an in-loop
+    deadline check never fires while ``readline`` is blocked), stderr is drained
+    concurrently (an undrained PIPE fills at ~64KB and deadlocks the child), and the
+    final reap is itself time-limited so a worker thread can never hang on ``wait()``."""
     import json as _json
+    import os as _os
+    import signal as _signal
     import subprocess
-    import time as _t
+    import threading as _th
 
-    from utah import config
-
-    cmd = [brain_cmd or config.BRAIN_CMD, "-p", "--output-format", "stream-json",
+    if brain_cmd is None:
+        from utah import config
+        brain_cmd = config.BRAIN_CMD
+    cmd = [brain_cmd, "-p", "--output-format", "stream-json",
            "--verbose", "--include-partial-messages",
            "--allowedTools", "Edit", "Write", "Read", "Bash"]
-    proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                            stderr=subprocess.PIPE, text=True, bufsize=1, cwd=cwd)
     try:
-        if proc.stdin:
-            proc.stdin.write(task)
-            proc.stdin.close()
-    except Exception:  # noqa: BLE001
-        pass
-    state: dict = {}
-    deadline = _t.monotonic() + timeout
-    try:
-        for raw in (proc.stdout or ()):
-            if _t.monotonic() > deadline:
+        # start_new_session: the run gets its OWN process group, so a timeout kill takes
+        # down claude AND every tool subprocess it spawned (otherwise a surviving child
+        # holds the stdout pipe open and the read loop never sees EOF).
+        proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                stderr=subprocess.PIPE, text=True, bufsize=1, cwd=cwd,
+                                start_new_session=True)
+    except OSError as exc:  # missing/unrunnable binary — a defined failure, not a stack bomb
+        raise RuntimeError(f"claude coding run could not start: {exc}") from exc
+
+    def _kill_tree() -> None:
+        try:
+            _os.killpg(_os.getpgid(proc.pid), _signal.SIGKILL)
+        except (OSError, ProcessLookupError):
+            try:
                 proc.kill()
-                raise subprocess.TimeoutExpired(cmd[0], timeout)
+            except OSError:
+                pass
+
+    # Drain stderr concurrently (bounded tail kept for the error message).
+    err_tail: list[str] = []
+
+    def _drain_stderr() -> None:
+        try:
+            for ln in proc.stderr or ():
+                err_tail.append(ln)
+                if len(err_tail) > 50:
+                    del err_tail[:-50]
+        except (OSError, ValueError):  # pipe closed mid-read — drain done
+            pass
+
+    drainer = _th.Thread(target=_drain_stderr, daemon=True, name="claude-stderr-drain")
+    drainer.start()
+
+    # Watchdog: the ONLY reliable timeout — kills the child even when it produces no
+    # output at all (the read loop below blocks inside readline between lines).
+    timed_out = _th.Event()
+
+    def _expire() -> None:
+        timed_out.set()
+        _kill_tree()
+
+    watchdog = _th.Timer(timeout, _expire)
+    watchdog.daemon = True
+    watchdog.start()
+
+    state: dict = {}
+    rc = -1
+    try:
+        try:
+            if proc.stdin:
+                proc.stdin.write(task)
+                proc.stdin.close()
+        except (OSError, ValueError):  # child died early — the rc path reports honestly
+            pass
+        for raw in (proc.stdout or ()):
             raw = raw.strip()
             if not raw:
                 continue
             try:
                 evt = _json.loads(raw)
-            except Exception:  # noqa: BLE001 — non-JSON line (rare) → skip
+            except ValueError:  # non-JSON line (rare) → skip
                 continue
             for line in format_stream_event(evt, state):
                 try:
@@ -431,14 +505,26 @@ def run_claude_streamed(task: str, *, cwd: str, on_line, timeout: float = 600.0,
                 except Exception:  # noqa: BLE001 — a slow/broken sink never kills the run
                     pass
     finally:
+        watchdog.cancel()
         try:
             if proc.stdout:
                 proc.stdout.close()
-        except Exception:  # noqa: BLE001
+        except OSError:
             pass
-    rc = proc.wait()
+        # Always reap, time-boxed — never a zombie, never a hung worker thread.
+        try:
+            rc = proc.wait(timeout=10.0)
+        except subprocess.TimeoutExpired:
+            _kill_tree()
+            try:
+                rc = proc.wait(timeout=10.0)
+            except subprocess.TimeoutExpired:
+                rc = -1
+    drainer.join(timeout=5.0)
+    if timed_out.is_set():
+        raise subprocess.TimeoutExpired(cmd[0], timeout)
     if rc:
-        err = (proc.stderr.read() if proc.stderr else "")[-300:]
+        err = "".join(err_tail)[-300:].strip()
         raise RuntimeError(f"claude coding run exited {rc}: {err or 'no output'}")
 
 

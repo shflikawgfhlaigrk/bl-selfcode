@@ -168,6 +168,13 @@ BRAIN_TIMEOUT: int = int(os.environ.get("UTAH_BRAIN_TIMEOUT", "120"))
 #: Seconds to wait when opening a Postgres connection.
 DB_CONNECT_TIMEOUT: int = int(os.environ.get("UTAH_DB_CONNECT_TIMEOUT", "5"))
 
+#: Milliseconds one Postgres STATEMENT may run on the ad-hoc lanes (exports, deck
+#: reads, migration rollback). A connect timeout alone leaves the query unbounded —
+#: a lock on leads/memory hangs the caller forever. Generous (5 min, matching the
+#: psql export lane) because these are analytic reads, never the daemon hot path;
+#: the shared daemon pool is deliberately NOT given a global statement timeout.
+DB_STATEMENT_TIMEOUT_MS: int = int(os.environ.get("UTAH_DB_STATEMENT_TIMEOUT_MS", "300000"))
+
 #: Connection-pool sizing for the long-lived daemon stores (memory, failures). The
 #: store was a single connection + RLock — every in-daemon memory op serialized, negating
 #: the worker pool's parallelism and the very reason Postgres was chosen (B6). A bounded
@@ -308,7 +315,16 @@ WAKE_MODEL: str = os.environ.get(
     os.path.expanduser("~/.utah/models/wake/hey_ace_v3.onnx"),
 )
 #: Confidence to arm command capture. ONNX arms only — STT/text still resolves the command.
-WAKE_THRESHOLD: float = float(os.environ.get("UTAH_WAKE_THRESHOLD", "0.82"))
+#: WAKE CONFIDENCE BAND (2026-06-10: a single 0.82 threshold was simultaneously too HIGH
+#: — soft real "Ace" missed — and too LOW — TV/room speech at 0.83 armed, then any
+#: transcript became a command, so Ace answered the television). Two thresholds fix both:
+#:   • ARM floor (0.68): low enough that a quiet "Ace" arms capture (fewer MISSES).
+#:   • TRUST (0.90): only AT/above this does an audio wake accept a transcript that has no
+#:     literal "ace" token as a command. In the 0.68–0.90 band, Stage B requires a real
+#:     standalone "ace"/"utah" in the transcript — so room speech without it is dropped
+#:     (fewer FALSE FIRES). Paired with the loud-audio storm guard in loop.py.
+WAKE_THRESHOLD: float = float(os.environ.get("UTAH_WAKE_THRESHOLD", "0.68"))
+WAKE_TRUST_THRESHOLD: float = float(os.environ.get("UTAH_WAKE_TRUST_THRESHOLD", "0.90"))
 #: Seconds after an audio wake hit to capture the command utterance (STT runs once).
 WAKE_ARM_S: float = float(os.environ.get("UTAH_WAKE_ARM_S", "8.0"))
 #: Force-capture window after openWakeWord fires (bypasses Silero on noisy mics).

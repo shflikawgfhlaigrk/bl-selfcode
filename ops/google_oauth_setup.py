@@ -6,6 +6,10 @@ Google consent screen, you click Allow, it captures the auth code on a localhost
 redirect, exchanges it for a **refresh token**, and writes the creds file Utah's
 calendar (and, if you add the gmail scope, the Gmail-API mail path) reads.
 
+Every step is an isolated function returning an honest ``{"ok": bool, ...}`` dict
+(testable with injected transport/clock — no real network in tests), and every
+network call carries an explicit timeout (``UTAH_OAUTH_HTTP_TIMEOUT``, default 30s).
+
 PREREQS
   * The OAuth client must be type **"Desktop app"** (Google then auto-allows the
     http://127.0.0.1:<port> loopback redirect — no redirect URI to register).
@@ -29,10 +33,12 @@ import secrets
 import sys
 import threading
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
 import webbrowser
 from pathlib import Path
+from typing import Callable, Mapping
 
 CLIENT_ID = os.environ.get(
     "GOOGLE_CLIENT_ID",
@@ -47,97 +53,234 @@ OUT = Path.home() / ".utah" / "secrets" / "google.json"
 AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
 TOKEN_URL = "https://oauth2.googleapis.com/token"
 
+#: Explicit bound on the token-exchange HTTP call — an unbounded urlopen hung the
+#: whole setup forever when the token endpoint stalled.
+HTTP_TIMEOUT_S = float(os.environ.get("UTAH_OAUTH_HTTP_TIMEOUT", "30"))
 
-def main() -> int:
-    client_secret = os.environ.get("GOOGLE_CLIENT_SECRET") or input(
-        "Paste the Google OAuth client secret (stays local, not echoed to chat): "
-    ).strip()
-    if not client_secret:
-        print("no client secret — aborting", file=sys.stderr)
-        return 2
 
+# ---------------------------------------------------------------------------
+# step 1: client secret (env first, local prompt fallback)
+# ---------------------------------------------------------------------------
+
+def get_client_secret(env: Mapping[str, str] | None = None,
+                      prompt_fn: Callable[[str], str] = input) -> dict:
+    """``{"ok", "secret", "error"}`` — never raises (EOF/interrupt = honest failure)."""
+    env = os.environ if env is None else env
+    secret = (env.get("GOOGLE_CLIENT_SECRET") or "").strip()
+    if not secret:
+        try:
+            secret = prompt_fn(
+                "Paste the Google OAuth client secret (stays local, not echoed to chat): "
+            ).strip()
+        except (EOFError, KeyboardInterrupt):
+            return {"ok": False, "secret": None, "error": "no client secret provided"}
+    if not secret:
+        return {"ok": False, "secret": None, "error": "empty client secret"}
+    return {"ok": True, "secret": secret, "error": None}
+
+
+# ---------------------------------------------------------------------------
+# step 2: loopback redirect server (binds 127.0.0.1, OS-assigned port)
+# ---------------------------------------------------------------------------
+
+def start_loopback(host: str = "127.0.0.1", port: int = 0) -> dict:
+    """``{"ok", "server", "captured", "redirect_uri", "error"}``. The handler folds each
+    request's query params into ``captured`` (first writer wins, so a stray favicon or a
+    replayed tab cannot clobber the real code); the caller polls ``captured``."""
     captured: dict[str, str] = {}
 
     class Handler(http.server.BaseHTTPRequestHandler):
-        def do_GET(self):  # noqa: N802
-            captured.update(
-                {k: v[0] for k, v in urllib.parse.parse_qs(
-                    urllib.parse.urlparse(self.path).query).items()}
-            )
+        def do_GET(self):  # noqa: N802 - BaseHTTPRequestHandler API
+            params = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+            for k, v in params.items():
+                captured.setdefault(k, v[0])
             self.send_response(200)
             self.send_header("Content-Type", "text/plain")
             self.end_headers()
-            self.wfile.write(b"Google auth complete. You can close this tab and return to the terminal.")
+            self.wfile.write(
+                b"Google auth complete. You can close this tab and return to the terminal.")
 
         def log_message(self, *a):  # silence
             pass
 
-    srv = http.server.HTTPServer(("127.0.0.1", 0), Handler)
-    port = srv.server_address[1]
-    redirect_uri = f"http://127.0.0.1:{port}/"
-    state = secrets.token_urlsafe(16)
+    try:
+        srv = http.server.HTTPServer((host, port), Handler)
+    except OSError as exc:
+        return {"ok": False, "server": None, "captured": captured,
+                "redirect_uri": None, "error": f"cannot bind loopback server: {exc}"}
+    srv.timeout = 1.0  # handle_request wakes every second so the serve loop can stop
+    return {"ok": True, "server": srv, "captured": captured,
+            "redirect_uri": f"http://{host}:{srv.server_address[1]}/", "error": None}
 
-    auth = AUTH_URL + "?" + urllib.parse.urlencode({
-        "client_id": CLIENT_ID,
+
+def _serve_until_captured(srv: http.server.HTTPServer, captured: dict, deadline: float,
+                          clock: Callable[[], float] = time.monotonic) -> None:
+    """Serve loopback requests (favicon probes included) until the redirect lands or the
+    deadline passes. Runs on a daemon thread; ``srv.timeout`` bounds each iteration."""
+    while clock() < deadline and not (captured.get("code") or captured.get("error")):
+        try:
+            srv.handle_request()
+        except OSError:  # server_close() raced us — we are done either way
+            return
+
+
+# ---------------------------------------------------------------------------
+# step 3: consent URL (pure) + browser nudge
+# ---------------------------------------------------------------------------
+
+def build_auth_url(redirect_uri: str, state: str, *, client_id: str = CLIENT_ID,
+                   scopes: list[str] | None = None) -> str:
+    return AUTH_URL + "?" + urllib.parse.urlencode({
+        "client_id": client_id,
         "redirect_uri": redirect_uri,
         "response_type": "code",
-        "scope": " ".join(SCOPES),
+        "scope": " ".join(SCOPES if scopes is None else scopes),
         "access_type": "offline",
         "prompt": "consent",        # forces a refresh_token even on re-grant
         "state": state,
     })
-    print("\nScopes requested:", " ".join(SCOPES))
-    print("\nOpen this URL and click Allow (it should open automatically):\n")
-    print(auth, "\n")
+
+
+def open_browser(url: str) -> bool:
+    """Best-effort: the URL is also printed, so a refused browser is not fatal."""
     try:
-        webbrowser.open(auth)
-    except Exception:
-        pass
+        return webbrowser.open(url)
+    except (webbrowser.Error, OSError):
+        return False
 
-    t = threading.Thread(target=srv.handle_request, daemon=True)
-    t.start()
-    for _ in range(int(os.environ.get("UTAH_OAUTH_WAIT", "300"))):  # default 5 min to approve
-        if captured.get("code") or captured.get("error"):
-            break
-        time.sleep(1)
-    srv.server_close()
 
+# ---------------------------------------------------------------------------
+# step 4: wait for the redirect (bounded, injectable clock — no busy hang)
+# ---------------------------------------------------------------------------
+
+def wait_for_code(captured: Mapping[str, str], state: str, wait_s: float = 300.0,
+                  sleep_fn: Callable[[float], None] = time.sleep,
+                  clock: Callable[[], float] = time.monotonic) -> dict:
+    """``{"ok", "code", "error"}`` — consent error, timeout, and a state (CSRF)
+    mismatch are all honest failures, never exceptions."""
+    deadline = clock() + wait_s
+    while not (captured.get("code") or captured.get("error")):
+        if clock() >= deadline:
+            return {"ok": False, "code": None,
+                    "error": f"timed out after {wait_s:.0f}s waiting for the consent redirect"}
+        sleep_fn(0.25)
     if captured.get("error"):
-        print("consent error:", captured["error"], file=sys.stderr)
-        return 1
-    if captured.get("state") != state or not captured.get("code"):
-        print("no valid auth code captured (timed out or state mismatch)", file=sys.stderr)
-        return 1
+        return {"ok": False, "code": None, "error": f"consent error: {captured['error']}"}
+    if captured.get("state") != state:
+        return {"ok": False, "code": None,
+                "error": "state mismatch on the consent redirect (stale tab or CSRF) — re-run"}
+    return {"ok": True, "code": captured["code"], "error": None}
 
+
+# ---------------------------------------------------------------------------
+# step 5: token exchange (the only off-box network call — explicit timeout,
+#          injectable transport)
+# ---------------------------------------------------------------------------
+
+def exchange_code(code: str, client_secret: str, redirect_uri: str, *,
+                  client_id: str = CLIENT_ID, token_url: str = TOKEN_URL,
+                  opener: Callable | None = None,
+                  timeout_s: float = HTTP_TIMEOUT_S) -> dict:
+    """``{"ok", "tokens", "error"}`` — never raises. *opener* takes
+    ``(request, timeout=...)`` and returns a context manager (urlopen-shaped)."""
+    opener = urllib.request.urlopen if opener is None else opener
     data = urllib.parse.urlencode({
-        "code": captured["code"],
-        "client_id": CLIENT_ID,
+        "code": code,
+        "client_id": client_id,
         "client_secret": client_secret,
         "redirect_uri": redirect_uri,
         "grant_type": "authorization_code",
     }).encode()
     try:
-        with urllib.request.urlopen(urllib.request.Request(TOKEN_URL, data=data)) as r:
-            tok = json.load(r)
-    except urllib.error.HTTPError as e:
-        print("token exchange failed:", e.read().decode()[:300], file=sys.stderr)
+        with opener(urllib.request.Request(token_url, data=data), timeout=timeout_s) as r:
+            body = r.read()
+    except urllib.error.HTTPError as exc:
+        try:
+            detail = exc.read().decode(errors="replace")[:300]
+        except (OSError, AttributeError):
+            detail = str(exc)
+        return {"ok": False, "tokens": None,
+                "error": f"token exchange failed: HTTP {exc.code}: {detail}"}
+    except (urllib.error.URLError, TimeoutError, OSError) as exc:
+        return {"ok": False, "tokens": None, "error": f"token endpoint unreachable: {exc}"}
+    try:
+        tokens = json.loads(body)
+    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+        return {"ok": False, "tokens": None, "error": f"token response is not JSON: {exc}"}
+    if not isinstance(tokens, dict):
+        return {"ok": False, "tokens": None, "error": "token response is not a JSON object"}
+    if not tokens.get("refresh_token"):
+        return {"ok": False, "tokens": tokens,
+                "error": "no refresh_token returned (revoke prior grant or check "
+                         "'offline' access): " + json.dumps(tokens)[:200]}
+    return {"ok": True, "tokens": tokens, "error": None}
+
+
+# ---------------------------------------------------------------------------
+# step 6: write the creds file (0600)
+# ---------------------------------------------------------------------------
+
+def write_creds(client_secret: str, refresh_token: str, *, client_id: str = CLIENT_ID,
+                scopes: list[str] | None = None, out_path: Path | str | None = None) -> dict:
+    """``{"ok", "path", "error"}`` — never raises (full disk / bad perms = honest failure)."""
+    out = OUT if out_path is None else Path(out_path)
+    try:
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(json.dumps({
+            "client_id": client_id,
+            "client_secret": client_secret,
+            "refresh_token": refresh_token,
+            "scopes": SCOPES if scopes is None else scopes,
+        }, indent=2))
+        os.chmod(out, 0o600)
+    except OSError as exc:
+        return {"ok": False, "path": str(out), "error": f"cannot write creds file: {exc}"}
+    return {"ok": True, "path": str(out), "error": None}
+
+
+# ---------------------------------------------------------------------------
+# orchestration
+# ---------------------------------------------------------------------------
+
+def main() -> int:
+    sec = get_client_secret()
+    if not sec["ok"]:
+        print(sec["error"], "— aborting", file=sys.stderr)
+        return 2
+
+    boot = start_loopback()
+    if not boot["ok"]:
+        print(boot["error"], file=sys.stderr)
+        return 1
+    srv, captured = boot["server"], boot["captured"]
+    state = secrets.token_urlsafe(16)
+    auth = build_auth_url(boot["redirect_uri"], state)
+
+    print("\nScopes requested:", " ".join(SCOPES))
+    print("\nOpen this URL and click Allow (it should open automatically):\n")
+    print(auth, "\n")
+    open_browser(auth)
+
+    wait_s = float(os.environ.get("UTAH_OAUTH_WAIT", "300"))  # default 5 min to approve
+    deadline = time.monotonic() + wait_s
+    threading.Thread(target=_serve_until_captured, args=(srv, captured, deadline),
+                     daemon=True).start()
+    got = wait_for_code(captured, state, wait_s)
+    srv.server_close()
+    if not got["ok"]:
+        print(got["error"], file=sys.stderr)
         return 1
 
-    refresh = tok.get("refresh_token")
-    if not refresh:
-        print("no refresh_token returned (revoke prior grant or check 'offline' access):",
-              json.dumps(tok)[:200], file=sys.stderr)
+    ex = exchange_code(got["code"], sec["secret"], boot["redirect_uri"])
+    if not ex["ok"]:
+        print(ex["error"], file=sys.stderr)
         return 1
 
-    OUT.parent.mkdir(parents=True, exist_ok=True)
-    OUT.write_text(json.dumps({
-        "client_id": CLIENT_ID,
-        "client_secret": client_secret,
-        "refresh_token": refresh,
-        "scopes": SCOPES,
-    }, indent=2))
-    os.chmod(OUT, 0o600)
-    print(f"\n✅ wrote {OUT} (mode 600) — calendar capability is now credentialed.")
+    wrote = write_creds(sec["secret"], ex["tokens"]["refresh_token"])
+    if not wrote["ok"]:
+        print(wrote["error"], file=sys.stderr)
+        return 1
+    print(f"\n✅ wrote {wrote['path']} (mode 600) — calendar capability is now credentialed.")
     return 0
 
 

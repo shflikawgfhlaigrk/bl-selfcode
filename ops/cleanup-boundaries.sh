@@ -24,7 +24,12 @@ ARCHIVE="$LA/_archived-ace"
 GUI="gui/$(id -u)"
 SOV_YAML="$HOME/Library/Application Support/Sovereign/sovereign.yaml"
 
-log() { printf '%s  %s\n' "$(date '+%H:%M:%S')" "$*"; }
+log()  { printf '%s  %s\n' "$(date '+%H:%M:%S')" "$*"; }
+err()  { printf '%s  %s\n' "$(date '+%H:%M:%S')" "$*" >&2; }
+fail() { err "$*"; exit 1; }
+# Honest abort: any unexpected command failure reports where and exits non-zero.
+trap 'err "cleanup-boundaries: FAILED at line $LINENO (exit $?)"' ERR
+
 run() {
   if [[ "$APPLY" -eq 1 ]]; then
     log "RUN  $*"
@@ -103,8 +108,9 @@ fi
 
 # --- 6. Health ---
 log "=== Health (always probed) ==="
+HEALTH_OK=0
 if curl -sf --max-time 5 "http://127.0.0.1:8766/state" >/dev/null 2>&1; then
-  python3 - <<'PY'
+  if python3 - <<'PY'
 import json, urllib.request
 st = json.load(urllib.request.urlopen("http://127.0.0.1:8766/state", timeout=5))
 mem = json.load(urllib.request.urlopen("http://127.0.0.1:8766/memory", timeout=5))
@@ -113,13 +119,25 @@ print(f"  voice: {(st.get('voice') or {}).get('status')}")
 print(f"  ledger leads: {(st.get('ledger') or {}).get('leads')}")
 print(f"  memory live: {mem.get('live')} / {mem.get('total')}")
 PY
+  then
+    HEALTH_OK=1
+  else
+    err "WARN: deck answered on :8766 but the state/memory probe failed"
+  fi
   log "Open Utah deck: http://127.0.0.1:8766/"
-  if command -v tailscale &>/dev/null; then
-    /Applications/Tailscale.app/Contents/MacOS/Tailscale serve status 2>/dev/null | head -3 || true
+  TS_BIN="/Applications/Tailscale.app/Contents/MacOS/Tailscale"
+  if [[ -x "$TS_BIN" ]]; then
+    "$TS_BIN" serve status 2>/dev/null | head -3 || true
   fi
 else
-  log "WARN: Utah deck not responding on :8766"
-  log "  After --apply: launchctl kickstart -k $GUI/com.utah.supervisor"
+  err "WARN: Utah deck not responding on :8766"
+  err "  After --apply: launchctl kickstart -k $GUI/com.utah.supervisor"
+fi
+
+# Dishonest-status guard: --apply that leaves the deck down must NOT exit 0.
+# (Dry-run only reports — a down deck is a finding there, not a failure.)
+if [[ "$APPLY" -eq 1 && "$HEALTH_OK" -ne 1 ]]; then
+  fail "applied boundary changes but the Utah deck is NOT healthy — fix before walking away"
 fi
 
 log "=== Done ==="

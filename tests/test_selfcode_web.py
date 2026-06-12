@@ -174,3 +174,136 @@ def test_shape_result_caps_diff_and_reason():
     s = selfcode_web.shape_result(res)
     assert len(s["reason"]) == 400 and len(s["diff"]) == 6000
     assert s["merged"] is False
+
+
+# ---- hardening: malformed rows / degenerate data never break a panel ---------
+
+def test_recent_cycles_skips_malformed_rows_keeps_good():
+    rows = [
+        (3, _FakeTS(), "{not json"),                      # corrupt JSON payload
+        _fake_log_row(2, task="good", domain="leads",
+                      attempts=[{"passed": True, "merged": False, "utility": 0.5}]),
+        (1, _FakeTS(), None),                             # NULL data column
+    ]
+    out = selfcode_web.recent_cycles(query_fn=lambda *a: rows)
+    assert [r["id"] for r in out] == [2]                  # good row survives the bad ones
+
+
+def test_recent_cycles_none_utility_attempt_never_raises():
+    rows = [_fake_log_row(1, task="t", domain="d", attempts=[
+        {"passed": False, "merged": False, "utility": None},
+        {"passed": True, "merged": False, "utility": 0.5},
+    ])]
+    out = selfcode_web.recent_cycles(query_fn=lambda *a: rows)
+    assert out[0]["utility"] == 0.5
+
+
+def test_default_query_db_connect_is_bounded(monkeypatch):
+    import sys
+    import types
+    seen = {}
+    fake = types.ModuleType("psycopg")
+
+    def connect(dsn, **kw):
+        seen.update(kw)
+        raise RuntimeError("no db in unit tests")
+
+    fake.connect = connect
+    monkeypatch.setitem(sys.modules, "psycopg", fake)
+    assert selfcode_web.recent_cycles() == []             # honest empty on connect failure
+    assert seen.get("connect_timeout"), "DB connect must carry a real timeout"
+    assert "statement_timeout" in seen.get("options", ""), \
+        "the query itself must be bounded, not just the connect"
+
+
+# ---- hardening: git boundaries (timeouts + argument safety) ------------------
+
+def test_branch_diff_refuses_option_shaped_branch(monkeypatch):
+    import subprocess as sp
+
+    def boom(*a, **k):
+        raise AssertionError("git must not run for an option-shaped branch")
+
+    monkeypatch.setattr(sp, "run", boom)
+    from pathlib import Path
+    assert selfcode_web._branch_diff(Path("/tmp"), "--upload-pack=/bin/true") == ""
+    assert selfcode_web._branch_diff(Path("/tmp"), "-pretty") == ""
+    assert selfcode_web._branch_diff(Path("/tmp"), "  ") == ""
+
+
+def test_branch_diff_timeout_is_empty(monkeypatch):
+    import subprocess as sp
+
+    def slow(*a, **k):
+        raise sp.TimeoutExpired("git", 15)
+
+    monkeypatch.setattr(sp, "run", slow)
+    from pathlib import Path
+    assert selfcode_web._branch_diff(Path("/tmp"), "selfcode/x") == ""
+
+
+def test_git_count_timeout_is_zero(monkeypatch):
+    import subprocess as sp
+
+    def slow(*a, **k):
+        raise sp.TimeoutExpired("git", 15)
+
+    monkeypatch.setattr(sp, "run", slow)
+    from pathlib import Path
+    assert selfcode_web._git_count(Path("/tmp"), "selfcode(auto)") == 0
+
+
+def test_git_count_passes_a_real_timeout(monkeypatch):
+    import subprocess as sp
+    seen = {}
+
+    def fake_run(cmd, **kw):
+        seen.update(kw)
+
+        class R:
+            returncode = 0
+            stdout = "selfcode(auto): merge x\nfeat: human commit\n"
+        return R()
+
+    monkeypatch.setattr(sp, "run", fake_run)
+    from pathlib import Path
+    assert selfcode_web._git_count(Path("/tmp"), "selfcode(auto)") == 1
+    assert seen.get("timeout"), "git subprocess must be bounded"
+
+
+# ---- hardening: env + gate boundaries ----------------------------------------
+
+def test_int_env_garbage_falls_back(monkeypatch):
+    monkeypatch.setenv("UTAH_GOAL_MERGES", "lots")
+    assert selfcode_web._int_env("UTAH_GOAL_MERGES", 25) == 25
+    monkeypatch.setenv("UTAH_GOAL_MERGES", "30")
+    assert selfcode_web._int_env("UTAH_GOAL_MERGES", 25) == 30
+    monkeypatch.delenv("UTAH_GOAL_MERGES", raising=False)
+    assert selfcode_web._int_env("UTAH_GOAL_MERGES", 25) == 25
+
+
+def test_run_edit_gate_check_failure_is_honest(monkeypatch):
+    """If the kill-switch read itself blows up, run_edit must return an honest error
+    dict — never raise into the web worker."""
+    from utah import selfcode
+
+    def broken_gate():
+        raise RuntimeError("flag filesystem dead")
+
+    monkeypatch.setattr(selfcode, "enabled", broken_gate)
+    out = selfcode_web.run_edit("x", propose_fn=lambda t: {})
+    assert out["ran"] is False
+    assert "gate" in out["error"] and "flag filesystem dead" in out["error"]
+
+
+def test_run_edit_diff_fallback_failure_never_raises(monkeypatch):
+    from utah import selfcode
+    monkeypatch.setattr(selfcode, "enabled", lambda: True)
+    res = {"task": "t", "tests_passed": True, "merged": False, "branch": "b"}
+
+    def broken_diff(branch):
+        raise RuntimeError("git tree gone")
+
+    out = selfcode_web.run_edit("x", propose_fn=lambda t: res, diff_fn=broken_diff)
+    assert out["ran"] is True and out["passed"] is True
+    assert out["diff"] == ""                              # diff is a bonus, never the gate

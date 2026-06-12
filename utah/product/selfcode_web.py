@@ -49,7 +49,9 @@ def _default_query(sql: str, params: tuple = ()) -> list[tuple]:
 
     from utah import config
 
-    with psycopg.connect(config.DB_DSN, autocommit=True, connect_timeout=8) as c:
+    with psycopg.connect(
+            config.DB_DSN, autocommit=True, connect_timeout=8,
+            options=f"-c statement_timeout={config.DB_STATEMENT_TIMEOUT_MS}") as c:
         return c.execute(sql, params).fetchall()
 
 
@@ -58,7 +60,8 @@ def _cycle_summary(data: dict) -> dict:
     attempt's utility, and whether it passed the gate / merged. Real fields only."""
     attempts = data.get("attempts") or []
     # The representative attempt = the highest-utility one (the cycle's best result).
-    best = max(attempts, key=lambda a: a.get("utility", 0.0)) if attempts else {}
+    # ``or 0.0`` — a crashed attempt logs utility=None, which must sort lowest, not raise.
+    best = max(attempts, key=lambda a: a.get("utility") or 0.0) if attempts else {}
     passed = any(bool(a.get("passed")) for a in attempts)
     merged = any(bool(a.get("merged")) for a in attempts)
     prop = data.get("propagation") or {}
@@ -86,9 +89,16 @@ def recent_cycles(limit: int = 25, *, query_fn=None) -> list[dict]:
         log.warning("selfcode_log read failed: %s", exc)
         return []
     out: list[dict] = []
-    for rid, ts, data in rows:
-        d = data if isinstance(data, dict) else json.loads(data)
-        s = _cycle_summary(d)
+    for row in rows:
+        try:
+            rid, ts, data = row
+            d = data if isinstance(data, dict) else json.loads(data)
+            s = _cycle_summary(d)
+        except (TypeError, ValueError, AttributeError) as exc:
+            # One corrupt log row (bad JSON / NULL data / wrong arity) must never
+            # blank the whole panel — skip it loudly, keep the good rows.
+            log.warning("selfcode_log row malformed — skipped: %s", exc)
+            continue
         s["id"] = rid
         s["logged_at"] = ts.isoformat() if hasattr(ts, "isoformat") else str(ts)
         out.append(s)
@@ -115,7 +125,8 @@ def cycle_stats(*, query_fn=None) -> dict:
 
 def _git_count(repo: Path, grep: str) -> int:
     """Count commits in *repo* whose subject matches *grep* (the autonomous-merge
-    provenance). git -C + a safe cwd so a TCC-protected process cwd can't abort it."""
+    provenance). git -C + a safe cwd so a TCC-protected process cwd can't abort it.
+    Real-or-zero: timeout / missing git / missing repo all count as 0, logged."""
     try:
         # SUBJECT-only: --grep matches the whole message (body too), so a human feature
         # commit that merely mentions the pattern got miscounted as an autonomous merge.
@@ -126,7 +137,7 @@ def _git_count(repo: Path, grep: str) -> int:
         if out.returncode != 0:
             return 0
         return sum(1 for ln in out.stdout.splitlines() if ln.strip().startswith(grep))
-    except Exception as exc:  # noqa: BLE001
+    except (subprocess.SubprocessError, OSError, ValueError) as exc:
         log.warning("git count failed (%s): %s", repo, exc)
         return 0
 
@@ -137,11 +148,24 @@ def _pct(num: float, den: float) -> int:
     return max(0, min(100, round(100.0 * num / den)))
 
 
+def _int_env(name: str, default: int) -> int:
+    """Env-int boundary: a garbage value must degrade to the default, never crash
+    the module import (this file imports inside the daemon's panel handlers)."""
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        log.warning("bad %s=%r — using default %d", name, raw, default)
+        return default
+
+
 #: Real targets (denominators) for each goal — kept modest so the bar reflects genuine
 #: progress against a concrete milestone, not a moving denominator.
 GOAL_TARGETS = {
-    "autonomous_merges": int(os.environ.get("UTAH_GOAL_MERGES", "25")),
-    "knowledge_corpus": int(os.environ.get("UTAH_GOAL_KNOWLEDGE", "200")),
+    "autonomous_merges": _int_env("UTAH_GOAL_MERGES", 25),
+    "knowledge_corpus": _int_env("UTAH_GOAL_KNOWLEDGE", 200),
 }
 
 
@@ -208,14 +232,18 @@ def shape_result(res: dict) -> dict:
 def _branch_diff(repo: Path, branch: str | None) -> str:
     """Best-effort: the diff the proposal produced on its branch vs main (so the page
     can SHOW what he changed). Empty on any failure — diff is a bonus, not the gate."""
-    if not branch:
+    branch = (branch or "").strip()
+    # Option-shaped input must never reach git as a flag (the branch arg comes from a
+    # typed console line via /diff <branch>).
+    if not branch or branch.startswith("-"):
         return ""
     try:
         out = subprocess.run(
             ["git", "-C", str(repo), "diff", f"main...{branch}"],
             capture_output=True, text=True, cwd=_SAFE_CWD, timeout=15)
         return out.stdout if out.returncode == 0 else ""
-    except Exception:  # noqa: BLE001
+    except (subprocess.SubprocessError, OSError, ValueError) as exc:
+        log.debug("branch diff failed (%s): %s", branch, exc)
         return ""
 
 
@@ -232,10 +260,14 @@ def run_edit(task: str, *, repo=None, propose_fn=None, diff_fn=None,
     if not task:
         return {"ran": False, "error": "empty edit request"}
     repo = Path(repo) if repo else REPO_DIR
-    from utah import selfcode
-
-    if not selfcode.enabled():
-        return {"ran": False, "error": "kill switch — self-coding disabled"}
+    try:
+        from utah import selfcode
+        if not selfcode.enabled():
+            return {"ran": False, "error": "kill switch — self-coding disabled"}
+    except Exception as exc:  # noqa: BLE001 — a broken gate check = honest refusal, not a 500
+        log.warning("self-code gate check failed: %s", exc)
+        return {"ran": False, "error": f"self-code gate unavailable: {str(exc)[:200]}",
+                "task": task}
 
     def _default_propose(t: str) -> dict:
         kw: dict = {}
@@ -256,7 +288,10 @@ def run_edit(task: str, *, repo=None, propose_fn=None, diff_fn=None,
         return {"ran": False, "error": str(exc)[:300], "task": task}
     shaped = shape_result(res)
     if not shaped["diff"]:
-        shaped["diff"] = (diff_fn or (lambda b: _branch_diff(repo, b)))(shaped["branch"])[:6000]
+        try:
+            shaped["diff"] = (diff_fn or (lambda b: _branch_diff(repo, b)))(shaped["branch"])[:6000]
+        except Exception as exc:  # noqa: BLE001 — diff is a bonus, never the gate
+            log.debug("diff fallback failed: %s", exc)
     return shaped
 
 

@@ -177,3 +177,178 @@ def test_history_shows_the_conversation_newest_last():
     assert lines[0].startswith("[2026-06-10 09:40")               # oldest first
     assert lines[-1].startswith("[2026-06-10 09:45")              # newest last
     assert "Q: hi" in out
+
+
+# --- hardening: findings self-heal harvest seam ---------------------------------------------
+
+def test_findings_selfheal_harvest_seam_is_wired():
+    """run_fast must thread harvest_fn through so the self-heal refresh is provable."""
+    calls = []
+    pending = [("selfheal", "fix the wcfeed pgrep heal path", {"ts": 1})]
+    out = console.run_fast("findings", pending_fn=lambda: pending,
+                           harvest_fn=lambda: calls.append(1))["output"]
+    assert calls == [1]
+    assert "[1] (selfheal)" in out
+
+
+def test_findings_default_harvest_actually_runs(monkeypatch):
+    """The production path must call sica_discover.harvest_failure_findings (the
+    self-heal refresh documented in the command) — not skip it silently."""
+    from utah import sica_discover
+    calls = []
+    monkeypatch.setattr(sica_discover, "harvest_failure_findings",
+                        lambda **k: calls.append(1) or {})
+    monkeypatch.setattr(sica_discover, "pending_findings", lambda **k: [])
+    out = console.run_fast("findings")["output"]
+    assert calls == [1]
+    assert "No pending" in out
+
+
+def test_findings_injected_pending_stays_hermetic(monkeypatch):
+    """An injected pending_fn (a test double) must NOT trigger the real harvest."""
+    from utah import sica_discover
+
+    def boom(**k):
+        raise AssertionError("real harvest must not run under an injected pending_fn")
+
+    monkeypatch.setattr(sica_discover, "harvest_failure_findings", boom)
+    out = console.run_fast("findings", pending_fn=lambda: [])["output"]
+    assert "No pending" in out
+
+
+def test_findings_harvest_crash_never_hides_findings():
+    def boom():
+        raise RuntimeError("failure feed down")
+    out = console.run_fast("findings", pending_fn=lambda: [("a", "task", {})],
+                           harvest_fn=boom)["output"]
+    assert "[1] (a)" in out
+
+
+def test_findings_source_failure_is_honest():
+    def boom():
+        raise RuntimeError("disk gone")
+    out = console.run_fast("findings", pending_fn=boom)["output"]
+    assert "unavailable" in out and "RuntimeError" in out
+
+
+def test_findings_malformed_record_never_raises():
+    out = console.run_fast("findings", pending_fn=lambda: [("d", None, {})])["output"]
+    assert "[1] (d)" in out                                       # None task renders empty
+
+
+# --- hardening: renderers never raise on degenerate rows -------------------------------------
+
+def test_goals_renders_safe_on_missing_pct():
+    gs = [{"name": "X", "pct": None, "detail": "no pct yet"}]
+    out = console.run_fast("goals", goals_fn=lambda: gs)["output"]
+    assert "0%" in out
+
+
+def test_goals_renders_clamped_on_overflow_pct():
+    gs = [{"name": "X", "pct": 250, "detail": "over"}]
+    out = console.run_fast("goals", goals_fn=lambda: gs)["output"]
+    assert "100%" in out                                          # clamped, never a 250% bar
+    assert "250%" not in out
+
+
+def test_cycles_renders_honest_on_non_dict_row():
+    out = console.run_fast("cycles", cycles_fn=lambda n: ["not-a-dict"])["output"]
+    assert "unavailable" in out
+
+
+# --- hardening: /history default DB boundary is bounded --------------------------------------
+
+def test_history_default_db_read_is_bounded(monkeypatch):
+    import sys
+    import types
+    seen = {}
+    fake = types.ModuleType("psycopg")
+
+    def connect(dsn, **kw):
+        seen.update(kw)
+        raise RuntimeError("no db in unit tests")
+
+    fake.connect = connect
+    monkeypatch.setitem(sys.modules, "psycopg", fake)
+    out = console.run_fast("history", "3")["output"]
+    assert "history unavailable" in out                           # honest degradation
+    assert seen.get("connect_timeout"), "DB connect must carry a real timeout"
+    assert "statement_timeout" in seen.get("options", ""), \
+        "the SELECT itself must be bounded, not just the connect"
+
+
+# --- hardening: run_claude_streamed (real subprocess boundary) --------------------------------
+
+import json as _json  # noqa: E402
+import subprocess as _sp  # noqa: E402
+import time as _time  # noqa: E402
+
+
+def _fake_claude(tmp_path, body: str) -> str:
+    p = tmp_path / "fakeclaude.sh"
+    p.write_text("#!/bin/sh\n" + body)
+    p.chmod(0o755)
+    return str(p)
+
+
+def test_run_claude_streamed_happy_path(tmp_path):
+    evt = _json.dumps({"type": "stream_event", "event": {
+        "type": "content_block_delta", "delta": {"type": "text_delta", "text": "done"}}})
+    stop = _json.dumps({"type": "stream_event", "event": {"type": "content_block_stop"}})
+    body = f"cat >/dev/null\necho '{evt}'\necho '{stop}'\n"
+    lines: list[str] = []
+    console.run_claude_streamed("task", cwd=str(tmp_path), on_line=lines.append,
+                                timeout=15.0, brain_cmd=_fake_claude(tmp_path, body))
+    assert lines == ["done"]
+
+
+def test_run_claude_streamed_nonzero_exit_raises_with_stderr(tmp_path):
+    body = "cat >/dev/null\necho 'boom detail' >&2\nexit 3\n"
+    import pytest
+    with pytest.raises(RuntimeError) as ei:
+        console.run_claude_streamed("task", cwd=str(tmp_path), on_line=lambda l: None,
+                                    timeout=15.0, brain_cmd=_fake_claude(tmp_path, body))
+    assert "3" in str(ei.value) and "boom detail" in str(ei.value)
+
+
+def test_run_claude_streamed_missing_binary_is_runtime_error(tmp_path):
+    import pytest
+    with pytest.raises(RuntimeError):
+        console.run_claude_streamed("task", cwd=str(tmp_path), on_line=lambda l: None,
+                                    timeout=5.0, brain_cmd=str(tmp_path / "no-such-claude"))
+
+
+def test_run_claude_streamed_silent_child_times_out(tmp_path):
+    """A child that produces NO output must still hit the timeout (a blocked readline
+    never reaches an in-loop deadline check) — and be killed, not awaited to term."""
+    import pytest
+    body = "sleep 5\n"
+    t0 = _time.monotonic()
+    with pytest.raises(_sp.TimeoutExpired):
+        console.run_claude_streamed("task", cwd=str(tmp_path), on_line=lambda l: None,
+                                    timeout=1.0, brain_cmd=_fake_claude(tmp_path, body))
+    assert _time.monotonic() - t0 < 4.0, "child must be killed at the deadline"
+
+
+def test_run_claude_streamed_stderr_flood_never_deadlocks(tmp_path):
+    """>64KB of stderr fills an undrained PIPE and deadlocks the child — the boundary
+    must drain stderr concurrently."""
+    body = ("cat >/dev/null\n"
+            "i=0\nwhile [ $i -lt 4000 ]; do\n"
+            "  echo 'xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx' >&2\n"
+            "  i=$((i+1))\ndone\nexit 0\n")
+    console.run_claude_streamed("task", cwd=str(tmp_path), on_line=lambda l: None,
+                                timeout=30.0, brain_cmd=_fake_claude(tmp_path, body))
+
+
+def test_run_claude_streamed_broken_sink_never_kills_run(tmp_path):
+    evt = _json.dumps({"type": "stream_event", "event": {
+        "type": "content_block_delta", "delta": {"type": "text_delta", "text": "hi"}}})
+    stop = _json.dumps({"type": "stream_event", "event": {"type": "content_block_stop"}})
+    body = f"cat >/dev/null\necho '{evt}'\necho '{stop}'\n"
+
+    def bad_sink(line):
+        raise RuntimeError("sink broke")
+
+    console.run_claude_streamed("task", cwd=str(tmp_path), on_line=bad_sink,
+                                timeout=15.0, brain_cmd=_fake_claude(tmp_path, body))
