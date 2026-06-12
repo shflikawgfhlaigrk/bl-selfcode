@@ -209,3 +209,21 @@ def test_csrf_guard_leaves_get_routes_untouched(monkeypatch):
     r = client.get("/status", headers={"Origin": "https://monitor.example"})
     assert r.status_code != 403                  # the guard never blocks a GET
     assert r.status_code == 200                  # and with ctl answering, it serves
+
+
+def test_post_endpoints_reject_oversized_input():
+    """Unbounded POST text is a DoS/abuse surface — every state-changing text
+    endpoint must reject input over the content cap with 413, before doing any work."""
+    from starlette.testclient import TestClient
+
+    from utah import config
+    from utah.interface import web
+
+    client = TestClient(web.build_app())
+    huge = "x" * (config.MAX_CONTENT_CHARS + 1)
+    for path, key in [("/api/tell", "text"), ("/api/console", "line"),
+                      ("/api/selfcode/edit", "text"), ("/api/speak", "text")]:
+        r = client.post(path, json={key: huge}, headers={"Origin": "http://testserver",
+                                                         "Host": "testserver"})
+        assert r.status_code == 413, f"{path} accepted oversized input ({r.status_code})"
+        assert "too large" in r.json().get("error", "").lower()

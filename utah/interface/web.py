@@ -251,6 +251,16 @@ async def api_panel(request):
         return JSONResponse({"error": str(exc)}, status_code=503)
 
 
+def _oversized(text: str) -> JSONResponse | None:
+    """413 for input over the content cap — an unbounded POST body is a DoS/abuse
+    surface, rejected before any brain/console/self-code work begins."""
+    if len(text) > config.MAX_CONTENT_CHARS:
+        return JSONResponse(
+            {"error": f"input too large (max {config.MAX_CONTENT_CHARS} chars)"},
+            status_code=413)
+    return None
+
+
 async def api_tell(request):
     try:
         body = await request.json()
@@ -259,6 +269,8 @@ async def api_tell(request):
     text = str(body.get("text", "")).strip()
     if not text:
         return JSONResponse({"error": "empty text"}, status_code=400)
+    if (err := _oversized(text)):
+        return err
     try:
         result = await ctl.call("tell", {"text": text}, timeout=180.0)
         # Path-B parity: the non-streaming reply must SPEAK the answer too (the
@@ -292,6 +304,8 @@ async def api_speak(request):
     text = str(body.get("text", "")).strip()
     if not text:
         return JSONResponse({"error": "empty text"}, status_code=400)
+    if (err := _oversized(text)):
+        return err
     threading.Thread(target=_speak_answer, args=(text,), daemon=True).start()
     return JSONResponse({"speaking": True, "chars": len(text)})
 
@@ -411,6 +425,8 @@ async def api_selfcode_edit(request):
     text = str(body.get("text", "")).strip()
     if not text:
         return JSONResponse({"error": "empty edit request"}, status_code=400)
+    if (err := _oversized(text)):
+        return err
     job = _enqueue_job(text)
     threading.Thread(target=_run_edit_job, args=(job["id"], text), daemon=True).start()
     return JSONResponse({"job": job["id"], "status": "queued", "task": text})
@@ -440,6 +456,8 @@ async def api_console(request):
     except Exception:  # noqa: BLE001
         body = {}
     line = str(body.get("line", body.get("text", ""))).strip()
+    if (err := _oversized(line)):
+        return err
     from utah.product import console as con
 
     cmd, arg = con.parse(line)
