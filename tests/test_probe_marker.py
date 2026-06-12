@@ -42,6 +42,17 @@ def test_docstring_is_nonempty_and_at_least_10_chars():
     assert len(mod.__doc__.strip()) >= 10
 
 
+def test_defines_nonempty_module_level_doc_string():
+    """``__doc__`` itself must be a non-empty ``str`` on a fresh import.
+    The checks above test truthiness, length, or read through ``vars(mod)``
+    on a possibly-cached module; this one pins the type and non-emptiness of
+    the attribute directly after a forced re-import."""
+    sys.modules.pop("utah._probe_marker", None)
+    mod = importlib.import_module("utah._probe_marker")
+    assert isinstance(mod.__doc__, str)
+    assert mod.__doc__.strip() != ""
+
+
 def test_source_has_module_level_docstring():
     """The docstring must be a literal first statement in the source file,
     not merely a ``__doc__`` attribute set at import time — the file has been
