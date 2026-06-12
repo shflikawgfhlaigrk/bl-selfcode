@@ -20,7 +20,7 @@ from collections import deque
 from typing import Iterator
 
 from utah import brain, config, failures, local, memory, router, social
-from utah.brain import BrainUnavailable
+from utah.brain import BrainRateLimited, BrainUnavailable
 from utah.embed import EmbedError
 from utah.memory import AdmissionDenied, MemoryUnavailable
 from utah.objects import Reply, ReplySource
@@ -304,6 +304,10 @@ def _stream_brain_buffered(
                 parts.append(chunk)
             else:
                 yield (channel, chunk)
+    except BrainRateLimited as exc:
+        log.warning("brain rate-limited: %s", exc)
+        failures.record("brain", "rate_limited", str(exc))
+        return ""
     except BrainUnavailable as exc:
         log.error("brain unavailable: %s", exc)
         failures.record("brain", "unavailable", str(exc))
@@ -405,6 +409,14 @@ def tell(text: str, *, persist: bool = True) -> Reply:
     # 4. REASON: Claude CLI brain, grounded in the conversation thread + recall.
     try:
         reply_text = brain.think(text, context)
+    except BrainRateLimited as exc:
+        # A subscription limit is TRANSIENT and expected (shared Claude plan), not an
+        # outage — record it as such so the AUDIT panel/alerts don't read a routine
+        # rate-limit as system breakage, and tell Michael honestly when it clears.
+        log.warning("brain rate-limited: %s", exc)
+        failures.record("brain", "rate_limited", str(exc))
+        return Reply(text=f"My reasoning brain is rate-limited right now ({exc}).",
+                     source=ReplySource.UNAVAILABLE, hits=hits)
     except BrainUnavailable as exc:
         log.error("brain unavailable: %s", exc)
         failures.record("brain", "unavailable", str(exc))

@@ -156,6 +156,34 @@ class BrainUnavailable(UtahError):
     """The Claude CLI could not produce a response (not an 'I don't know')."""
 
 
+class BrainRateLimited(BrainUnavailable):
+    """A TRANSIENT subscription limit — the brain shells out to the ``claude`` CLI,
+    which shares Michael's plan, so a session-limit hit fails every brain call until
+    it resets. A subclass of :class:`BrainUnavailable` so every existing
+    ``except BrainUnavailable`` still catches it, but distinguishable so callers can
+    report it honestly (rate-limited until <when>) instead of as a system outage."""
+
+
+#: The Claude CLI's exit-1 body when the plan's session limit is hit, captured verbatim
+#: from the live failure log: ``You've hit your session limit · resets 12pm (America/Chicago)``.
+_RATE_LIMIT_SIG = re.compile(r"session limit|rate.?limit", re.IGNORECASE)
+_RATE_LIMIT_RESET = re.compile(r"resets?\s+(?P<when>[^\n]+?)\s*$", re.IGNORECASE)
+
+
+def classify_brain_error(detail: str) -> BrainUnavailable:
+    """Map a brain failure *detail* to the right exception: a session-limit body →
+    :class:`BrainRateLimited` (honest, with the reset window when present); anything
+    else → plain :class:`BrainUnavailable`."""
+    text = detail or ""
+    if _RATE_LIMIT_SIG.search(text):
+        m = _RATE_LIMIT_RESET.search(text)
+        when = (m.group("when").strip() if m else "")
+        suffix = f" — resets {when}" if when else ""
+        return BrainRateLimited(
+            f"brain rate-limited (Claude subscription){suffix}; transient, not a system fault")
+    return BrainUnavailable(text)
+
+
 class Runner(Protocol):
     """The subprocess boundary: argv + timeout -> stdout text."""
 
@@ -178,9 +206,8 @@ def _subprocess_runner(argv: Sequence[str], timeout: int) -> str:
         raise BrainUnavailable(f"brain could not start: {exc}") from exc
     if proc.returncode != 0:
         detail = (proc.stderr or proc.stdout or "").strip()[-500:]
-        raise BrainUnavailable(
-            f"brain exited {proc.returncode}: {detail or 'no output'}"
-        )
+        raise classify_brain_error(
+            f"brain exited {proc.returncode}: {detail or 'no output'}")
     return proc.stdout or ""
 
 
@@ -281,7 +308,7 @@ def _subprocess_stream_runner(argv: Sequence[str], timeout: int) -> Iterator[str
         rc = proc.wait()
     if rc:
         detail = (proc.stderr.read() if proc.stderr else "").strip()[-500:]
-        raise BrainUnavailable(f"brain exited {rc}: {detail or 'no output'}")
+        raise classify_brain_error(f"brain exited {rc}: {detail or 'no output'}")
 
 
 _stream_runner: Callable[[Sequence[str], int], Iterator[str]] = _subprocess_stream_runner
