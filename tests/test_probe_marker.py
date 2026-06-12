@@ -64,3 +64,20 @@ def test_module_lives_inside_the_utah_package():
     source = Path(mod.__file__)
     assert source.name == "_probe_marker.py"
     assert source.parent.name == "utah"
+
+
+def test_exposes_a_constant_when_imported_via_importlib():
+    """The module must expose a callable or constant once importlib loads it.
+    Its inertness contract (``test_module_is_inert``) forbids public callables,
+    so the exposure is the docstring: a string constant bound to ``__doc__``
+    by the literal first statement of the file — not a function masquerading
+    as documentation, and not None as it would be for a bare empty file."""
+    sys.modules.pop("utah._probe_marker", None)
+    mod = importlib.import_module("utah._probe_marker")
+    assert any(
+        callable(value) or isinstance(value, (str, bytes, int, float, complex))
+        for value in vars(mod).values()
+    )
+    doc = vars(mod)["__doc__"]
+    assert isinstance(doc, str) and doc.strip()
+    assert not callable(doc)
