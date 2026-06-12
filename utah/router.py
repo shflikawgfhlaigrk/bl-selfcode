@@ -26,6 +26,9 @@ class Route(enum.Enum):
     BRIEF = "brief"              # the morning-brief capability (live Postgres state)
     WEATHER = "weather"          # the weather capability (free API + cache)
     TIME = "time"                # the clock capability (time/date, grounded)
+    ACTION = "action"            # a COMMAND to RUN a capability (rerun leads/outreach/etc.)
+    LEADS = "leads"              # live lead/pipeline/probate counts (grounded Postgres)
+    NEWS = "news"                # recent headlines on a topic (researcher-backed, grounded)
     KNOWLEDGE = "knowledge"      # a curated knowledge pack, verbatim (no model)
     LOCAL_QUICK = "local_quick"  # llama3.2:3b — fast instruct, the trivially-fast lane
     LOCAL_HEAVY = "local_heavy"  # deepseek-r1:32b — RETIRED from routing (~54GB resident);
@@ -59,6 +62,33 @@ _TIME = re.compile(
     r"\b(what'?s the (time|date)|what time is it|current time|the time right now|"
     r"what day is it|what'?s today'?s? (date|day)?|today'?s date|day of the week|"
     r"what'?s the day)\b",
+    re.I,
+)
+#: Live lead / pipeline / probate COUNT questions — answered from the ledger, never the
+#: free-generating brain (which fabricated "500+0+0=721"). Scoped to count-intent so a
+#: stray "what leads to X" verb does not hijack the capability.
+_LEADS = re.compile(
+    r"\blead[_\s-]?scout\b|"
+    r"\b(how many|number of|count of|total|the)\s+(leads?|prospects?|probate)\b|"
+    r"\b(leads?|prospects?|probate)\s+(count|counts|today|so far|this week|breakdown|split|pipeline)\b|"
+    r"\b(today'?s|new|fresh|how many)\s+leads?\b|"
+    r"\blead counts?\b|\bpipeline\b|"
+    r"\bprobate\s+(cases?|offers?|count|filings?)\b",
+    re.I,
+)
+
+#: News/headlines intent — "news about X", "latest news on X", "what's happening
+#: with X", "the headlines". Answered by the researcher-backed news capability
+#: (real web fetch + grounded extraction), never a model inventing headlines.
+#: Bare "headline(s)" deliberately needs a news-y qualifier ("the/today's/latest
+#: headlines", "headlines for X") so "rewrite that headline" stays a normal turn.
+_NEWS = re.compile(
+    r"\bnews\s+(?:about|on|for|regarding)\b|"
+    r"\b(?:latest|recent|any|today'?s)\s+news\b|"
+    r"\bwhat'?s\s+(?:in\s+the\s+news|the\s+news)\b|"
+    r"\bwhat(?:'?s|\s+is)\s+happening\s+with\b|"
+    r"\b(?:the|today'?s|latest|morning|any)\s+headlines\b|"
+    r"\bheadlines\s+(?:for|on|about|from)\b",
     re.I,
 )
 
@@ -113,6 +143,15 @@ def is_factual_recall(text: str) -> bool:
     return bool(_FACTUAL_RECALL.search(text or ""))
 
 
+def is_self_or_project(text: str) -> bool:
+    """True for a self/project/identity question ("who are you", "what can you do",
+    "what is Project Utah"). :mod:`utah.core` uses this to inject the live
+    introspection self-model (:func:`utah.introspect.self_model`) as grounding facts
+    on the brain pass — the answer comes from REAL daemon/memory state, never
+    parametric guesswork."""
+    return bool(_SELF_OR_PROJECT.search(text or ""))
+
+
 def route(text: str) -> Route:
     """Map a turn to the cheapest tier that can answer it."""
     t = (text or "").strip()
@@ -127,14 +166,36 @@ def route(text: str) -> Route:
         return Route.SOCIAL
     if _ASK_CLAUDE.search(t):
         return Route.BRAIN
+    # A COMMAND to RUN a capability ("rerun the leads", "run outreach", "rerun probate",
+    # "run the engines"). BEFORE _AGENTIC (so the generic "run"/"execute" verb doesn't get
+    # swallowed into the brain) and BEFORE _LEADS (the bug: "rerun the lead scout" matched
+    # the LEADS *read* capability and only reported counts — now it executes). A question
+    # ("how many leads") has no run verb → is_action is False → falls through to the read.
+    from utah import actions
+
+    if actions.is_action(t):
+        return Route.ACTION
     if _AGENTIC.search(t):
         return Route.BRAIN
     if _WEATHER.search(t):
         return Route.WEATHER
+    # Lead/pipeline counts → grounded ledger capability. BEFORE _TIME (so "today's lead
+    # count" isn't swallowed by the today's-date matcher) and BEFORE _FACTUAL_RECALL (so
+    # "how many leads" hits real Postgres, not the brain that invented "500+0+0=721").
+    if _LEADS.search(t):
+        return Route.LEADS
     if _TIME.search(t):
         return Route.TIME
     if _BRIEF.search(t):
         return Route.BRIEF
+    # News/headlines intent → the researcher-backed news capability (real web fetch +
+    # grounded extraction), never a model inventing headlines. After WEATHER/LEADS/
+    # TIME/BRIEF so the grounded capabilities keep winning ("what happened overnight"
+    # stays BRIEF; "what's happening with the pipeline" stays LEADS); before the
+    # knowledge/factual-recall checks so "latest news on the super bowl" pulls the
+    # real, CURRENT web instead of a cold brain recall.
+    if _NEWS.search(t):
+        return Route.NEWS
     # Curated knowledge packs answer verbatim — never a model (which hallucinates
     # them). Checked before reasoning/local so "explain Douglas's rules" stays exact.
     from utah.knowledge import douglas

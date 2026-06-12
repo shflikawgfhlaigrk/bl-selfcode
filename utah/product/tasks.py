@@ -5,6 +5,7 @@ against a ``tasks`` table in the same Postgres cluster (no SQLite). Real, ungate
 """
 from __future__ import annotations
 
+import contextlib
 import logging
 
 import psycopg
@@ -28,9 +29,19 @@ class TasksError(UtahError):
     """The tasks store could not be reached."""
 
 
+@contextlib.contextmanager
 def _conn():
+    """An autocommit connection from the shared per-DSN pool (:mod:`utah.db_pool`) —
+    the same pool the failure store rides, so every checkout is BOUNDED
+    (``connect_timeout=DB_CONNECT_TIMEOUT``, checkout capped at ``DB_POOL_TIMEOUT``).
+    The previous fresh ``psycopg.connect`` per call had NO connect timeout: a stalled
+    Postgres hung the tasks panel forever. Any psycopg failure (checkout timeout, dead
+    cluster, query error) surfaces as :class:`TasksError`."""
+    from utah import db_pool
+
     try:
-        return psycopg.connect(config.DB_DSN, autocommit=True)
+        with db_pool.get_pool(config.DB_DSN).connection() as c:
+            yield c
     except psycopg.Error as exc:
         raise TasksError(f"tasks store unreachable: {exc}") from exc
 
@@ -65,7 +76,8 @@ def done(task_id: int) -> bool:
             "UPDATE tasks SET status='done', done_ts=now() WHERE id=%s AND status<>'done'",
             (task_id,),
         )
-    return (cur.rowcount or 0) > 0
+        changed = (cur.rowcount or 0) > 0    # read INSIDE the checkout (pooled conns reset on return)
+    return changed
 
 
 __all__ = ["init_schema", "add", "list_tasks", "done", "TasksError"]

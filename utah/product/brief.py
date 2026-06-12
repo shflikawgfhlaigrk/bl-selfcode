@@ -35,7 +35,8 @@ def _brief_recipient() -> str:
 
 def compose_brief(*, ledger_counts: dict, memory_live: int,
                   failures_recent: list, leads_recent: list,
-                  probate_top: list | None = None) -> str:
+                  probate_top: list | None = None,
+                  leads_week: list | None = None) -> str:
     """A grounded brief from live state. All numbers are real; nothing invented."""
     lc = ledger_counts or {}
     lines = ["UTAH MORNING BRIEF", ""]
@@ -44,6 +45,10 @@ def compose_brief(*, ledger_counts: dict, memory_live: int,
         f"{lc.get('outreach_ledger', 0)} outreach queued, {lc.get('fires', 0)} engine fires."
     )
     lines.append(f"Memory: {memory_live} live facts grounding the brain.")
+    if leads_week:
+        total = sum(r.get("n", 0) for r in leads_week)
+        tops = ", ".join(f"{r.get('region')} ({r.get('n')})" for r in leads_week[:3])
+        lines.append(f"Last 7 days: {total} new leads — top regions: {tops}.")
     if probate_top:
         # The property intel Michael never received (2026-06-10): top resolved estates.
         lines.append("Real estate — top resolved probate properties (county ARV):")
@@ -75,6 +80,7 @@ def gather() -> dict:
         "failures_recent": failures.recent(8),
         "leads_recent": lg.recent("leads", 3),
         "probate_top": _probate_top(),
+        "leads_week": _leads_week_rollup(),
     }
 
 
@@ -95,6 +101,25 @@ def _probate_top(limit: int = 5) -> list[dict]:
                 for c, co, a, ad, avg in rows]
     except Exception:  # noqa: BLE001 — store down: brief still ships without the section
         return []
+
+
+def _leads_week_rollup(limit: int = 5, *, query_fn=None) -> list[dict]:
+    """Leads added per region over the last 7 days — the brief's one analytic, run on
+    the OLAP tier (DuckDB over the attached read-only primary) where rollups belong.
+    Best-effort: an unreachable OLAP tier costs the brief one line, never the brief."""
+    from utah.store import olap
+
+    q = query_fn or olap.query
+    try:
+        rows = q(
+            "SELECT region, count(*) AS n FROM pg.public.leads "
+            f"WHERE ts > now() - INTERVAL 7 DAY GROUP BY region ORDER BY n DESC LIMIT {int(limit)}",
+            timeout_s=30,
+        )
+    except olap.OlapError as exc:
+        log.debug("brief leads rollup skipped (OLAP tier down): %s", exc)
+        return []
+    return [{"region": r[0], "n": int(r[1])} for r in rows]
 
 
 def run(*, gather=gather, speak_fn=None, email_fn=None, can_email=False,

@@ -95,3 +95,35 @@ def test_compose_brief_omits_3mile_average_when_gated():
                       "arv": 913400, "address": "434 THUNDER ROAD"}],
     )
     assert "3mi avg" not in text                       # gated county: no fabricated number
+
+
+def test_compose_brief_shows_week_rollup_when_present():
+    text = brief.compose_brief(
+        ledger_counts={}, memory_live=0, failures_recent=[], leads_recent=[],
+        leads_week=[{"region": "atlanta", "n": 12}, {"region": "macon", "n": 9}])
+    assert "Last 7 days: 21 new leads" in text
+    assert "atlanta (12)" in text and "macon (9)" in text
+
+
+def test_compose_brief_omits_week_rollup_when_unavailable():
+    text = brief.compose_brief(
+        ledger_counts={}, memory_live=0, failures_recent=[], leads_recent=[],
+        leads_week=[])
+    assert "Last 7 days" not in text
+
+
+def test_leads_week_rollup_rides_the_olap_tier():
+    seen = {}
+    def fake_query(sql, **kw):
+        seen["sql"] = sql
+        return [("atlanta", 12), ("macon", 9)]
+    rows = brief._leads_week_rollup(query_fn=fake_query)
+    assert rows == [{"region": "atlanta", "n": 12}, {"region": "macon", "n": 9}]
+    assert "pg.public.leads" in seen["sql"]  # the analytic reads the attached primary
+
+
+def test_leads_week_rollup_degrades_honestly_when_olap_down():
+    from utah.store import olap
+    def boom(sql, **kw):
+        raise olap.OlapError("attach failed")
+    assert brief._leads_week_rollup(query_fn=boom) == []

@@ -151,15 +151,19 @@ def _mirror_desktop(title: str, message: str, *, priority: int) -> None:
 
     iPhone lock-screen alerts can show "error decrypting" even with E2E disabled — that's
     Apple's per-device payload encryption + a broken Pushover NSE, not Utah's send path.
-    High-priority streams also ping the Mac so breakage still surfaces in plain text."""
+    High-priority streams also ping the Mac so breakage still surfaces in plain text.
+    The non-push channel rides the courier (the one delivery router); the perms
+    pre-check stays so a mirror on an ungranted Mac never records a gated failure."""
     if priority < 1:
         return
     try:
+        from utah import courier
         from utah.integrations import notify
         if notify.perms_available():
-            notify.notify(message, title=title.replace("⚠️ ", "").replace("📈 ", ""))
-    except Exception:  # noqa: BLE001 — mirror must never block the phone push
-        pass
+            courier.deliver(message, via="notify",
+                            subject=title.replace("⚠️ ", "").replace("📈 ", ""))
+    except Exception as exc:  # noqa: BLE001 — mirror must never block the phone push
+        log.debug("desktop mirror swallowed: %s", exc, exc_info=True)
 
 
 def _send(stream: str, message: str, *, title: str, target: str | None = None,
@@ -182,10 +186,18 @@ def _send(stream: str, message: str, *, title: str, target: str | None = None,
             return {"sent": False, "gated": True, "reason": "trade_budget"}
         push = sender if sender is not None else _SENDER
         if push is None:
-            from utah.integrations import pushover
-            push = pushover.send
-        result = push(message, title=title, priority=priority, target=target,
-                      url=url, url_title=url_title)
+            # The live default transport (daemon + crons inject nothing) rides the
+            # courier — the one delivery router — instead of hand-picking pushover
+            # here. Courier inherits the channel's honest gate (no creds => gated,
+            # never fakes). An injected sender still bypasses it: the _SENDER seam
+            # is how the whole suite runs with zero network and zero real pushes.
+            from utah import courier
+            result = courier.deliver(message, via="push", subject=title,
+                                     priority=priority, target=target,
+                                     url=url, url_title=url_title)
+        else:
+            result = push(message, title=title, priority=priority, target=target,
+                          url=url, url_title=url_title)
         if result.get("sent"):
             _mirror_desktop(title, message, priority=priority)
         return result

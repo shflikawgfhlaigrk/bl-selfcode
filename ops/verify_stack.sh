@@ -86,6 +86,23 @@ fi
 echo "  olap wired in code:"
 grep -rn "store\.olap\|from utah\.store import olap\|olap\.query" "$REPO/utah" \
   --include='*.py' 2>/dev/null | sed 's/^/    /' || echo "    (none — olap.py stranded)"
+# Real round-trip, not just a grep: ATTACH the live primary READ-ONLY through
+# utah.store.olap and count a real table. Bounded (connect_timeout on the DSN,
+# 30s watchdog) so a stalled primary FAILs this line instead of hanging the sweep.
+echo "  olap real round-trip (runtime venv, read-only ATTACH, bounded):"
+if [ -x "$RT" ]; then
+  if out=$(PYTHONPATH="$REPO" "$RT" -c "
+from utah.store import olap
+rows = olap.query('SELECT count(*) FROM pg.public.leads', dsn='$DSN', timeout_s=30)
+print(rows[0][0])
+" 2>&1); then
+    yes "olap.query leads count: $out"
+  else
+    nob "olap round-trip failed: $(printf '%s\n' "$out" | tail -1)"
+  fi
+else
+  nob "runtime venv missing — olap round-trip skipped"
+fi
 
 hdr "SQLite retired"
 echo "  *.db under ~/.utah and repo (maxdepth 3):"

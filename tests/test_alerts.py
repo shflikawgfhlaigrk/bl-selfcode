@@ -157,6 +157,77 @@ def test_courier_push_routes_to_sender():
     assert sent["m"] == "ping" and sent["title"] == "Hi" and sent["priority"] == 1
 
 
+# --- courier IS the live transport (deleting courier.py kills every page) -------
+
+def test_default_transport_routes_through_courier(monkeypatch):
+    """With no injected sender (the live daemon/cron shape), _send hands delivery to
+    courier.deliver — the one channel router — instead of hand-picking pushover.
+    The injectable _SENDER seam is untouched: an injected sender still bypasses."""
+    monkeypatch.setattr(alerts, "_now", lambda: datetime(2026, 6, 7, 12, 0, 0))
+    routed = []
+
+    def fake_deliver(message, *, via, subject="Utah", priority=0, target=None,
+                     url=None, url_title=None, **kw):
+        routed.append({"message": message, "via": via, "subject": subject,
+                       "priority": priority, "url": url, "url_title": url_title})
+        return {"via": via, "sent": True, "gated": False}
+
+    monkeypatch.setattr(courier, "deliver", fake_deliver)
+    monkeypatch.setattr(alerts, "_mirror_desktop", lambda *a, **k: None)
+    alerts.set_sender(None)                      # the live shape: no injected sender
+    r = alerts.critical("watchdog", "daemon down", key="courier-live-path")
+    assert r["sent"] is True
+    assert routed and routed[0]["via"] == "push" and routed[0]["priority"] == 2
+    assert "daemon down" in routed[0]["message"]
+
+
+def test_courier_routed_brief_keeps_deck_link(monkeypatch):
+    """The brief's deck tap-through survives the courier hop on the live path."""
+    monkeypatch.setattr(alerts, "_now", lambda: datetime(2026, 6, 7, 12, 0, 0))
+    routed = []
+    monkeypatch.setattr(courier, "deliver",
+                        lambda m, **k: routed.append({"message": m, **k})
+                        or {"via": k.get("via"), "sent": True, "gated": False})
+    alerts.set_sender(None)
+    r = alerts.brief("UTAH MORNING BRIEF\n164 leads")
+    assert r["sent"] is True
+    assert routed[0]["via"] == "push" and routed[0]["url"] == config.DECK_TAILNET_URL
+
+
+def test_injected_sender_still_bypasses_courier(monkeypatch):
+    """The _SENDER seam exists so the suite never pushes for real — an injected
+    sender must keep bypassing courier entirely (no double delivery)."""
+    def boom(*a, **k):
+        raise AssertionError("courier must not be consulted when a sender is injected")
+    monkeypatch.setattr(courier, "deliver", boom)
+    s = _capture()
+    r = alerts.critical("watchdog", "daemon down", key="sender-bypass", sender=s)
+    assert r["sent"] is True and len(s.calls) == 1
+
+
+def test_desktop_mirror_routes_through_courier(monkeypatch):
+    """The high-priority desktop mirror (the non-push channel) also rides courier —
+    with the perms gate intact and the emoji-cleaned title preserved."""
+    from utah.integrations import notify
+    monkeypatch.setattr(notify, "perms_available", lambda: True)
+    calls = []
+    monkeypatch.setattr(courier, "deliver",
+                        lambda m, **k: calls.append({"message": m, **k})
+                        or {"via": k.get("via"), "sent": True, "gated": False})
+    alerts._mirror_desktop("⚠️ Utah CRITICAL", "daemon down", priority=2)
+    assert calls and calls[0]["via"] == "notify"
+    assert calls[0]["subject"] == "Utah CRITICAL"        # emoji stripped, title kept
+
+
+def test_desktop_mirror_still_gated_on_perms(monkeypatch):
+    from utah.integrations import notify
+    monkeypatch.setattr(notify, "perms_available", lambda: False)
+    def boom(*a, **k):
+        raise AssertionError("no perms => the mirror must not deliver")
+    monkeypatch.setattr(courier, "deliver", boom)
+    alerts._mirror_desktop("⚠️ Utah CRITICAL", "daemon down", priority=2)  # no raise
+
+
 # ── storm-proofing (2026-06-10 "why the fuck do i have hundreds of trade
 # notifications"): durable dedup, trade TTL, hourly page budget ────────────────
 

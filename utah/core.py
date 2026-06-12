@@ -45,15 +45,51 @@ def _conversation_context() -> str:
     return "\n".join(f"Michael: {q}\nAce: {a}" for q, a in _CONVO)
 
 
-def _build_context(hits: list, web: str = "") -> str:
-    """Brain context = core identity facts + conversation thread + freshly fetched web
-    text + recalled memory. ``web`` (the just-fetched page text from a learn-on-miss)
-    is injected as its own labelled block so the retry grounds on the real source text
-    in ONE pass — no per-source extraction round-trips, which is the latency win."""
+def _self_model_facts(self_model=None) -> str:
+    """Utah's live self-model (:func:`utah.introspect.self_model`) rendered as grounding
+    bullet facts for a self/project question — the brain answers "what are you / what can
+    you do" from REAL daemon + memory state, never parametric guesswork. ``self_model``
+    is injectable (defaults to the live introspect call). Never raises; a failed
+    introspection degrades HONESTLY to an explicit "self-model unavailable" line (logged
+    + documented) so the brain knows the live state is missing — it is never silently
+    dropped."""
+    if self_model is None:
+        from utah import introspect
+
+        self_model = introspect.self_model
+    try:
+        m = self_model() or {}
+    except Exception as exc:  # noqa: BLE001 — grounding must never break a reply
+        log.warning("introspect self-model unavailable for grounding: %s", exc)
+        failures.record("introspect", "self_model_failed", str(exc))
+        return "- live self-model unavailable right now (introspection failed)"
+    mem_counts = m.get("memory") or {}
+    mem_line = ", ".join(f"{k}={v}" for k, v in mem_counts.items()) or "counts unavailable"
+    return "\n".join([
+        f"- {m.get('identity', 'Utah')}",
+        f"- Capabilities ({m.get('capability_count', 0)}): "
+        + ", ".join(m.get("capabilities", [])),
+        f"- Daemon: {'up' if m.get('daemon_up') else 'DOWN (status unreachable)'}",
+        f"- Memory: {mem_line}",
+    ])
+
+
+def _build_context(hits: list, web: str = "", *, text: str = "") -> str:
+    """Brain context = core identity facts + (for a self/project question) the live
+    introspection self-model + conversation thread + freshly fetched web text + recalled
+    memory. ``web`` (the just-fetched page text from a learn-on-miss) is injected as its
+    own labelled block so the retry grounds on the real source text in ONE pass — no
+    per-source extraction round-trips, which is the latency win. ``text`` is the question
+    being answered: when it is a self/project turn (router.is_self_or_project), the
+    self-model block grounds "who/what are you" in real daemon + memory state."""
     parts: list[str] = []
     core = memory.core_recall()
     if core:
         parts.append("CORE (always true):\n" + "\n".join(f"- {h.content}" for h in core))
+    if text and router.is_self_or_project(text):
+        parts.append(
+            "YOUR LIVE SELF-MODEL (introspection — real daemon/memory state):\n"
+            + _self_model_facts())
     convo = _conversation_context()
     if convo:
         parts.append("RECENT CONVERSATION:\n" + convo)
@@ -115,6 +151,29 @@ def _capability_reply(text: str, route: Route, hits: list) -> Reply | None:
         brief_text = (brief.run(speak_fn=None, can_email=False) or {}).get("brief") or ""
         if brief_text:
             return Reply(text=brief_text, source=ReplySource.CAPABILITY, hits=hits)
+    if route is Route.ACTION:
+        # A COMMAND that RUNS a real capability (rerun leads/outreach/probate/engines/
+        # research) and reports the REAL returned numbers — never a fabricated "done".
+        # Data-populating actions fire immediately; the SEND action runs inside the
+        # code's own CAN-SPAM / business-hours / deliverability send-gates. Surfaced as a
+        # grounded CAPABILITY reply (real numbers, live state) — not stored as a durable
+        # turn (the counts go stale, same as the other capability replies).
+        from utah import actions
+
+        return Reply(text=actions.run(text), source=ReplySource.CAPABILITY, hits=hits)
+    if route is Route.LEADS:
+        from utah.product import leads_status
+
+        return Reply(text=leads_status.answer(text), source=ReplySource.CAPABILITY, hits=hits)
+    if route is Route.NEWS:
+        # A news/headlines question → the researcher-backed news capability (real DDG
+        # search + fetch + grounded extraction; the facts land in memory through the
+        # admission gate, so the next ask compounds). A blocked search / empty web
+        # degrades to an honest "couldn't pull news" — never an invented headline.
+        # Live data → CAPABILITY, not stored as a durable turn (same as weather/brief).
+        from utah.product import news
+
+        return Reply(text=news.answer(text), source=ReplySource.CAPABILITY, hits=hits)
     if route is Route.KNOWLEDGE:
         from utah.knowledge import douglas
 
@@ -311,7 +370,7 @@ def tell(text: str, *, persist: bool = True) -> Reply:
         _CONVO.append((text, clean))
         return Reply(text=clean, source=ReplySource.MEMORY, hits=hits)
 
-    context = _build_context(hits)
+    context = _build_context(hits, text=text)
 
     # 3. LOCAL: a free resident model answers quick things; a miss escalates.
     if route in (Route.LOCAL_QUICK, Route.LOCAL_HEAVY):
@@ -334,7 +393,7 @@ def tell(text: str, *, persist: bool = True) -> Reply:
         web = _learn(text)
         if web:
             try:
-                grounded = brain.think(text, _build_context(hits, web=web))
+                grounded = brain.think(text, _build_context(hits, web=web, text=text))
             except BrainUnavailable:
                 grounded = ""
             if grounded and not brain.is_refusal(grounded):
@@ -407,7 +466,7 @@ def tell_stream(text: str, *, want_thinking: bool = True, voice: bool = False) -
         log.warning("memory unavailable during recall, degrading: %s", exc)
         failures.record("memory", "unavailable", str(exc))
         hits = []
-    context = _build_context(hits)
+    context = _build_context(hits, text=text)
 
     # 2.5 GROUNDING (transparency) — surface the REAL recalled memory the reasoning
     #      tiers (local/learn/brain) are about to stand on, so the chat box can render
@@ -449,7 +508,7 @@ def tell_stream(text: str, *, want_thinking: bool = True, voice: bool = False) -
             yield ("source", "learned")
             yield ("thinking", "I don't have that yet — searching the web and learning it…\n")
             grounded = yield from _stream_brain_buffered(
-                text, _build_context(hits, web=web), want_thinking=want_thinking)
+                text, _build_context(hits, web=web, text=text), want_thinking=want_thinking)
             if grounded and not brain.is_refusal(grounded):
                 yield ("answer", grounded)
                 _CONVO.append((text, grounded))
@@ -492,7 +551,7 @@ def tell_stream(text: str, *, want_thinking: bool = True, voice: bool = False) -
         web = _learn(text)
         if web:
             grounded = yield from _stream_brain_buffered(
-                text, _build_context(hits, web=web), want_thinking=want_thinking)
+                text, _build_context(hits, web=web, text=text), want_thinking=want_thinking)
             if grounded and not brain.is_refusal(grounded):
                 reply_text = grounded  # commit the grounded answer
         # else (nothing learned / retry refused) → the honest refusal stands.

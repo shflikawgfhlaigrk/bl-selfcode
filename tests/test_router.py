@@ -195,3 +195,74 @@ def test_self_identity_word_boundary_does_not_catch_substrings():
     # \bace\b / \butah\b must not fire on 'place', 'race', etc.
     assert route("find me a parking place") is not Route.BRAIN
     assert route("what's 2+2") is Route.LOCAL_QUICK
+
+
+# --- live lead/pipeline counts → a GROUNDED capability, never the free-generating brain ---
+# Regression: the chat brain fabricated lead counts ("500+0+0=721") because "how many leads"
+# matched _FACTUAL_RECALL → BRAIN, which has no live-ledger access. Lead-count intent must
+# route to the grounded LEADS capability (real Postgres) BEFORE factual-recall.
+
+@pytest.mark.parametrize("text", [
+    "how many leads do we have", "what's today's lead count", "lead count",
+    "today's leads", "new leads", "how many leads did lead_scout find",
+    "how many probate cases", "probate count", "what's the pipeline look like",
+])
+def test_lead_questions_route_to_grounded_leads_capability(text):
+    assert route(text) is Route.LEADS
+
+
+def test_leads_capability_does_not_steal_real_factual_recall_or_weather():
+    assert route("how many people won the super bowl") is Route.BRAIN   # real world-knowledge untouched
+    assert route("how many countries are in africa") is Route.BRAIN
+    assert route("what's the weather like") is Route.WEATHER            # capabilities order preserved
+
+
+# --- news intent → the researcher-backed NEWS capability, never invented headlines ---
+# news.headlines was a real wrapper over researcher.research with nothing live calling
+# it; these pin the route that makes it a genuine capability lane.
+
+@pytest.mark.parametrize("text", [
+    "news about the housing market",
+    "any news about openai?",
+    "latest news on tesla",
+    "recent news",
+    "what's happening with the election",
+    "what's the news",
+    "give me the headlines",
+    "today's headlines",
+    "headlines for atlanta",
+])
+def test_news_intents_route_to_the_news_capability(text):
+    assert route(text) is Route.NEWS
+
+
+def test_news_beats_cold_factual_recall():
+    # "latest news on the super bowl" carries a _FACTUAL_RECALL keyword — the news
+    # intent must win: the capability fetches the real, CURRENT web; a cold brain
+    # recall can only refuse (or worse, answer from stale training).
+    assert route("latest news on the super bowl") is Route.NEWS
+
+
+def test_news_does_not_shadow_grounded_capabilities_or_actions():
+    # Precedence stays sane: WEATHER/TIME/LEADS/BRIEF/ACTION all keep winning.
+    assert route("what's the weather like") is Route.WEATHER
+    assert route("what time is it") is Route.TIME
+    assert route("what happened overnight") is Route.BRIEF              # brief, not news
+    assert route("what's happening with the pipeline") is Route.LEADS   # ledger read stays grounded
+    assert route("rerun outreach") is Route.ACTION
+
+
+def test_plain_mention_of_news_does_not_hijack():
+    # An agentic task that merely contains "news" stays with the brain.
+    assert route("write a news scraper in python") is Route.BRAIN
+
+
+# --- self/project predicate — exposed for core's introspection grounding ---
+
+def test_is_self_or_project_exposes_the_self_question_predicate():
+    from utah.router import is_self_or_project
+
+    assert is_self_or_project("what can you do")
+    assert is_self_or_project("what is project utah")
+    assert not is_self_or_project("what's 2+2")
+    assert not is_self_or_project("")
