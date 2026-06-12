@@ -12,10 +12,12 @@ Keep it import-safe and side-effect-free. Do not delete it as junk: its whole
 job is to exist as a stable, documented place for diff-capture probes to land.
 
 The only statements permitted besides this docstring are the inert
-``__version__`` string constant and the empty ``__all__`` list below
-(asserted by tests/test_probe_marker.py).
+``__version__`` and ``__author__`` string constants and the empty
+``__all__`` list below (asserted by tests/test_probe_marker.py).
 """
 
 __version__ = "1.0.0"
+
+__author__ = "Michael Barber"
 
 __all__ = []
