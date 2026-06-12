@@ -192,16 +192,20 @@ def test_csrf_guard_blocks_cross_origin_state_change(monkeypatch):
 
 def test_csrf_guard_leaves_get_routes_untouched(monkeypatch):
     """Read routes never carry a state change — the guard must not touch them even
-    with a foreign Origin (monitors/embeds legitimately GET cross-origin)."""
+    with a foreign Origin (monitors/embeds legitimately GET cross-origin). The guard's
+    contract is 'GET is never 403'; whether /status is 200 or 503 depends on the
+    daemon, which this test must NOT depend on (api_status calls ctl.call directly —
+    asserting ==200 only passed because a live daemon happened to answer)."""
     from starlette.testclient import TestClient
 
     from utah.interface import web
 
-    async def no_daemon():
-        return None
+    class FakeCtl:
+        async def call(self, *a, **k):
+            return {"ok": True}                 # hermetic: no live daemon needed
 
-    monkeypatch.setattr(web, "_daemon_status", no_daemon)
-    monkeypatch.setattr(web, "_ledger_snapshot", lambda: {})
+    monkeypatch.setattr(web, "ctl", FakeCtl())
     client = TestClient(web.build_app())
     r = client.get("/status", headers={"Origin": "https://monitor.example"})
-    assert r.status_code == 200
+    assert r.status_code != 403                  # the guard never blocks a GET
+    assert r.status_code == 200                  # and with ctl answering, it serves
