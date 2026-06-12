@@ -7,6 +7,7 @@ these tests make the suite notice (it has vanished from disk before).
 """
 from __future__ import annotations
 
+import ast
 import importlib
 from pathlib import Path
 
@@ -19,6 +20,17 @@ def test_module_imports_and_exposes_marker_docstring():
     mod = importlib.import_module("utah._probe_marker")
     assert mod.__doc__ is not None
     assert mod.__doc__.splitlines()[0] == MARKER_LINE
+
+
+def test_source_has_module_level_docstring():
+    """The docstring must be a literal first statement in the source file,
+    not merely a ``__doc__`` attribute set at import time — the file has been
+    emptied on disk before while a cached import looked healthy."""
+    mod = importlib.import_module("utah._probe_marker")
+    tree = ast.parse(Path(mod.__file__).read_text(encoding="utf-8"))
+    docstring = ast.get_docstring(tree)
+    assert docstring is not None
+    assert docstring.strip()
 
 
 def test_module_is_inert():
