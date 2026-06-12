@@ -14,6 +14,7 @@ import re
 import shutil
 import subprocess
 import time
+from collections.abc import Sequence
 
 from utah import failures
 from utah.daemon import runtime
@@ -114,19 +115,38 @@ def _cdp_get(path: str, *, method: str = "GET", timeout: float = 4.0) -> object:
         return json.loads(r.read().decode("utf-8", "replace") or "null")
 
 
-def _ensure_visible_chrome(chrome: str, *, wait_s: float = 15.0) -> None:
+def _chrome_app_bundle(chrome: str) -> str:
+    """The ``.app`` bundle for *chrome* (a binary path) so we can ``open -g -a`` it in
+    the BACKGROUND. Falls back to the well-known app name when the path isn't a bundle."""
+    marker = ".app/"
+    i = chrome.find(marker)
+    if i != -1:
+        return chrome[: i + len(".app")]
+    return "Google Chrome"
+
+
+def _bg_spawn(argv: Sequence[str]) -> None:
+    subprocess.Popen(list(argv), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
+def _ensure_visible_chrome(chrome: str, *, wait_s: float = 15.0, spawn_fn=None) -> None:
     """Ace's one persistent ON-SCREEN browser: spawn if the CDP port isn't answering,
-    then wait until it is. Own profile + own port — never touches Michael's browsers."""
+    then wait until it is. Own profile + own port — never touches Michael's browsers.
+
+    Launched via ``open -g`` (BACKGROUND) so it NEVER steals focus or yanks the cursor
+    away from Michael — the same caret-stealing bug wc_feed fixed (a direct foreground
+    Popen of the chrome binary activates the app on every spawn)."""
     try:
         _cdp_get("/json/version")
         return
     except Exception:  # noqa: BLE001 — not up yet
         pass
-    subprocess.Popen(
-        [chrome, f"--remote-debugging-port={CDP_PORT}", "--remote-allow-origins=*",
+    spawn = spawn_fn or _bg_spawn
+    spawn(
+        ["open", "-g", "-n", "-a", _chrome_app_bundle(chrome), "--args",
+         f"--remote-debugging-port={CDP_PORT}", "--remote-allow-origins=*",
          f"--user-data-dir={_ACE_PROFILE}", "--no-first-run", "--no-default-browser-check",
-         "--window-size=980,740", "--window-position=60,60", "about:blank"],
-        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+         "--window-size=980,740", "--window-position=60,60", "about:blank"])
     deadline = time.monotonic() + wait_s
     while time.monotonic() < deadline:
         try:
