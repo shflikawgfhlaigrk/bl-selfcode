@@ -15,6 +15,7 @@ from utah import local as local_mod
 from utah import memory as memory_mod
 from utah import rerank as rerank_mod
 from utah import sica as sica_mod
+from utah.product import signals as signals_mod
 from tests.fakes import FakeEmbedder, FakeFailureStore, FakeStore, ScriptedRunner, ZeroReranker
 
 
@@ -22,6 +23,16 @@ def _alerts_off(*_a, **_k):
     """Default test push sender: never touches the network or pages a real phone.
     Tests that exercise alerts inject their own capturing sender over this."""
     return {"sent": False, "gated": True, "fake": True}
+
+
+def _mail_off(*_a, **_k):
+    """Default test mail transport for signals delivery: gated, never SMTP."""
+    return {"sent": False, "gated": True, "fake": True}
+
+
+def _discord_off(*_a, **_k):
+    """Default test Discord post for signals delivery: gated, never a webhook."""
+    return {"posted": False, "gated": True, "fake": True}
 
 
 def _local_down(*_a, **_k):
@@ -50,6 +61,15 @@ def _restore_boundaries():
     _seen_tmp = tempfile.mkdtemp(prefix="utah-alerts-seen-")
     alerts_mod.set_seen_path(__import__("pathlib").Path(_seen_tmp) / "alerts_seen.json")
     alerts_mod._reset_seen_for_tests()
+    # SITE-12: pin the signals delivery lane OFF for EVERY test — record_fire spawns a
+    # background delivery thread, and without this a ledger test would read the real
+    # signals_subscribers table (and could email real subscribers). The empty-subscriber
+    # pin is the lane's own honest gate: zero network, zero DB, zero sends. Tests that
+    # exercise delivery inject their own fakes per call (they override these defaults).
+    signals_mod.set_transports(mail_send=_mail_off, discord_post=_discord_off,
+                               subscribers_fn=lambda: [])
+    signals_mod.set_seen_path(__import__("pathlib").Path(_seen_tmp) / "signals_seen.json")
+    signals_mod._reset_seen_for_tests()
     # Pin a fake memory backend for EVERY test so no test ever reads, writes, or resets
     # the real Postgres memory (that pollution added rows to prod; a stray reset once
     # wiped it). Tests that need a configured store override via the `mem`/`fake_store`
@@ -77,6 +97,9 @@ def _restore_boundaries():
     alerts_mod.set_sender(None)
     alerts_mod.set_seen_path(None)
     alerts_mod._reset_seen_for_tests()
+    signals_mod.set_transports()
+    signals_mod.set_seen_path(None)
+    signals_mod._reset_seen_for_tests()
 
 
 @pytest.fixture

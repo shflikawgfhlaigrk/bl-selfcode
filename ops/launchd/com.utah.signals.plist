@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  com.utah.signals — Signals subscriber delivery sweep (every 15 min, SITE-12).
+
+  Runs `python -m utah.product.signals deliver-latest`: delivers the most recent
+  ungraded-or-newly-graded REAL fire to every active signals_subscribers row (email
+  via utah.mail, one Discord post via the fires webhook). The record_fire hook already
+  delivers fires the moment they land; this lane exists for the GRADED state — once
+  com.utah.grade-fires fills outcome/pnl, the result goes out exactly once (per-state
+  file-backed dedup in ~/.utah/run/signals_seen.json makes the cadence idempotent).
+  Honest gates: empty subscriber table / UTAH_SIGNALS_DELIVERY=0 / already-delivered
+  all log {"sent": 0, "gated": true, ...} and send nothing.
+
+  Install:
+    cp ops/launchd/com.utah.signals.plist ~/Library/LaunchAgents/
+    launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.utah.signals.plist
+  Force-run now:  launchctl kickstart gui/$(id -u)/com.utah.signals
+  Stop:           launchctl bootout  gui/$(id -u)/com.utah.signals
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.utah.signals</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/michaelbarber/.utah/venv/bin/python</string>
+    <string>-m</string>
+    <string>utah.product.signals</string>
+    <string>deliver-latest</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>/Users/michaelbarber/Desktop/ProjectUtah</string>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PYTHONPATH</key>
+    <string>/Users/michaelbarber/Desktop/ProjectUtah</string>
+    <key>PYTHONUNBUFFERED</key>
+    <string>1</string>
+    <key>PATH</key>
+    <string>/Users/michaelbarber/.utah/venv/bin:/opt/homebrew/bin:/usr/local/bin:/Users/michaelbarber/.local/bin:/usr/bin:/bin</string>
+  </dict>
+
+  <key>StartInterval</key>
+  <integer>900</integer>
+
+  <key>RunAtLoad</key>
+  <true/>
+
+  <key>StandardOutPath</key>
+  <string>/Users/michaelbarber/.utah/logs/signals.log</string>
+
+  <key>StandardErrorPath</key>
+  <string>/Users/michaelbarber/.utah/logs/signals.err</string>
+</dict>
+</plist>

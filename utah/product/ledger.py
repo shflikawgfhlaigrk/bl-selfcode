@@ -418,6 +418,22 @@ class Ledger:
             alerts.trade_fire(engine, direction, entry, fire_id=int(row[0]),
                               symbol=symbol, stop=stop, target=target,
                               rationale=" ".join(x for x in (symbol, rationale) if x) or None)
+            # SITE-12 — the Signals product's deliverable: fan this REAL fire out to
+            # subscribers (one email per active signals_subscribers row + ONE Discord
+            # post) on a background thread, same doctrine as the page above — never
+            # raises, never blocks, a delivery failure can never break fire recording.
+            # Honest gates live inside utah.product.signals (UTAH_SIGNALS_DELIVERY
+            # flag, empty subscriber table, file-backed per-fire dedup), so this is a
+            # no-op in practice until real subscribers exist.
+            try:
+                from utah.product import signals
+                signals.deliver_fire_async({
+                    "id": int(row[0]), "engine": engine, "direction": direction,
+                    "entry": entry, "symbol": symbol, "stop": stop, "target": target,
+                    "rationale": rationale,
+                })
+            except Exception:  # noqa: BLE001 — delivery must never break the write
+                pass
         return int(row[0])
 
     # --- bars + fire grading (the measurability lane: utah/product/fire_grader.py) ---

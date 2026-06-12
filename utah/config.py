@@ -523,6 +523,13 @@ ALERT_DEDUP_SECONDS: int = int(os.environ.get("UTAH_ALERT_DEDUP", "1800"))
 TRADE_ALERT_DEDUP_SECONDS: int = int(os.environ.get("UTAH_TRADE_DEDUP", "7200"))
 TRADE_ALERTS_PER_HOUR: int = int(os.environ.get("UTAH_TRADE_ALERTS_PER_HOUR", "6"))
 
+#: SITE-12 — subscriber delivery of engine fires (utah/product/signals.py), the
+#: Signals product's deliverable. Default ON: with an empty signals_subscribers table
+#: the lane is an honest no-op (deliver_fire gates with "no active subscribers"), so
+#: this flag exists only as a hard emergency OFF without touching the table.
+SIGNALS_DELIVERY: bool = os.environ.get("UTAH_SIGNALS_DELIVERY", "1") not in (
+    "0", "", "false", "no")
+
 #: Emergency (priority 2) re-alert cadence / give-up window, in seconds.
 PUSHOVER_EMERGENCY_RETRY: int = 60
 PUSHOVER_EMERGENCY_EXPIRE: int = 3600
