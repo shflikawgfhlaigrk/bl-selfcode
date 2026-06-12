@@ -66,6 +66,27 @@ def test_module_lives_inside_the_utah_package():
     assert source.parent.name == "utah"
 
 
+def test_defines_module_level_version_string():
+    """``__version__`` must be a nonempty string assigned at module level in
+    the source file — not injected into a cached module object at runtime.
+    Being dunder-prefixed it stays within the inertness contract
+    (``test_module_is_inert`` only forbids public names)."""
+    sys.modules.pop("utah._probe_marker", None)
+    mod = importlib.import_module("utah._probe_marker")
+    assert isinstance(mod.__version__, str)
+    assert mod.__version__.strip()
+
+    tree = ast.parse(Path(mod.__file__).read_text(encoding="utf-8"))
+    assigned = {
+        target.id
+        for node in tree.body
+        if isinstance(node, ast.Assign)
+        for target in node.targets
+        if isinstance(target, ast.Name)
+    }
+    assert "__version__" in assigned
+
+
 def test_exposes_a_constant_when_imported_via_importlib():
     """The module must expose a callable or constant once importlib loads it.
     Its inertness contract (``test_module_is_inert``) forbids public callables,
