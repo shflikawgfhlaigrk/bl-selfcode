@@ -175,6 +175,13 @@ def test_csrf_guard_blocks_cross_origin_state_change(monkeypatch):
     native = client.post("/api/tell", json={"text": ""})
     assert native.status_code != 403
 
+    # A PRESENT but unparseable/empty-host Origin must be REFUSED, not waved through
+    # as if it were native — a present Origin that doesn't clearly match is hostile.
+    for bad in ("http://", "null", "://nohost"):
+        r = client.post("/api/console", json={"cmd": "history"},
+                        headers={"Origin": bad})
+        assert r.status_code == 403, f"empty/garbage Origin {bad!r} bypassed the guard"
+
 
 def test_csrf_guard_leaves_get_routes_untouched(monkeypatch):
     """Read routes never carry a state change — the guard must not touch them even

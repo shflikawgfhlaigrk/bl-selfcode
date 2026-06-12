@@ -658,14 +658,18 @@ class OriginGuard(BaseHTTPMiddleware):
     async def dispatch(self, request, call_next):
         if request.method in _UNSAFE_METHODS:
             origin = request.headers.get("origin")
-            if origin:
+            # Absent Origin = native caller (curl/daemon/tailnet tap) — allowed.
+            # A PRESENT Origin must parse to a host that matches Host; anything else
+            # (cross-origin, empty/unparseable "http://", "null") is refused — a
+            # present-but-unclear Origin is treated as hostile, not waved through.
+            if origin is not None:
                 origin_host = urlsplit(origin).netloc.split("@")[-1]
                 host = request.headers.get("host", "")
-                # Compare host:port; a bare-host Origin matches a bare-host Host.
-                if origin_host and origin_host != host and \
-                        origin_host.split(":")[0] != host.split(":")[0]:
+                matches = bool(origin_host) and (
+                    origin_host == host or origin_host.split(":")[0] == host.split(":")[0])
+                if not matches:
                     return JSONResponse(
-                        {"error": f"cross-origin request refused (Origin {origin})"},
+                        {"error": f"cross-origin request refused (Origin {origin!r})"},
                         status_code=403)
         return await call_next(request)
 
