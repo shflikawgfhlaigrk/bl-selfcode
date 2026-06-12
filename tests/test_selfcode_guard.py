@@ -77,7 +77,7 @@ def _propose_editing(repo, rel, *, store):
     return r, calls
 
 
-def test_safety_core_set_is_the_six_documented_paths():
+def test_safety_core_set_is_the_documented_paths():
     """Guard the guard: the parametrized cases below cover exactly SAFETY_PATHS, so a
     case exists for every off-limits file (and only those) if the set ever drifts."""
     assert set(selfcode.SAFETY_PATHS) == {
@@ -87,6 +87,7 @@ def test_safety_core_set_is_the_six_documented_paths():
         "utah/daemon/peercred.py",
         "utah/daemon/lifecycle.py",
         "utah/daemon/governor.py",
+        "tests/conftest.py",   # the shared autouse pollution guards (the gate's harness)
     }
 
 

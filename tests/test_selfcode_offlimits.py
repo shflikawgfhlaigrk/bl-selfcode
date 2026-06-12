@@ -42,6 +42,7 @@ SAFETY_CORE: dict[str, str] = {
     "peercred.py": "utah/daemon/peercred.py",
     "lifecycle.py": "utah/daemon/lifecycle.py",
     "governor.py": "utah/daemon/governor.py",
+    "conftest.py": "tests/conftest.py",   # the shared autouse pollution guards
 }
 
 

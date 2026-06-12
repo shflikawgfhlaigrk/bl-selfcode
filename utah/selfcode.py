@@ -98,6 +98,7 @@ SAFETY_PATHS: tuple[str, ...] = (
     "utah/daemon/peercred.py",
     "utah/daemon/lifecycle.py",
     "utah/daemon/governor.py",
+    "tests/conftest.py",   # the shared autouse pollution guards — the gate's harness
 )
 
 #: The tier of a change = the STRICTEST tier among the files it touches; the tier
@@ -221,6 +222,32 @@ def _real_tests(*, cwd: str, timeout: int = CODE_TIMEOUT_S) -> tuple[bool, str]:
     return proc.returncode == 0, (proc.stdout or "") + (proc.stderr or "")
 
 
+def _real_count_tests(*, cwd: str, timeout: int = 120) -> int:
+    """Number of tests pytest COLLECTS in *cwd* (``pytest --co -q``). The verification
+    floor: a self-coded change may not leave the suite collecting FEWER tests than
+    before (green-by-deletion). Returns -1 when collection itself fails — the caller
+    treats an unknowable count as a failed gate (fail-closed), never a free pass."""
+    try:
+        proc = subprocess.run([sys.executable, "-m", "pytest", "--co", "-q"], cwd=cwd,
+                              capture_output=True, text=True, timeout=timeout)
+    except (OSError, subprocess.SubprocessError):
+        return -1
+    if proc.returncode != 0:
+        return -1
+    out = proc.stdout or ""
+    # Authoritative when present: the "<N> tests collected" summary line.
+    m = re.search(r"(\d+)\s+tests?\s+collected", out)
+    if m:
+        return int(m.group(1))
+    # This pytest's `--co -q` prints one "path/to/test_file.py: <count>" line per file;
+    # the suite total is the sum of those per-file counts.
+    per_file = re.findall(r"^\S+\.py:\s*(\d+)\s*$", out, re.MULTILINE)
+    if per_file:
+        return sum(int(n) for n in per_file)
+    # Last resort: one node id per line (older `--co -q` formats).
+    return sum(1 for ln in out.splitlines() if ln.strip() and "::" in ln)
+
+
 def _real_commit_proposal(task: str, *, repo: str = ".") -> str | None:
     """Commit the run's working-tree change onto the current proposal branch, so the diff
     is REAL and SURVIVES the next sync. Without this, a propose-only (auto_merge=False)
@@ -240,7 +267,7 @@ def propose(task: str, *, run_claude=None, run_tests=None, branch_fn=None,
             discard_fn=None, merge_fn=None, auto_merge=None, tree_clean_fn=None,
             repo: str | None = None, safety_snapshot_fn=None, safety_intact_fn=None,
             changed_files_fn=None, supervised_fn=None, bump_supervised_fn=None,
-            smoke: bool = False) -> dict:
+            count_tests_fn=None, smoke: bool = False) -> dict:
     """Propose a change for *task* on an isolated branch, gated by the suite AND the
     doc-13 tier policy. The change's tier (the strictest among the files it touches)
     sets the autonomy ceiling: Tier-D (safety) is rolled back via a byte-check; only a
@@ -272,6 +299,7 @@ def propose(task: str, *, run_claude=None, run_tests=None, branch_fn=None,
 
     run_claude = run_claude or (lambda t: _real_claude(t, cwd=repo or "."))
     run_tests = run_tests or (lambda: _real_tests(cwd=repo or "."))
+    count_tests_fn = count_tests_fn or (lambda: _real_count_tests(cwd=repo or "."))
     # Thread `repo` into the branch/discard defaults too — otherwise _real_branch /
     # _real_discard default to cwd="." and operate on the PROCESS's tree, not `repo`
     # (a real footgun caught live: propose(repo=worktree) `git checkout -B`'d the
@@ -285,6 +313,7 @@ def propose(task: str, *, run_claude=None, run_tests=None, branch_fn=None,
         before = None
         if safety_intact_fn is None:
             before = (safety_snapshot_fn or (lambda: safety_snapshot(repo or ".")))()
+        baseline_tests = count_tests_fn()   # the verification floor's before-image
         branch = branch_fn(_slug(task))   # isolated; _real_branch refuses main
     except Exception as exc:  # noqa: BLE001 — pre-run setup failed; honor "never raises"
         rec("selfcode", "setup_failed", f"{task[:80]}: {exc}")
@@ -326,6 +355,23 @@ def propose(task: str, *, run_claude=None, run_tests=None, branch_fn=None,
         log.info("selfcode: %s — suite RED, rolled back", task[:60])
         return {"task": task, "applied": False, "tests_passed": False,
                 "branch": branch, "reason": tail}
+
+    # Verification floor: green is not buyable by SHRINKING the gate. The post-run
+    # suite must collect at least as many tests as before the change (additions are
+    # welcome; deletions/disabled collection are not). An unknowable count (-1) is
+    # fail-closed — a change that breaks collection can never read as "green".
+    post_tests = count_tests_fn()
+    if baseline_tests >= 0 and (post_tests < 0 or post_tests < baseline_tests):
+        rec("selfcode", "verification_erosion",
+            f"{task[:80]}: suite green but collected {post_tests} < baseline "
+            f"{baseline_tests} tests — change removed/disabled tests, rolled back")
+        _safe(discard_fn)
+        log.info("selfcode: %s — green but tests REMOVED (%s<%s), rolled back",
+                 task[:60], post_tests, baseline_tests)
+        return {"task": task, "applied": False, "tests_passed": False, "merged": False,
+                "branch": branch,
+                "reason": f"verification erosion: {post_tests} < {baseline_tests} tests "
+                          "collected after the change (green by deletion refused)"}
 
     if do_merge:
         # Tree was clean pre-run, so changed-files == the run's output → tier is reliable.

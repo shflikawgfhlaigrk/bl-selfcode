@@ -143,3 +143,40 @@ def test_auto_merge_refuses_dirty_tree(monkeypatch, tmp_path):
     assert r["applied"] is False and r["merged"] is False
     assert "dirty" in r["reason"].lower()
     assert calls["branch"] is None and merge_called == []   # never branched, never merged
+
+
+def test_conftest_is_off_limits_safety():
+    """The shared test harness (tests/conftest.py — the autouse pollution guards) is
+    Tier-D off-limits: the self-coder must never be able to disable the fixtures that
+    keep the suite honest."""
+    assert "tests/conftest.py" in selfcode.SAFETY_PATHS
+    assert selfcode.classify(["tests/conftest.py"]) == "D"
+
+
+def test_green_suite_that_removed_tests_is_rejected(monkeypatch, tmp_path):
+    """Verification-erosion guard: a change that makes the suite GREEN by DELETING
+    tests (collected count drops below the pre-run baseline) is rolled back, never
+    kept — 'green' must not be buyable by shrinking the gate."""
+    failures.set_store(FakeFailureStore())
+    monkeypatch.setattr(selfcode, "KILL_SWITCH", tmp_path / "nope")
+    calls, bf, df = _vcs()
+    counts = iter([1500, 1400])   # baseline 1500 -> 1400 after the run (50 tests deleted)
+    r = selfcode.propose("delete some tests to go green", run_claude=lambda t: None,
+                         run_tests=lambda: (True, "1400 passed"), branch_fn=bf, discard_fn=df,
+                         count_tests_fn=lambda: next(counts))
+    assert r["applied"] is False and r["tests_passed"] is False
+    assert calls["discarded"] is True
+    assert "removed" in r["reason"].lower() or "erosion" in r["reason"].lower()
+
+
+def test_green_suite_that_added_tests_is_kept(monkeypatch, tmp_path):
+    """The inverse must NOT be blocked: a change that ADDS tests (count goes up) and
+    stays green is kept — the loop is encouraged to grow its own coverage."""
+    failures.set_store(FakeFailureStore())
+    monkeypatch.setattr(selfcode, "KILL_SWITCH", tmp_path / "nope")
+    calls, bf, df = _vcs()
+    counts = iter([1500, 1503])   # baseline 1500 -> 1503 (added 3 tests)
+    r = selfcode.propose("add a helper and its tests", run_claude=lambda t: None,
+                         run_tests=lambda: (True, "1503 passed"), branch_fn=bf, discard_fn=df,
+                         count_tests_fn=lambda: next(counts))
+    assert r["applied"] is True and r["tests_passed"] is True
