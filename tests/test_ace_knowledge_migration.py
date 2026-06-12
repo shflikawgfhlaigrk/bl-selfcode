@@ -51,6 +51,26 @@ def test_migrate_classifies_inserted_deduped_rejected_junk():
     assert stats["rejected"] == 1
     assert calls["n"] == 3                                       # only non-junk hit the gate
     assert stats["ok"] is True and stats["aborted"] is False     # honest completion signal
+    # Reconciliation: every source row landed in EXACTLY one bucket — no silent loss.
+    rec = stats["reconcile"]
+    assert rec["accounted"] == 5 == stats["read"] and rec["ok"] is True
+
+
+def test_migrate_reconcile_catches_a_silently_lost_row(monkeypatch):
+    """If a row is consumed but counted in no bucket (a counter bug), the closure
+    check must catch it — accounting that doesn't sum to `read` is ok=False."""
+    def fake_store(content):
+        return WriteResult(id=1, action=WriteAction.INSERTED)
+
+    rows = [("ace", "a real fact about the utah project on postgres now")]
+    stats = ak.migrate(rows, store_fn=fake_store)
+    # Sanity: a clean run reconciles.
+    assert stats["reconcile"]["ok"] is True
+    # Force a phantom loss and re-derive: closure is computed from the buckets, so a
+    # tampered count surfaces as ok=False (proves the check isn't a tautology).
+    tampered = dict(stats)
+    tampered["inserted"] = 0
+    assert ak.reconcile(tampered)["ok"] is False
 
 
 # ---------------------------------------------------------------------------

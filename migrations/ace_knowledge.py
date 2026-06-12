@@ -195,13 +195,33 @@ def migrate(
             _compensate(stats, batch_ids, rollback_fn)
             stats["aborted"] = True
             stats["ok"] = False
+            stats["reconcile"] = reconcile(stats)
             log.error("ace_knowledge migrate ABORTED (store down): %s", stats)
             return stats
         if len(batch_ids) >= batch_size:
             batch_ids = []  # batch full -> durable; nothing here rolls back any more
         if stats["read"] % 500 == 0:
             log.info("ace_knowledge migrate: %s", stats)
+    stats["reconcile"] = reconcile(stats)
+    if not stats["reconcile"]["ok"]:
+        stats["ok"] = False
+        failures.record("migration", "reconcile_gap",
+                        f"ace_knowledge: accounted {stats['reconcile']['accounted']} "
+                        f"!= read {stats['reconcile']['read']}")
     return stats
+
+
+def reconcile(stats: dict) -> dict:
+    """Accounting closure: every source row must land in EXACTLY one outcome bucket.
+    ``accounted = junk + inserted + deduped + rejected + failed + rolled_back`` must
+    equal ``read`` — a gap means a row was consumed but counted nowhere (silent loss),
+    surfaced as ``ok=False`` rather than a stat nobody checks. Rolled-back rows are
+    added back because ``inserted`` was decremented when they were undone."""
+    accounted = (stats.get("junk", 0) + stats.get("inserted", 0) + stats.get("deduped", 0)
+                 + stats.get("rejected", 0) + stats.get("failed", 0)
+                 + stats.get("rolled_back", 0))
+    read = stats.get("read", 0)
+    return {"ok": accounted == read, "accounted": accounted, "read": read}
 
 
 def _compensate(stats: dict, batch_ids: list[int],
