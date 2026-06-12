@@ -303,6 +303,8 @@
   .cmd{display:flex;gap:10px;padding:9px 20px 11px;align-items:center}
   .micbtn{width:38px;height:38px;flex:none;border-radius:9px;border:1px solid var(--line);background:#0f0e0a;color:var(--mut);font-size:15px;cursor:default;display:flex;align-items:center;justify-content:center}
   .micbtn.live{color:var(--ok);border-color:#1c3a28;box-shadow:0 0 12px var(--okglow)}
+  .micbtn.barge{color:var(--err);border-color:#3a1714;background:#160a09;box-shadow:0 0 14px rgba(255,90,80,.25);cursor:pointer;font-size:8px;letter-spacing:1.5px;font-weight:700;font-family:inherit;line-height:1.1;text-align:center;padding:4px}
+  .micbtn.barge:hover{background:#220c0a}
   .cmd input{flex:1;background:var(--panel);border:1px solid var(--line);color:var(--txt);padding:11px 14px;border-radius:9px;font:inherit}
   .cmd input:focus{outline:0;border-color:var(--gold);box-shadow:0 0 0 1px var(--goldglow)}
   .cmd button.send{background:linear-gradient(180deg,var(--gold2),var(--gold));border:0;color:#1a1407;padding:0 24px;height:38px;border-radius:9px;font-weight:700;cursor:pointer;letter-spacing:1px}
@@ -679,15 +681,14 @@ async function poll(){
   const voice = (st&&st.voice)||{};
   const vlive = voice.status==="listening"||voice.listening===true;
   led("led-voice", voice.status==="down"||voice.status==null?"off":(vlive?"ok":"warn"));
-  /* while Ace is SPEAKING the mic chip becomes the kill switch — the one moment
-     Michael most needs a stop is mid-speech, when the mic itself is muted */
+  /* while Ace is SPEAKING the mic chip is the BARGE button — cut voice + listen */
   const speaking = voice.status==="speaking" || voice.speaking===true;
   const mic=$("mic");
-  mic.className="micbtn"+(vlive?" live":"");
-  mic.textContent = speaking ? "◼" : "🎙";
-  mic.title = speaking ? "STOP — cut the voice now" : "voice loop";
+  mic.className="micbtn"+(speaking?" barge":(vlive?" live":""));
+  mic.textContent = speaking ? "BARGE" : "🎙";
+  mic.title = speaking ? "BARGE — stop Ace and listen (no wake word needed)" : "voice loop — say “ace” to wake";
   mic.style.cursor = speaking ? "pointer" : "default";
-  mic.onclick = speaking ? ()=>fetch("/api/speak/stop",{method:"POST"}).catch(()=>{}) : null;
+  mic.onclick = speaking ? ()=>fetch("/api/voice/barge",{method:"POST"}).catch(()=>{}) : null;
 
   if(!up){
     $("spine").innerHTML=emptyBox("CORE OFFLINE");
@@ -753,7 +754,7 @@ function renderFns(s,m,st,voice){
   if(mls&&lab.engines) mls.textContent=lab.engines+" engines · paper/sim · "+(lab.feed==="live"?"LIVE WealthCharts feed":"feed gated");
   const pool=(s&&s.pool)||{}, bus=(s&&s.bus)||{};
   const fns=[
-    {nm:"Voice Loop", sub:"wake · barge-in · TTS", st:voice.status?voice.status.toUpperCase():"DOWN", cls:(voice.status==="listening")?"":(voice.status?"warn":"off"), click:()=>drill('voice')},
+    {nm:"Voice Loop", sub:"wake ace only · button barge", st:voice.status?voice.status.toUpperCase():"DOWN", cls:(voice.status==="listening")?"":(voice.status?"warn":"off"), click:()=>drill('voice')},
     {nm:"Agent Mesh", sub:up?(pool.borrowed+" running · "+pool.available+" ready"):"worker pool", st:up?(pool.borrowed>0?"RUNNING":"READY"):"DOWN", cls:up?"":"off", click:()=>drill('agents')},
     {nm:"Memory Holograph", sub:m?(m.entities+" entities · graph"):"pgvector · hnsw", st:m?(m.degraded?"BUSY":"INDEXED"):"DOWN", cls:m?(m.degraded?"warn":""):"off", click:()=>drill('memory')},
     {nm:"Black Box Ledger", sub:audit+" audit events", st:up?"RECORDING":"DOWN", cls:up?"":"off", click:()=>drill('audit')},

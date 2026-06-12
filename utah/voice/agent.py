@@ -164,6 +164,7 @@ def _selfcode_turn(command, task, dispatch, speak_stream, publish, on_speaking) 
 
 
 def handle_utterance(transcript, *, audio_wake: bool = False, wake_confidence=None,
+                     button_barge: bool = False,
                      tell=None, tell_stream=None,
                      speak_stream=None, publish=None, on_speaking=None,
                      dispatch=None) -> dict | None:
@@ -185,7 +186,8 @@ def handle_utterance(transcript, *, audio_wake: bool = False, wake_confidence=No
     publish = publish or _default_publish
 
     command = wake.resolve_command(transcript, audio_wake=audio_wake,
-                                   wake_confidence=wake_confidence)
+                                   wake_confidence=wake_confidence,
+                                   button_barge=button_barge)
     if command is None:
         return None  # not addressed to Utah
 

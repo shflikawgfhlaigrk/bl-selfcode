@@ -89,8 +89,10 @@ _WAKE_LOUD_WINDOW_S = float(os.environ.get("UTAH_VOICE_WAKE_LOUD_WINDOW_S", "2.0
 # into a false barge. Real speech on the built-in mic runs rms ≥0.03; Ace's playback
 # bleed measures lower at the mic, so 0.10 with a 5-frame (~160 ms) run sits clear of
 # echo while a real interruption (the user leaning in to talk over him) trips at once.
-# Disable with UTAH_VOICE_BARGE=0.
-_BARGE_ON = os.environ.get("UTAH_VOICE_BARGE", "1") == "1"
+# Disable with UTAH_VOICE_BARGE_AUTO=1 (legacy UTAH_VOICE_BARGE=1 also enables auto).
+_BARGE_AUTO = (
+    os.environ.get("UTAH_VOICE_BARGE_AUTO", os.environ.get("UTAH_VOICE_BARGE", "0")) == "1"
+)
 _BARGE_RMS = float(os.environ.get("UTAH_VOICE_BARGE_RMS", "0.10"))
 _BARGE_MIN_FRAMES = int(os.environ.get("UTAH_VOICE_BARGE_MIN_FRAMES", "5"))  # ~160 ms @ 32 ms/frame
 # After a barge cut, record a fixed window of the interrupting utterance and hand it
@@ -244,9 +246,9 @@ def _write_wav(pcm: bytes) -> str:
 
 
 def _should_capture(*, audio_wake_ok: bool, armed_until: float) -> bool:
-    """Only transcribe speech when audio-wake armed, or when falling back to text-only."""
+    """Only transcribe after an openWakeWord hit (ace) — no transcript-only fallback."""
     if not audio_wake_ok:
-        return True  # legacy: segment everything, gate on transcript
+        return False
     return time.monotonic() < armed_until
 
 
@@ -276,6 +278,7 @@ def run() -> None:
     # interruption during playback) and the main loop (which captures the new utterance).
     # The detector latches after firing and is reset before each playback (see arming).
     from utah.voice.barge import BargeDetector
+    from utah.voice.barge_control import consume_button_barge
     _barge_det = BargeDetector(rms_threshold=_BARGE_RMS, min_frames=_BARGE_MIN_FRAMES)
     barge_evt = threading.Event()
     level = {"max": 0.0}
@@ -300,7 +303,7 @@ def run() -> None:
         # the cleaned RAW signal (HPF, but NOT AGC — AGC would amplify Ace's own echo
         # into a false barge) and fire only on sustained, genuinely-loud speech. On a
         # barge: cut the voice instantly and flag the loop to capture the interruption.
-        if _BARGE_ON and tts.is_anything_playing():
+        if _BARGE_AUTO and tts.is_anything_playing():
             liveness.feed_muted()   # intentionally muted — not deaf
             bpcm = hpf.process(raw) if hpf is not None else raw
             if _on_playback_frame(_rms(bpcm), _barge_det, tts.stop_speaking):
@@ -458,7 +461,8 @@ def run() -> None:
                     log.info("voice: audio wake armed (%.0fs window, conf=%.2f)",
                              config.WAKE_ARM_S, confidence)
 
-                def _process_segment(pcm: bytes, *, segment_armed: bool) -> None:
+                def _process_segment(pcm: bytes, *, segment_armed: bool,
+                                     button_barge: bool = False) -> None:
                     secs = len(pcm) / 2 / SAMPLE_RATE
                     seg_rms = _rms(pcm)
                     log.info("voice: speech segment %.1fs rms=%.4f → transcribing (audio_wake=%s)",
@@ -488,6 +492,7 @@ def run() -> None:
                                 text or "",
                                 audio_wake=segment_armed,
                                 wake_confidence=(wake_conf if segment_armed else None),
+                                button_barge=button_barge,
                                 on_speaking=_on_speaking,
                             )
                             cmd = result.get("command") if result else None
@@ -521,8 +526,15 @@ def run() -> None:
                 _collect_start = 0.0
                 _collect_deadline = 0.0
                 _last_loud_at = 0.0
+                _button_barge_arm = False
+                if not _BARGE_AUTO:
+                    log.info("voice loop: auto barge OFF — use deck BARGE button to interrupt")
                 while True:
                     frame = q.get()
+                    if consume_button_barge():
+                        barge_evt.set()
+                        _button_barge_arm = True
+                        log.info("voice: button barge — stop acknowledged, arming capture")
                     if _rms(frame) >= _WAKE_MIN_RMS:
                         _last_loud_at = time.monotonic()
                     # ── Barge-in: the mic callback cut Ace's voice because Michael talked
@@ -539,6 +551,8 @@ def run() -> None:
                             _collect_deadline = _collect_start + _BARGE_CAPTURE_S
                             log.info("voice: barge capture %.1fs (Whisper, VAD-bypass)",
                                      _BARGE_CAPTURE_S)
+                        elif _button_barge_arm:
+                            log.info("voice: button barge — listening (say ace or speak command)")
                     if wake_det is not None:
                         for hit in wake_det.feed(frame):
                             # Storm guard: no genuinely loud audio recently = the model
@@ -571,7 +585,14 @@ def run() -> None:
                             if time.monotonic() >= _collect_deadline:
                                 _collecting = False
                                 armed_until = 0.0
-                                _process_segment(b"".join(_collect_frames), segment_armed=True)
+                                _barge = _button_barge_arm
+                                _process_segment(
+                                    b"".join(_collect_frames),
+                                    segment_armed=True,
+                                    button_barge=_barge,
+                                )
+                                if _barge:
+                                    _button_barge_arm = False
                         continue
 
                     # ── Silero two-stage path (force-capture disabled) ──
@@ -584,8 +605,11 @@ def run() -> None:
                     if pcm is None:
                         continue
                     segment_armed = audio_wake_ok and time.monotonic() < armed_until
+                    _barge = _button_barge_arm
                     armed_until = 0.0  # one segment per arm window
-                    _process_segment(pcm, segment_armed=segment_armed)
+                    _process_segment(pcm, segment_armed=segment_armed, button_barge=_barge)
+                    if _barge:
+                        _button_barge_arm = False
         except Exception as exc:  # noqa: BLE001
             fail_n += 1
             if fail_n == 1:
