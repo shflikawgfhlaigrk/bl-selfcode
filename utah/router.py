@@ -28,6 +28,7 @@ class Route(enum.Enum):
     TIME = "time"                # the clock capability (time/date, grounded)
     ACTION = "action"            # a COMMAND to RUN a capability (rerun leads/outreach/etc.)
     LEADS = "leads"              # live lead/pipeline/probate counts (grounded Postgres)
+    MAIL = "mail"                # live email/text send counts (grounded mail_ledger)
     NEWS = "news"                # recent headlines on a topic (researcher-backed, grounded)
     KNOWLEDGE = "knowledge"      # a curated knowledge pack, verbatim (no model)
     LOCAL_QUICK = "local_quick"  # llama3.2:3b — fast instruct, the trivially-fast lane
@@ -74,6 +75,17 @@ _LEADS = re.compile(
     r"\b(today'?s|new|fresh|how many)\s+leads?\b|"
     r"\blead counts?\b|\bpipeline\b|"
     r"\bprobate\s+(cases?|offers?|count|filings?)\b",
+    re.I,
+)
+#: Live email / text SEND-COUNT questions — answered from mail_ledger, never the brain
+#: (2026-06-13: the brain gave "I can't reach the ledger" a dozen turns running). Scoped to
+#: send/count intent on mail nouns so it never hijacks a normal email-about-X message.
+_MAIL = re.compile(
+    r"\b(how many|number of|count of|total)\s+(e-?mails?|texts?|messages?|sms|sends?)\b|"
+    r"\b(e-?mails?|texts?|messages?|sms|mail)\s+(sent|sends?|count|counts|today|so far|this morning|this week)\b|"
+    r"\b(e-?mails?|texts?|messages?)\s+(did we|have we|were)\s+(sent|send)\b|"
+    r"\bhow many\b[^.?!]*\b(e-?mails?|texts?|messages?)\b[^.?!]*\bsent\b|"
+    r"\bmail\s+(count|ledger|sent)\b",
     re.I,
 )
 
@@ -184,6 +196,11 @@ def route(text: str) -> Route:
     # "how many leads" hits real Postgres, not the brain that invented "500+0+0=721").
     if _LEADS.search(t):
         return Route.LEADS
+    # Email/text send counts → grounded mail_ledger capability. BEFORE _TIME (so "emails
+    # today"/"sent this morning" isn't swallowed by the date matcher) — Ace KNOWS the
+    # number instead of describing the code that writes it.
+    if _MAIL.search(t):
+        return Route.MAIL
     if _TIME.search(t):
         return Route.TIME
     if _BRIEF.search(t):
