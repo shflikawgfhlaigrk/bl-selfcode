@@ -41,4 +41,5 @@ def test_port_probe_budget_is_canary_cheap():
 def test_default_probe_set_covers_every_outage_class():
     names = {p.__name__ for p in drift.DEFAULT_PROBES}
     assert names == {"plist_drift", "stale_runtime", "port_squatters",
-                     "icloud_conflicts", "empty_secrets"}
+                     "icloud_conflicts", "empty_secrets",
+                     "sovereign_hijack", "tailserve_hook", "tailserve_job"}

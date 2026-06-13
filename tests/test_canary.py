@@ -92,9 +92,9 @@ def test_drift_plist_mismatch_is_reported(tmp_path, monkeypatch):
     (repo / "ops" / "launchd" / "com.utah.x.plist").write_text("<plist>A</plist>")
     (agents / "com.utah.x.plist").write_text("<plist>B</plist>")     # drifted
     (repo / "ops" / "launchd" / "com.utah.y.plist").write_text("<p/>")  # not installed
-    monkeypatch.setattr(drift, "REPO", repo)
-    monkeypatch.setattr(drift, "AGENTS", agents)
-    out = drift.plist_drift()
+    # plist_drift takes repo/agents as kwargs (defaults bound at def-time), so inject
+    # directly — monkeypatching the module globals no longer reaches the default args.
+    out = drift.plist_drift(repo=repo, agents=agents)
     assert any("differs from repo" in f for f in out)
     assert any("NOT installed" in f for f in out)
 

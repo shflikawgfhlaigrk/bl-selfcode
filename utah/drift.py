@@ -21,7 +21,10 @@ import os
 import pathlib
 import re
 import socket
+import subprocess
 import time
+import urllib.error
+import urllib.request
 from typing import Callable, Mapping
 
 log = logging.getLogger("utah.drift")
@@ -137,6 +140,52 @@ def icloud_conflicts(*, repo: pathlib.Path = REPO) -> list[str]:
     return [f"iCloud conflict copies present: {', '.join(hits)}"] if hits else []
 
 
+def tailserve_job(*, gui: str | None = None) -> list[str]:
+    """com.utah.tailserve must stay loaded — it re-asserts tailnet :8765 → Utah :8766
+    every 2 min so Ace/Sovereign can't clobber the hook again."""
+    gui = gui or f"gui/{os.getuid()}"
+    r = subprocess.run(
+        ["launchctl", "print", f"{gui}/com.utah.tailserve"],
+        capture_output=True,
+        timeout=5,
+    )
+    if r.returncode != 0:
+        return ["com.utah.tailserve not loaded — tailnet :8765 may drift off Utah"]
+    return []
+
+
+def tailserve_hook(*, want_target: str = "127.0.0.1:8766") -> list[str]:
+    """Tailscale serve on :8765 must proxy the Utah deck, not Ace/Sovereign."""
+    ts = "/Applications/Tailscale.app/Contents/MacOS/Tailscale"
+    if not os.path.isfile(ts) or not os.access(ts, os.X_OK):
+        return []  # no Tailscale — tailnet hook N/A on this host
+    try:
+        status = subprocess.run(
+            [ts, "serve", "status"],
+            capture_output=True,
+            text=True,
+            timeout=8,
+        ).stdout
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return [f"tailserve status unreadable ({exc.__class__.__name__})"]
+    if want_target not in status:
+        return [f"tailnet :8765 not proxying {want_target} — run com.utah.tailserve"]
+    return []
+
+
+def sovereign_hijack(*, utah_port: int = 8766) -> list[str]:
+    """Utah must own :8766 — Sovereign answering there is the classic hijack."""
+    try:
+        body = urllib.request.urlopen(
+            f"http://127.0.0.1:{utah_port}/", timeout=PORT_PROBE_TIMEOUT_S
+        ).read(1024).decode("utf-8", "replace").lower()
+    except (urllib.error.URLError, TimeoutError, OSError) as exc:
+        return [f":{utah_port} (utah web deck) not listening ({exc.__class__.__name__})"]
+    if "sovereign" in body and "ace os" not in body:
+        return [f":{utah_port} is serving Sovereign, not Utah"]
+    return []
+
+
 def empty_secrets(*, secrets_dir: pathlib.Path = SECRETS_DIR) -> list[str]:
     """Integrations that claim 'ready' on the deck must have non-empty creds.
 
@@ -159,6 +208,9 @@ DEFAULT_PROBES: tuple[Callable[[], list[str]], ...] = (
     plist_drift,
     stale_runtime,
     port_squatters,
+    tailserve_job,
+    tailserve_hook,
+    sovereign_hijack,
     icloud_conflicts,
     empty_secrets,
 )
@@ -197,5 +249,8 @@ __all__ = [
     "plist_drift",
     "port_squatters",
     "scan",
+    "sovereign_hijack",
     "stale_runtime",
+    "tailserve_hook",
+    "tailserve_job",
 ]
