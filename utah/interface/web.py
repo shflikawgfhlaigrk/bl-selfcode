@@ -711,11 +711,13 @@ class OriginGuard(BaseHTTPMiddleware):
 
 def build_app() -> Starlette:
     routes = [
-        Route("/", hud),                 # the real dash (Black Gold HUD) is now the default
-        Route("/hud", hud),
-        Route("/deck", hud),
+        Route("/", index),                # THE REAL DECK: live.html — actively maintained, full live
+                                          # data (failures feed, PIPELINE, SYSTEM MAP, panels). The
+                                          # Jun-6 React SPA shell lacks all of this; it's at /hud.
+        Route("/hud", hud),               # the Jun-6 React SPA design shell (stale build, reference only)
+        Route("/deck", index),            # the real deck
         Route("/sim", hud),               # legacy alias (was the static "design sim")
-        Route("/classic", index),         # the prior server-rendered live.html deck, preserved
+        Route("/classic", index),         # live.html (same as /)
         Route("/live", index),
         Route("/terminal", terminal),
         Route("/terminal.html", terminal),
