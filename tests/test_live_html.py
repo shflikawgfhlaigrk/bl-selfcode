@@ -21,10 +21,18 @@ from utah.interface import web
 SRC = web.LIVE.read_text(encoding="utf-8")
 
 
+def _inline_scripts() -> list[str]:
+    # NON-greedy + findall: live.html carries more than one inline <script> block (a small
+    # bootstrap + the main deck). A greedy single match would span from the first <script>
+    # to the LAST </script>, swallowing the HTML between them ("Unexpected token '<'").
+    blocks = re.findall(r"<script>(.*?)</script>", SRC, re.S)
+    assert blocks, "live.html must carry its inline deck script"
+    return blocks
+
+
 def _inline_script() -> str:
-    m = re.search(r"<script>(.*)</script>", SRC, re.S)
-    assert m, "live.html must carry its inline deck script"
-    return m.group(1)
+    # all inline blocks joined (no intervening HTML) — for the text-contract scans below.
+    return "\n;\n".join(_inline_scripts())
 
 
 # --- the script is valid JS ------------------------------------------------------
@@ -33,11 +41,13 @@ def test_inline_script_parses_under_node(tmp_path):
     node = shutil.which("node")
     if not node:
         pytest.skip("node not installed — JS syntax check unavailable")
-    js = tmp_path / "deck.js"
-    js.write_text(_inline_script(), encoding="utf-8")
-    proc = subprocess.run([node, "--check", str(js)], capture_output=True,
-                          text=True, timeout=30)
-    assert proc.returncode == 0, f"deck script has a JS syntax error:\n{proc.stderr}"
+    for i, block in enumerate(_inline_scripts()):
+        js = tmp_path / f"deck{i}.js"
+        js.write_text(block, encoding="utf-8")
+        proc = subprocess.run([node, "--check", str(js)], capture_output=True,
+                              text=True, timeout=30)
+        assert proc.returncode == 0, (
+            f"deck inline script block {i} has a JS syntax error:\n{proc.stderr}")
 
 
 # --- XSS surface ------------------------------------------------------------------

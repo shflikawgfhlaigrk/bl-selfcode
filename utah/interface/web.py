@@ -66,17 +66,26 @@ _PWA_HEAD = (
 )
 
 
-async def index(request):
-    # Inject PWA tags into <head> at serve time (keeps live.html itself clean). Honest
-    # fallback: if the read/decode fails, serve the file bytes unchanged.
+def _serve_deck(path):
+    """Serve a deck HTML file with the PWA <head> injected exactly once (manifest, apple
+    meta, service worker) so it installs to the home screen. Keeps the source files clean.
+    Honest fallback: if read/decode fails, serve the file bytes unchanged."""
     try:
-        html = LIVE.read_text(encoding="utf-8")
+        html = path.read_text(encoding="utf-8")
         if "/manifest.webmanifest" not in html:
             html = html.replace("<head>", "<head>" + _PWA_HEAD, 1)
-        return HTMLResponse(html)
+        return HTMLResponse(
+            html,
+            headers={"Cache-Control": "no-store, must-revalidate", "Pragma": "no-cache"},
+        )
     except (OSError, UnicodeDecodeError) as exc:  # never let PWA injection break the deck
-        log.warning("PWA injection skipped (%s) — serving live.html raw", exc)
-        return FileResponse(LIVE)
+        log.warning("PWA injection skipped (%s) — serving %s raw", exc, path.name)
+        return FileResponse(path)
+
+
+async def index(request):
+    """The classic server-rendered deck (live.html), preserved at /classic and /live."""
+    return _serve_deck(LIVE)
 
 
 async def terminal(request):
@@ -143,8 +152,13 @@ async def app_icon(request):
     return Response(_png_icon(size), media_type="image/png")
 
 
-async def sim(request):
-    return FileResponse(DASH / "index.html")  # Black Gold design simulation (reference only)
+async def hud(request):
+    """The ACE OS Black Gold Command Deck — the live operator HUD. Served same-origin so
+    its per-domain fetches (/status, /memory, /daemon, /voice, /engines, /agents, /risk,
+    /audit, /sync) resolve against THIS daemon's live feed — that's what turns it from the
+    static design mock into the real dash. The DEFAULT deck; the prior server-rendered deck
+    is preserved at /classic (and /live)."""
+    return _serve_deck(DASH / "index.html")
 
 
 async def favicon(request):
@@ -697,10 +711,14 @@ class OriginGuard(BaseHTTPMiddleware):
 
 def build_app() -> Starlette:
     routes = [
-        Route("/", index),
+        Route("/", hud),                 # the real dash (Black Gold HUD) is now the default
+        Route("/hud", hud),
+        Route("/deck", hud),
+        Route("/sim", hud),               # legacy alias (was the static "design sim")
+        Route("/classic", index),         # the prior server-rendered live.html deck, preserved
+        Route("/live", index),
         Route("/terminal", terminal),
         Route("/terminal.html", terminal),
-        Route("/sim", sim),
         Route("/favicon.svg", favicon),
         Route("/discord", discord_redirect),
         Route("/api/discord", api_discord),
