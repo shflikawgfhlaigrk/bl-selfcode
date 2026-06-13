@@ -51,15 +51,60 @@ TARGET_R = 2.0       # R-multiple target (backtest.backtest default)
 HORIZON_MIN = 30     # evaluation horizon: timeout + mark-to-market after 30 minutes
 
 
+def _levels_sane(direction: str, entry: float, stop: float, target: float) -> bool:
+    """Recorded stop/target are usable only when both are finite and on the geometrically
+    correct sides of entry for the direction (long: stop < entry < target; short:
+    target < entry < stop). The old all-breakout fires wrote garbled levels (both on one
+    side); those fail this and fall back to structural reconstruction."""
+    if stop is None or target is None:
+        return False
+    if not all(isinstance(x, (int, float)) and math.isfinite(x) for x in (stop, target)):
+        return False
+    if direction == "long":
+        return stop < entry < target
+    return target < entry < stop
+
+
+def _grade_levels(direction: str, entry: float, stop: float, target: float, post) -> dict:
+    """Walk post-fire closes against the fire's OWN recorded stop/target (any archetype).
+    PESSIMISTIC ordering: a bar at/through the STOP counts as the stop even if it also
+    cleared the target that bar (closes can't see intrabar order), so a win is never
+    flattered. End of horizon → timeout, marked to market. Never invents a price."""
+    for px in post:
+        if direction == "long":
+            if px <= stop:
+                return {"outcome": "stop", "pnl": round(stop - entry, 4),
+                        "reason": f"recorded stop {stop} hit (target was {target})"}
+            if px >= target:
+                return {"outcome": "target", "pnl": round(target - entry, 4),
+                        "reason": f"recorded target {target} hit (stop was {stop})"}
+        else:
+            if px >= stop:
+                return {"outcome": "stop", "pnl": round(entry - stop, 4),
+                        "reason": f"recorded stop {stop} hit (target was {target})"}
+            if px <= target:
+                return {"outcome": "target", "pnl": round(entry - target, 4),
+                        "reason": f"recorded target {target} hit (stop was {stop})"}
+    last = post[-1]
+    pnl = (last - entry) if direction == "long" else (entry - last)
+    return {"outcome": "timeout", "pnl": round(pnl, 4),
+            "reason": f"neither recorded level hit in horizon; marked to market at {last}"}
+
+
 def grade(direction: str, entry: float, prior_closes, post_closes, *,
-          lookback: int = LOOKBACK, target_r: float = TARGET_R) -> dict:
+          lookback: int = LOOKBACK, target_r: float = TARGET_R,
+          stop: float | None = None, target: float | None = None) -> dict:
     """Grade ONE fire from real bar closes. PURE (unit-tested with synthetic bars).
 
     ``prior_closes``: chronological closes of the bars before the breakout bar (the
     structural-stop window). ``post_closes``: chronological closes after the fire, already
     clipped to the evaluation horizon. Returns ``{outcome, pnl, reason}`` where outcome is
     ``target | stop | timeout | ungradable`` and pnl is signed points (None if ungradable).
-    """
+
+    When the fire carries its OWN ``stop`` and ``target`` (any archetype — mean-reversion's
+    tight-target/wide-stop, not just breakout), grade against THOSE levels so the outcome
+    matches the geometry the engine actually traded. Falls back to structural breakout
+    reconstruction when no levels are given or they are geometrically insane (old rows)."""
     if direction not in ("long", "short"):
         return {"outcome": "ungradable", "pnl": None,
                 "reason": f"unknown direction {direction!r}"}
@@ -69,6 +114,13 @@ def grade(direction: str, entry: float, prior_closes, post_closes, *,
         # NaN pnl to the ledger. Refuse instead of mis-grading.
         return {"outcome": "ungradable", "pnl": None,
                 "reason": f"fire has no usable entry price ({entry!r})"}
+    # Prefer the fire's OWN recorded levels (archetype-correct geometry) when sane.
+    if _levels_sane(direction, entry, stop, target):
+        post = list(post_closes)
+        if not post:
+            return {"outcome": "ungradable", "pnl": None,
+                    "reason": "no post-fire bars persisted — a price is never invented"}
+        return _grade_levels(direction, entry, stop, target, post)
     if not (isinstance(target_r, (int, float)) and math.isfinite(target_r) and target_r > 0):
         # target_r <= 0 inverts the target THROUGH the entry: a losing trade would
         # grade 'target'. Parameter abuse, not data — refuse loudly.
@@ -120,7 +172,19 @@ def _grade_one(ledger, fire: dict, horizon: timedelta, lookback: int,
     prior = ledger.bars_before(symbol, ts, lookback + 1)[:-1]
     post = ledger.bars_between(symbol, ts, end)
     return grade(fire["direction"], fire.get("entry"), prior, post,
-                 lookback=lookback, target_r=target_r)
+                 lookback=lookback, target_r=target_r,
+                 stop=_finite_or_none(fire.get("stop")),
+                 target=_finite_or_none(fire.get("target")))
+
+
+def _finite_or_none(x):
+    """Coerce a recorded numeric (psycopg may hand back Decimal) to float, or None for
+    a missing/NaN/inf level — so grade() grades against real levels or falls back cleanly."""
+    try:
+        f = float(x)
+        return f if math.isfinite(f) else None
+    except (TypeError, ValueError):
+        return None
 
 
 def run_scheduled(ledger=None, *, horizon_min: int = HORIZON_MIN,

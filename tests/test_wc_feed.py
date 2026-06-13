@@ -4,6 +4,12 @@ from __future__ import annotations
 
 from utah.integrations import wc_feed
 
+# Pass-through edge gate: these tests exercise fire MECHANICS (bar aggregation, the
+# edge/level fire contract, cooldown, provenance), not the proven-edge gate (that lives
+# in tests/test_trading_edge_gate.py). Inject so a fire records on signal without a real
+# per-symbol backtest / DB hit.
+_PASS = lambda _engine, _symbol: {"ok": True, "reason": "test pass-through"}  # noqa: E731
+
 # a REAL frame captured live from app.wealthcharts.com (MNQ June micro-futures)
 REAL = ('{"cmd":"feed","data":{"type":"candle","c":"CM.MNQM6","candle":'
         '{"cnu":1,"co":29374.00,"cm":29370.00,"cM":29380.00,"cc":29376.50,'
@@ -218,6 +224,11 @@ class _FireLedger:
     def record_fire(self, engine, direction, entry=None, synthetic=False, symbol=None, *, stop=None, target=None, rationale=None):
         self.fired.append((engine, direction, entry, synthetic, symbol))
         self.provenance = {"stop": stop, "target": target, "rationale": rationale}
+        # per-engine provenance: breakout and meanrev fire the same bar under their OWN
+        # archetype geometry, so keep both (self.provenance alone holds only the last).
+        if not hasattr(self, "prov_by_engine"):
+            self.prov_by_engine = {}
+        self.prov_by_engine[engine] = dict(self.provenance)
         return 1
 
     def record_bars(self, symbol, rows, bar_seconds=15):
@@ -231,7 +242,7 @@ def test_barstream_hooks_once_and_flushes_incrementally():
     double-count a bar or re-persist it (Michael 2026-06-10: 'run it the one time
     and get the hook for the data', not a 30s reconnect loop)."""
     lg = _FireLedger()
-    bs = wc_feed.BarStream(lg, bar_seconds=1, lookback=5)
+    bs = wc_feed.BarStream(lg, bar_seconds=1, lookback=5, edge_fn=_PASS)
     for ep, px in [(0, 100.0), (1, 101.0), (2, 102.0), (3, 101.0), (4, 103.0)]:
         bs.feed("CM.NQM6", ep, px)
     r1 = bs.flush()
@@ -254,7 +265,7 @@ def test_barstream_no_new_closed_bar_means_no_reevaluation():
     """Flushing while only the forming bar grew must not re-evaluate (no duplicate
     fires from the same closed bar)."""
     lg = _FireLedger()
-    bs = wc_feed.BarStream(lg, bar_seconds=1, lookback=5)
+    bs = wc_feed.BarStream(lg, bar_seconds=1, lookback=5, edge_fn=_PASS)
     for ep, px in [(0, 100.0), (1, 101.0), (2, 102.0), (3, 101.0),
                    (4, 103.0), (5, 110.0), (6, 111.0)]:
         bs.feed("X", ep, px)
@@ -268,7 +279,7 @@ def test_barstream_no_new_closed_bar_means_no_reevaluation():
 def test_barstream_trims_its_buffer_to_the_forming_bar():
     """The hook runs for hours — the per-symbol tick buffer must not grow unboundedly."""
     lg = _FireLedger()
-    bs = wc_feed.BarStream(lg, bar_seconds=1, lookback=5)
+    bs = wc_feed.BarStream(lg, bar_seconds=1, lookback=5, edge_fn=_PASS)
     for ep in range(50):
         bs.feed("X", ep, 100.0 + ep * 0.01)
     bs.flush()
@@ -280,7 +291,7 @@ def test_barstream_fires_on_signal_edge_not_every_extended_bar():
     band and paged the phone each time. Edge contract: fire when the signal appears or
     flips; a no-signal bar re-arms; an extended run fires ONCE."""
     lg = _FireLedger()
-    bs = wc_feed.BarStream(lg, bar_seconds=1, lookback=5)
+    bs = wc_feed.BarStream(lg, bar_seconds=1, lookback=5, edge_fn=_PASS)
     for ep, px in [(0, 100.0), (1, 101.0), (2, 102.0), (3, 101.0), (4, 103.0)]:
         bs.feed("X", ep, px)
     bs.flush()
@@ -366,7 +377,7 @@ def test_barstream_writes_every_tick_through_to_the_live_surface():
             self.ticks.append((symbol, price, epoch_s))
 
     lg = _TickLedger()
-    bs = wc_feed.BarStream(lg, bar_seconds=10, lookback=5)
+    bs = wc_feed.BarStream(lg, bar_seconds=10, lookback=5, edge_fn=_PASS)
     bs.feed("CM.NQM6", 100, 1.0)
     bs.feed("US.SPY", 101, 2.0)
     assert lg.ticks == [("CM.NQM6", 1.0, 100), ("US.SPY", 2.0, 101)]
@@ -415,7 +426,7 @@ def test_warm_boot_rebuilds_state_and_already_on_signals_do_not_refire():
     assert state["US.SPY"]["last_key"] == 24                     # ts convention honored
     assert sig[("breakout", "US.SPY")] == "long"                 # live signal restored
     bs = wc_feed.BarStream(lg, bar_seconds=_WarmLedger.BS, lookback=20,
-                           state=state, sig=sig)
+                           state=state, sig=sig, edge_fn=_PASS)
     # next bar extends the same breakout (new high) — still the SAME episode
     bs.feed("US.SPY", 25 * _WarmLedger.BS, 130.0)
     bs.feed("US.SPY", 26 * _WarmLedger.BS, 131.0)                # closes bar 25
@@ -428,7 +439,7 @@ def test_warm_boot_still_fires_on_a_genuine_flip():
     lg = _WarmLedger()
     state, sig = wc_feed.warm_from_ledger(lg, bar_seconds=_WarmLedger.BS, lookback=20)
     bs = wc_feed.BarStream(lg, bar_seconds=_WarmLedger.BS, lookback=20,
-                           state=state, sig=sig)
+                           state=state, sig=sig, edge_fn=_PASS)
     # crash through the bottom of the range -> breakout flips long->short
     bs.feed("US.SPY", 25 * _WarmLedger.BS, 80.0)
     bs.feed("US.SPY", 26 * _WarmLedger.BS, 79.0)
@@ -442,13 +453,13 @@ def test_sig_is_caller_owned_across_rehooks():
     lg = _WarmLedger()
     state, sig = wc_feed.warm_from_ledger(lg, bar_seconds=_WarmLedger.BS, lookback=20)
     bs1 = wc_feed.BarStream(lg, bar_seconds=_WarmLedger.BS, lookback=20,
-                            state=state, sig=sig)
+                            state=state, sig=sig, edge_fn=_PASS)
     bs1.feed("US.SPY", 25 * _WarmLedger.BS, 130.0)
     bs1.feed("US.SPY", 26 * _WarmLedger.BS, 131.0)
     bs1.flush()
     # hook drops; the loop re-attaches with the SAME caller-owned dicts
     bs2 = wc_feed.BarStream(lg, bar_seconds=_WarmLedger.BS, lookback=20,
-                            state=state, sig=sig)
+                            state=state, sig=sig, edge_fn=_PASS)
     bs2.feed("US.SPY", 27 * _WarmLedger.BS, 132.0)               # breakout continues
     bs2.feed("US.SPY", 28 * _WarmLedger.BS, 133.0)
     bs2.flush()
@@ -496,13 +507,16 @@ def test_hook_fire_carries_provenance_and_cooldown_suppresses_rearm():
             return {"open": False, "last_fire_age_s": 1.0 if mine else None}
 
     lg = _CooldownLedger()
-    bs = wc_feed.BarStream(lg, bar_seconds=1, lookback=5)
+    bs = wc_feed.BarStream(lg, bar_seconds=1, lookback=5, edge_fn=_PASS)
     _feed_through_breakout(bs)
     r = bs.flush()
     first = len(lg.fired)
     assert r["fires"] == first >= 1                   # each engine's FIRST fire admits
-    assert lg.provenance["stop"] is not None and lg.provenance["target"] is not None
-    assert "breakout" in lg.provenance["rationale"]
+    # every fire carries non-null provenance, each under its OWN archetype geometry:
+    bo = lg.prov_by_engine["breakout"]
+    assert bo["stop"] is not None and bo["target"] is not None and "breakout" in bo["rationale"]
+    mr = lg.prov_by_engine["meanrev"]
+    assert mr["stop"] is not None and mr["target"] is not None and "mean-revert" in mr["rationale"]
 
     r2 = _walk_signal_drop_then_new_edge(bs)
     assert r2["fires"] == 0 and len(lg.fired) == first  # cooldown held the line
@@ -515,7 +529,7 @@ def test_hook_refires_once_cooldown_has_aged_out():
             return {"open": False, "last_fire_age_s": 9999.0 if mine else None}
 
     lg = _AgedLedger()
-    bs = wc_feed.BarStream(lg, bar_seconds=1, lookback=5)
+    bs = wc_feed.BarStream(lg, bar_seconds=1, lookback=5, edge_fn=_PASS)
     _feed_through_breakout(bs)
     bs.flush()
     breakout_first = [f for f in lg.fired if f[0] == "breakout"]
@@ -532,7 +546,7 @@ def test_hook_fire_suppressed_while_position_open():
             return {"open": True, "last_fire_age_s": 9999.0}
 
     lg = _OpenLedger()
-    bs = wc_feed.BarStream(lg, bar_seconds=1, lookback=5)
+    bs = wc_feed.BarStream(lg, bar_seconds=1, lookback=5, edge_fn=_PASS)
     _feed_through_breakout(bs)
     assert bs.flush()["fires"] == 0 and lg.fired == []
 

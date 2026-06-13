@@ -78,6 +78,13 @@ def _restore_boundaries():
     # Pin an in-memory SICA archive so no test reads/writes the real Postgres
     # selfcode_archive (Archive() with no path now defaults to PG in production).
     sica_mod.set_archive_backend(sica_mod._MemArchive())
+    # Clear the trading edge-gate cache so a verdict from one test (or a real-DB backtest)
+    # never leaks into another's fire decisions (the gate is module-level + TTL-cached).
+    try:
+        from utah.product import trading as _trading_mod
+        _trading_mod._EDGE_CACHE.clear()
+    except Exception:  # noqa: BLE001 — trading import optional in minimal test subsets
+        pass
     local_mod.set_runner(_local_down)
     local_mod.set_stream_runner(_local_down)
     local_mod.set_load_probe(lambda: 0.0)  # never read the host's real load in tests

@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import time
 from pathlib import Path
 
 from utah import failures
@@ -109,9 +110,18 @@ ENGINE_ARCHETYPE = {
 #: wide-stop tail-cap: a structural bound on the rare unbounded drawdown, not a curve-fit.
 #: ``win_floor=0.87`` is the GOAL gate — ``edge_proven`` stays False until the live OOS
 #: actually clears it AND is net-positive, so the dash never shows a proven edge it lacks.
+#: ``min_trades`` is the SAMPLE FLOOR for "edge proven" — the fire gate's guard against
+#: betting on noise. Proven live 2026-06-13: at min_trades=1 the breakout gate passed on
+#: 4–11-trade "edges" (CM.NQM6 n=4 win=0.50, CM.MNQM6 n=11 net+1.6R) — pure small-sample
+#: luck, exactly the overfit the edge gate exists to refuse. At a 20-trade OOS floor the
+#: only engine/symbol that proves edge on the current ~3-day bar history is mean-reversion
+#: on NQ futures (CM.NQM6: OOS win 88%, +491 pts, n=25) — the robust winner the parameter
+#: sweep also found. Raise as the captured history deepens.
+EDGE_MIN_TRADES = int(os.environ.get("UTAH_EDGE_MIN_TRADES", "20"))
 MEANREV_CFG = {"lookback": 20, "z_enter": 2.0, "tgt_frac": 0.6, "stop_mult": 8.0,
-               "win_floor": 0.87, "oos_frac": 0.4, "min_trades": 1, "max_hold": 80}
-BREAKOUT_CFG = {"lookback": 20, "target_r": 2.0, "min_trades": 1}
+               "win_floor": 0.87, "oos_frac": 0.4, "min_trades": EDGE_MIN_TRADES,
+               "max_hold": 80}
+BREAKOUT_CFG = {"lookback": 20, "target_r": 2.0, "min_trades": EDGE_MIN_TRADES}
 
 
 def implemented_engines() -> tuple[str, ...]:
@@ -280,6 +290,46 @@ def lab_state(fires: int = 0, by_engine: dict | None = None, backtests=_AUTO) ->
     }
 
 
+#: Per-(engine, symbol) edge verdict cache: ``{(engine, symbol): (computed_at, verdict)}``.
+#: The gate runs a real backtest, so it is cached behind a TTL — at most one backtest per
+#: (engine, symbol) per ``EDGE_TTL_S`` rather than one per bar flush (the fire path can run
+#: every few seconds). Module-level so both fire paths (run, wc_feed.flush) share it.
+_EDGE_CACHE: dict[tuple[str, str], tuple[float, dict]] = {}
+#: 15 min — the bar regime the engines read; re-proving faster wastes a backtest on the
+#: same window. Env-tunable so a deploy can tighten/loosen without a code change.
+EDGE_TTL_S = float(os.environ.get("UTAH_EDGE_TTL_S", "900"))
+
+
+def edge_ok(engine: str, symbol: str, *, ohlc_fn=None, score_fn=None,
+            ttl_s: float = EDGE_TTL_S, now=None) -> dict:
+    """Does *engine* currently have PROVEN held-out OOS edge on *symbol*'s real bars?
+
+    The fire gate. A fire records ONLY when this returns ``ok=True`` — so the engine
+    never makes a negative-expectancy bet (2026-06-12: the un-gated breakout fired
+    1,461 times at 21.5% on a 2R target = net −4,384 pts; the data's edge lives only in
+    mean-reversion on index futures). ``ok`` is exactly the archetype backtest's
+    ``edge_proven`` (real sample AND positive OOS), so the gate tightens/loosens with the
+    live data and never fires blind on thin/empty bars. Cached per (engine, symbol) behind
+    ``ttl_s``. All boundaries injected for unit-proof; production reads the symbol's bars
+    and runs the engine's archetype backtest."""
+    clock = now or time.time
+    key = (engine, symbol)
+    hit = _EDGE_CACHE.get(key)
+    if hit is not None and (clock() - hit[0]) < ttl_s:
+        return hit[1]
+    bars = list((ohlc_fn or _ohlc_bars)(symbol) or [])
+    if len(bars) < MEANREV_CFG["lookback"] + 2:
+        # Not enough bars to prove anything — NEVER fire blind on thin/empty data.
+        # Not cached: edge arms the moment the feed has persisted enough bars.
+        return {"ok": False, "reason": f"insufficient bars ({len(bars)}) to prove edge",
+                "scorecard": _empty_scorecard(engine)}
+    score = (score_fn or _backtest_engine)(engine, bars)
+    verdict = {"ok": bool(score.get("edge_proven")),
+               "reason": score.get("reason", ""), "scorecard": score}
+    _EDGE_CACHE[key] = (clock(), verdict)
+    return verdict
+
+
 def evaluate(closes: list[float], *, lookback: int = 20, engine: str = "breakout") -> dict | None:
     """One engine's signal on the closed-bar series. Pure. Unknown/unported engine
     names NEVER fabricate a signal — they return None until their rules land."""
@@ -306,12 +356,22 @@ def _live_feed() -> list[float]:  # pragma: no cover — activates with the real
 
 def _fire_context(closes: list[float], sig: dict, *, lookback: int = 20,
                   target_r: float = 2.0) -> dict:
-    """Structural stop/target + rationale from the breakout window (same math as fire_grader)."""
+    """Stop/target/rationale for a fire — ARCHETYPE-AWARE.
+
+    The geometry MUST match the archetype the engine's edge is proven under, or the
+    live fire can't capture the backtested edge (2026-06-12: every engine fired with
+    breakout geometry, so the mean-reversion engine — proven positive with a tight
+    target / wide stop — was live-stopped as a breakout and bled). Breakout keeps the
+    structural stop + R-multiple target (= fire_grader / backtest.backtest). Mean-
+    reversion gets the tight-target-toward-the-mean / wide-z-stop shape from
+    backtest._mr_trades, using MEANREV_CFG's tgt_frac and stop_mult."""
     if len(closes) < lookback + 1:
         return {"stop": None, "target": None,
-                "rationale": f"{sig['engine']} {sig['direction']} breakout"}
+                "rationale": f"{sig['engine']} {sig['direction']} signal"}
     window = closes[-lookback - 1:-1][-lookback:]
     direction, entry = sig["direction"], sig["entry"]
+    if ENGINE_ARCHETYPE.get(sig["engine"]) == "mean-reversion":
+        return _meanrev_context(window, direction, entry, lookback)
     stop = min(window) if direction == "long" else max(window)
     risk = abs(entry - stop)
     if risk <= 0:
@@ -326,9 +386,45 @@ def _fire_context(closes: list[float], sig: dict, *, lookback: int = 20,
     }
 
 
-def run(ledger, *, feed_fn=None, lookback: int = 20, engine: str = "breakout") -> dict:
+def _meanrev_context(window: list[float], direction: str, entry: float,
+                     lookback: int) -> dict:
+    """Mean-reversion fire geometry — tight target a fraction of the way back to the
+    rolling mean, wide stop ``stop_mult`` sigma beyond entry (exactly backtest._mr_trades
+    so a live fire's risk/reward matches the proven OOS shape). Degrades to a bare
+    rationale (no levels) on a zero-variance window — never fabricates a level."""
+    mean = sum(window) / len(window)
+    var = sum((c - mean) ** 2 for c in window) / len(window)
+    if var <= 0.0:
+        return {"stop": None, "target": None,
+                "rationale": f"mean-revert {direction} @ {entry:.4f} (flat window)"}
+    sd = var ** 0.5
+    tgt_frac, stop_mult = MEANREV_CFG["tgt_frac"], MEANREV_CFG["stop_mult"]
+    if direction == "long":
+        target = entry + tgt_frac * (mean - entry)
+        stop = entry - stop_mult * sd
+    else:
+        target = entry - tgt_frac * (entry - mean)
+        stop = entry + stop_mult * sd
+    z = (entry - mean) / sd
+    return {
+        "stop": round(stop, 4),
+        "target": round(target, 4),
+        "rationale": (f"mean-revert {direction} @ {entry:.4f} (z={z:+.2f}), "
+                      f"target {target:.4f} ({tgt_frac:.0%} to mean {mean:.4f}), "
+                      f"stop {stop:.4f} ({stop_mult:g}σ)"),
+    }
+
+
+def run(ledger, *, feed_fn=None, lookback: int = 20, engine: str = "breakout",
+        symbol: str | None = None, edge_fn=None) -> dict:
     """Pull recent closes from the feed, evaluate, and record a real fire on signal.
-    GATED: with no feed it records 0 fires + documents the gate. Never fabricates. Never raises."""
+    GATED on two things: (1) the live WC feed (no feed → 0 fires, documented); (2) PROVEN
+    EDGE — a signal fires only when *engine* currently proves held-out OOS edge on *symbol*
+    (:func:`edge_ok`), so the engine never takes a negative-expectancy bet. The edge gate
+    is active when a ``symbol`` is known (the live path passes it); with no symbol AND no
+    ``edge_fn`` the gate can't evaluate a stream and is skipped (the pure-pipeline unit
+    contract). ``edge_fn(engine, symbol) -> {ok,...}`` is injectable for tests.
+    Never fabricates. Never raises."""
     if feed_fn is None and not feed_available():
         failures.record("trading", "feed_gated",
                         "engine fires gated: no live WealthCharts feed (Michael's WC login). "
@@ -343,6 +439,14 @@ def run(ledger, *, feed_fn=None, lookback: int = 20, engine: str = "breakout") -
     sig = evaluate(closes, lookback=lookback, engine=engine)
     if not sig:
         return {"fires": 0, "signal": None}
+    # EDGE GATE: never bet without proven held-out edge on this symbol. Active when a
+    # symbol is known (live path) or an edge_fn is injected (tests); skipped otherwise so
+    # the pure-pipeline unit contract (fire on signal) is preserved.
+    if edge_fn is not None or symbol is not None:
+        verdict = (edge_fn or (lambda e, s: edge_ok(e, s)))(engine, symbol)
+        if not verdict.get("ok"):
+            return {"fires": 0, "signal": sig, "suppressed": "no_edge",
+                    "edge_reason": verdict.get("reason", "")}
     # ONE POSITION PER ENGINE + COOLDOWN (2026-06-10: 749 fires in a day — a
     # persisting breakout re-fired every bar; stats and alerts were garbage).
     # Open fire (ungraded) = in a trade: no new fire until the grader closes it.
@@ -384,4 +488,4 @@ def run(ledger, *, feed_fn=None, lookback: int = 20, engine: str = "breakout") -
 
 __all__ = ["evaluate", "run", "feed_available", "lab_state", "ENGINES", "ENGINE_RULES",
            "implemented_engines", "fleet_backtest", "dash_config", "ENGINE_ARCHETYPE",
-           "MEANREV_CFG", "APEX_DASH_CONFIG"]
+           "MEANREV_CFG", "APEX_DASH_CONFIG", "edge_ok", "EDGE_TTL_S"]

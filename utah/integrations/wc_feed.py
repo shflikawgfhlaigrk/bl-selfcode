@@ -474,13 +474,19 @@ class BarStream:
 
     def __init__(self, ledger, *, bar_seconds: int = BAR_SECONDS, lookback: int = 20,
                  engine: str = "breakout", state: dict | None = None,
-                 max_bars: int = MAX_BARS, sig: dict | None = None):
+                 max_bars: int = MAX_BARS, sig: dict | None = None, edge_fn=None):
         self.ledger = ledger
         self.bar_seconds = bar_seconds
         self.lookback = lookback
         self.engine = engine
         self.state = state if state is not None else {}
         self.max_bars = max_bars
+        #: EDGE GATE: ``edge_fn(engine, symbol) -> {"ok": bool, ...}`` — a fire records
+        #: only when the engine currently proves held-out OOS edge on the symbol (2026-06-12:
+        #: the un-gated breakout bled −4,384 pts firing blind). Default is the real
+        #: per-(engine,symbol) backtest gate (trading.edge_ok, TTL-cached); tests inject a
+        #: pass-through. ``None`` here defers to trading.edge_ok at flush time.
+        self._edge_fn = edge_fn
         self.buf: dict[str, list[tuple[int, float]]] = {}
         #: EDGE-firing state: last signal direction per (engine, symbol). An engine
         #: fires when its signal APPEARS or FLIPS — never again on every extended bar
@@ -553,6 +559,14 @@ class BarStream:
                     if state.get("open") or (age is not None and age < trading.FIRE_COOLDOWN_S):
                         log.info("wc_feed suppressed: %s %s %s (%s)", eng, symbol, direction,
                                  "in_position" if state.get("open") else "cooldown")
+                        continue
+                    # EDGE GATE: only fire where THIS engine currently proves held-out OOS
+                    # edge on THIS symbol — never a negative-expectancy bet (2026-06-12:
+                    # blind breakout = net −4,384 pts; the data's edge is meanrev on NQ).
+                    verdict = (self._edge_fn or (lambda e, s: trading.edge_ok(e, s)))(eng, symbol)
+                    if not verdict.get("ok"):
+                        log.info("wc_feed suppressed: %s %s %s (no_edge: %s)", eng, symbol,
+                                 direction, verdict.get("reason", ""))
                         continue
                     ctx = trading._fire_context(closes, sig, lookback=self.lookback)
                     self.ledger.record_fire(eng, direction, entry=closes[-1],
