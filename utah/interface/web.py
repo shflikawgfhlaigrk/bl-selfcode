@@ -39,6 +39,7 @@ DASH = pathlib.Path(__file__).resolve().parents[2] / "dashboard"
 STATIC = pathlib.Path(__file__).resolve().parent / "static"
 LIVE = STATIC / "live.html"
 TERMINAL = STATIC / "terminal.html"
+ROUTE_PAGE = STATIC / "route.html"
 
 
 async def _daemon_status() -> dict | None:
@@ -92,6 +93,104 @@ async def terminal(request):
     """The standalone Ace Terminal — a dark monospace TUI into the same grounded brain
     the deck uses (POSTs /api/tell, streams /api/tell/stream). No new brain; just a shell."""
     return FileResponse(TERMINAL)
+
+
+async def route_page(request):
+    """Route Optimizer page — paste addresses (or pull our own probate/leads) and get the
+    shortest drive order + miles saved + a Google Maps link. The two sellable products
+    (Canvasser / Fleet) ride the one engine in ``utah.product.route``."""
+    return FileResponse(ROUTE_PAGE)
+
+
+#: Hard ceiling on stops per request — keeps geocoding (1 req/sec) and the O(n²) 2-opt
+#: polish snappy, and bounds the POST as an abuse surface.
+_ROUTE_MAX_STOPS = 60
+
+
+async def api_route(request):
+    """Optimize a set of stops. Body: ``{source, addresses|limit, config, vehicles, depot}``.
+    ``source`` = ``probate`` (uses enriched lat/lng + ARV, no geocoding), ``leads`` (geocoded
+    live), or ``paste`` (newline addresses, geocoded live). Returns ordered routes, totals,
+    a naive-vs-optimized comparison, and per-driver Maps links. Never fabricates a coord."""
+    from utah.product import route as R
+    try:
+        body = await request.json()
+    except Exception:  # noqa: BLE001 — malformed body is the caller's 400, never our 500
+        body = {}
+
+    source = str(body.get("source", "paste")).lower()
+    cfg_name = str(body.get("config", "canvasser")).lower()
+    try:
+        limit = min(_ROUTE_MAX_STOPS, int(body.get("limit") or 20))
+    except (TypeError, ValueError):
+        limit = 20
+
+    geocoder = None  # default: live OSM geocode
+    if source == "probate":
+        stops = await run_in_threadpool(R.stops_from_probate, limit=limit)
+        geocoder = lambda _addr: None  # coords already enriched; no network
+    elif source == "leads":
+        stops = await run_in_threadpool(R.stops_from_leads, limit=limit)
+    else:
+        raw = body.get("addresses") or []
+        if isinstance(raw, str):
+            raw = raw.splitlines()
+        lines = [str(s).strip() for s in raw if str(s).strip()][:_ROUTE_MAX_STOPS]
+        if (err := _oversized("\n".join(lines))):
+            return err
+        stops = [R.Stop(label=ln, address=ln) for ln in lines]
+
+    if not stops:
+        return JSONResponse({"error": "no stops to route"}, status_code=400)
+
+    if cfg_name == "fleet":
+        try:
+            vehicles = max(2, min(int(body.get("vehicles") or 2), 8))
+        except (TypeError, ValueError):
+            vehicles = 2
+        cfg = R.Config(name="fleet", vehicles=vehicles, round_trip=True)
+    else:
+        cfg = R.CANVASSER
+
+    depot = None
+    depot_addr = str(body.get("depot", "")).strip()
+    if depot_addr:
+        depot = R.Stop(label="depot", address=depot_addr)
+
+    res = await run_in_threadpool(R.optimize, stops, cfg, depot=depot, geocoder=geocoder)
+
+    routable = [i for i, s in enumerate(stops) if s.lat is not None]
+    naive_miles = None
+    if cfg.vehicles == 1 and len(routable) >= 2:
+        pts = [(stops[i].lat, stops[i].lng) for i in routable]
+        naive_miles = R.path_miles(R.distance_matrix(pts), list(range(len(pts))),
+                                   round_trip=cfg.round_trip)
+
+    routes_out = [{
+        "driver": n,
+        "miles": round(vr.total_miles, 1),
+        "minutes": round(vr.minutes),
+        "maps_url": vr.maps_url,
+        "stops": [{"label": stops[i].label,
+                   "arv": float(stops[i].meta["arv"]) if stops[i].meta.get("arv") is not None else None}
+                  for i in vr.stops],
+    } for n, vr in enumerate(res.routes, 1)]
+
+    return JSONResponse({
+        "config": cfg.name,
+        "vehicles": cfg.vehicles,
+        "stops_in": len(stops),
+        "routable": len(routable),
+        "unroutable": [stops[i].label for i in res.unroutable],
+        "total_miles": round(res.total_miles, 1),
+        "total_minutes": round(res.total_minutes),
+        "max_driver_minutes": round(max((vr.minutes for vr in res.routes), default=0)),
+        "naive_miles": round(naive_miles, 1) if naive_miles else None,
+        "saved_miles": round(naive_miles - res.total_miles, 1) if naive_miles else None,
+        "saved_pct": round((naive_miles - res.total_miles) / naive_miles * 100)
+                     if naive_miles else None,
+        "routes": routes_out,
+    })
 
 
 def _png_icon(size: int) -> bytes:
@@ -721,6 +820,8 @@ def build_app() -> Starlette:
         Route("/live", index),
         Route("/terminal", terminal),
         Route("/terminal.html", terminal),
+        Route("/route", route_page),
+        Route("/api/route", api_route, methods=["POST"]),
         Route("/favicon.svg", favicon),
         Route("/discord", discord_redirect),
         Route("/api/discord", api_discord),

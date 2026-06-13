@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Route Optimizer — Utah</title>
+<style>
+  :root{ --bg:#08080c; --panel:#0f0f15; --line:#23232e; --gold:#d9b25b; --gold2:#f0d488;
+         --ink:#e7e7ee; --dim:#8b8b9a; --good:#5fd38a; }
+  *{ box-sizing:border-box; }
+  body{ margin:0; background:var(--bg); color:var(--ink);
+        font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; }
+  header{ padding:22px 20px 10px; border-bottom:1px solid var(--line); }
+  h1{ margin:0; font-size:20px; color:var(--gold2); letter-spacing:.5px; }
+  .sub{ color:var(--dim); font-size:12px; margin-top:3px; }
+  .wrap{ max-width:880px; margin:0 auto; padding:18px 16px 60px; }
+  .card{ background:var(--panel); border:1px solid var(--line); border-radius:12px;
+         padding:16px; margin-top:14px; }
+  label{ display:block; color:var(--dim); font-size:11px; text-transform:uppercase;
+         letter-spacing:.6px; margin:10px 0 4px; }
+  select,input,textarea,button{ font:inherit; color:var(--ink); background:#15151d;
+         border:1px solid var(--line); border-radius:8px; padding:9px 11px; width:100%; }
+  textarea{ min-height:92px; resize:vertical; font-family:ui-monospace,Menlo,monospace; font-size:13px; }
+  .row{ display:flex; gap:12px; flex-wrap:wrap; }
+  .row > div{ flex:1; min-width:140px; }
+  button.go{ margin-top:16px; background:linear-gradient(180deg,var(--gold2),var(--gold));
+         color:#1a1206; font-weight:700; border:none; cursor:pointer; letter-spacing:.4px; }
+  button.go:active{ transform:translateY(1px); }
+  .hide{ display:none; }
+  .headline{ font-size:30px; color:var(--good); font-weight:800; }
+  .headline small{ font-size:14px; color:var(--dim); font-weight:500; }
+  .meta{ color:var(--dim); font-size:13px; margin-top:2px; }
+  .driver{ border:1px solid var(--line); border-radius:10px; padding:12px; margin-top:10px;
+           background:#101017; }
+  .driver h3{ margin:0 0 6px; font-size:13px; color:var(--gold2); }
+  .stop{ display:flex; justify-content:space-between; padding:4px 0;
+         border-bottom:1px dashed #1c1c26; font-size:13px; }
+  .stop:last-child{ border-bottom:none; }
+  .stop .n{ color:var(--dim); width:22px; display:inline-block; }
+  .arv{ color:var(--gold); font-variant-numeric:tabular-nums; }
+  a.maps{ display:inline-block; margin-top:8px; color:#1a1206; text-decoration:none;
+          background:var(--gold); padding:6px 12px; border-radius:7px; font-weight:600; font-size:12px; }
+  .warn{ color:#e2a23a; font-size:12px; margin-top:8px; }
+  .err{ color:#e2685f; }
+  .spin{ color:var(--dim); }
+</style>
+</head>
+<body>
+<header>
+  <h1>◆ Route Optimizer</h1>
+  <div class="sub">Shortest drive order · miles saved · one-tap Google Maps. Free engine (OpenStreetMap + no paid libs).</div>
+</header>
+
+<div class="wrap">
+  <div class="card">
+    <div class="row">
+      <div>
+        <label>Stops from</label>
+        <select id="source">
+          <option value="probate">Our probate properties (instant — has GPS + ARV)</option>
+          <option value="leads">Our SMB leads (geocoded live, slower)</option>
+          <option value="paste">Paste addresses</option>
+        </select>
+      </div>
+      <div>
+        <label>Mode</label>
+        <select id="config">
+          <option value="canvasser">Canvasser — one person, value-first</option>
+          <option value="fleet">Fleet — split across drivers</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="row">
+      <div id="vehWrap" class="hide">
+        <label>Drivers</label>
+        <input id="vehicles" type="number" min="2" max="8" value="2">
+      </div>
+      <div id="limitWrap">
+        <label>How many stops</label>
+        <input id="limit" type="number" min="2" max="60" value="15">
+      </div>
+      <div>
+        <label>Start / depot (optional)</label>
+        <input id="depot" placeholder="e.g. Gainesville, GA">
+      </div>
+    </div>
+
+    <div id="pasteWrap" class="hide">
+      <label>Addresses (one per line)</label>
+      <textarea id="addresses" placeholder="123 Main St, Macon, GA&#10;45 Oak Ave, Warner Robins, GA"></textarea>
+    </div>
+
+    <button class="go" id="go">Optimize route</button>
+  </div>
+
+  <div id="out"></div>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+const fmtMin = m => m >= 60 ? `${Math.floor(m/60)}h ${m%60}m` : `${m}m`;
+
+function syncControls(){
+  const paste = $("source").value === "paste";
+  const fleet = $("config").value === "fleet";
+  $("pasteWrap").classList.toggle("hide", !paste);
+  $("limitWrap").classList.toggle("hide", paste);
+  $("vehWrap").classList.toggle("hide", !fleet);
+}
+$("source").onchange = syncControls;
+$("config").onchange = syncControls;
+syncControls();
+
+$("go").onclick = async () => {
+  const out = $("out");
+  const body = {
+    source: $("source").value,
+    config: $("config").value,
+    vehicles: parseInt($("vehicles").value) || 2,
+    limit: parseInt($("limit").value) || 15,
+    depot: $("depot").value.trim(),
+  };
+  if (body.source === "paste") body.addresses = $("addresses").value;
+  out.innerHTML = `<div class="card spin">Optimizing… ${body.source!=="probate" ? "(geocoding live, ~1 sec/stop)" : ""}</div>`;
+  let d;
+  try {
+    const r = await fetch("/api/route", {
+      method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(body)
+    });
+    d = await r.json();
+    if (d.error) throw new Error(d.error);
+  } catch(e){ out.innerHTML = `<div class="card err">Failed: ${e.message}</div>`; return; }
+  render(d);
+};
+
+function render(d){
+  let h = `<div class="card">`;
+  if (d.saved_pct != null && d.saved_pct > 0){
+    h += `<div class="headline">${d.saved_pct}% less driving <small>vs. just going in order</small></div>
+          <div class="meta">${d.naive_miles} mi → <b style="color:var(--gold2)">${d.total_miles} mi</b>,
+          about ${fmtMin(d.total_minutes)} behind the wheel.</div>`;
+  } else if (d.config === "fleet"){
+    h += `<div class="headline">${d.vehicles} drivers <small>${d.total_miles} mi total</small></div>
+          <div class="meta">Longest single driver: ~${fmtMin(d.max_driver_minutes)}. Work split evenly.</div>`;
+  } else {
+    h += `<div class="headline">${d.total_miles} mi <small>${fmtMin(d.total_minutes)}</small></div>`;
+  }
+  h += `<div class="meta">${d.routable} of ${d.stops_in} stops routed.`;
+  if (d.unroutable && d.unroutable.length) h += ` <span class="warn">${d.unroutable.length} couldn't be located: ${d.unroutable.slice(0,4).join(", ")}${d.unroutable.length>4?"…":""}</span>`;
+  h += `</div></div>`;
+
+  for (const rt of d.routes){
+    h += `<div class="driver"><h3>${d.config==="fleet" ? "Driver "+rt.driver : "Route"} · ${rt.miles} mi · ${fmtMin(rt.minutes)}</h3>`;
+    rt.stops.forEach((s,i) => {
+      const arv = s.arv ? `<span class="arv">$${Number(s.arv).toLocaleString()}</span>` : "";
+      h += `<div class="stop"><span><span class="n">${i+1}.</span>${s.label}</span>${arv}</div>`;
+    });
+    h += `<a class="maps" href="${rt.maps_url}" target="_blank" rel="noopener">Open in Google Maps →</a></div>`;
+  }
+  $("out").innerHTML = h;
+}
+</script>
+</body>
+</html>
