@@ -35,6 +35,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+from pathlib import Path
 
 from utah import config, failures, sica
 from utah.daemon import runtime
@@ -172,17 +173,93 @@ def _leads_signal(db_query=None) -> str:
         return f"(leads signal unavailable: {type(exc).__name__}); capability: utah/product/leads.py"
 
 
-def _baseline_signal(read_text=None) -> str:
+#: A generated task may never have these as its SUBJECT. `_probe_marker.py` exists so the
+#: diff-capture probe has an inert file to touch; the loop reward-hacked it (2026-06-12:
+#: 9 merged cycles adding the same trivial test there). The probe machinery still uses the
+#: file — it is only banned as a WORK target.
+BANNED_TASK_TARGETS = ("_probe_marker",)
+
+#: Checked-in weakness queue distilled from the RUBRIC-V2-STRICT grade report (only
+#: entries verified still-open at HEAD). Refreshed by hand or by future rescores.
+GRADE_QUEUE_PATH = Path(__file__).resolve().parent.parent / "ops" / "grade-queue.json"
+
+#: How many weak targets the baseline signal names per cycle.
+_BASELINE_TARGETS_N = 5
+
+
+def _read_quiet(p: Path) -> str:
+    try:
+        return p.read_text(encoding="utf-8", errors="ignore")
+    except OSError:
+        return ""
+
+
+def _untested_modules(repo_root=None, limit: int = _BASELINE_TARGETS_N) -> list[str]:
+    """``utah/`` modules with no test file mentioning their stem — REAL coverage gaps
+    found by a cheap filesystem scan (no DB, no brain). Loose matching (any
+    ``tests/test_*.py`` filename containing the stem counts as covered) so this
+    under-reports rather than nags about indirectly-covered modules. Never raises."""
+    try:
+        root = Path(repo_root) if repo_root else Path(__file__).resolve().parent.parent
+        pkg, tests = root / "utah", root / "tests"
+        if not pkg.is_dir() or not tests.is_dir():
+            return []
+        from utah import selfcode
+        test_files = list(tests.glob("test_*.py"))
+        test_names = " ".join(p.name for p in test_files)
+        # Filename match misses tests that cover a module under another name
+        # (sitegen.py ← test_product_exports.py), and the signal SAYS "no test file"
+        # — so check contents too before claiming a gap (honest-signal doctrine).
+        test_text = "".join(_read_quiet(p) for p in test_files)
+        out: list[str] = []
+        for p in sorted(pkg.rglob("*.py")):
+            if "__pycache__" in p.parts or p.name.startswith("_"):
+                continue                      # private/init/probe files are never targets
+            if " " in p.name:
+                continue                      # iCloud conflict-copy junk ("vad 2.py")
+            rel = str(p.relative_to(root))
+            if rel in selfcode.SAFETY_PATHS:
+                continue                      # Tier-D: the loop can't merge these anyway
+            if p.stem in test_names or p.stem in test_text:
+                continue
+            out.append(rel)
+            if len(out) >= limit:
+                break
+        return out
+    except Exception:  # noqa: BLE001 — a scan failure must not break task generation
+        return []
+
+
+def _load_grade_queue(grade_queue=None) -> list[dict]:
+    """The graded weakness queue — injected list, or ``ops/grade-queue.json``. Never raises."""
+    if grade_queue is not None:
+        return list(grade_queue)
+    try:
+        return json.loads(GRADE_QUEUE_PATH.read_text())
+    except Exception:  # noqa: BLE001 — a missing/corrupt queue degrades to the FS scan
+        return []
+
+
+def _baseline_signal(read_text=None, repo_root=None, grade_queue=None) -> str:
     rt = read_text or (lambda p: p.read_text() if p.exists() else "")
     try:
         verify = json.loads(rt(VERIFY_JSON) or "{}")
         state = verify.get("state", "unknown")
         detail = str(verify.get("detail", verify.get("failing", "")))[:200]
-        return (f"verifier state={state} detail={detail!r}. Improve code/test health: "
-                f"fix a flaky/failing test, add coverage for an untested branch, or clear "
-                f"a real failure-log entry. Keep changes leaf-level (Tier-A) where possible.")
     except Exception as exc:  # noqa: BLE001
-        return f"(baseline signal unavailable: {type(exc).__name__}); improve test coverage/health."
+        state, detail = f"unavailable: {type(exc).__name__}", ""
+    gaps = _untested_modules(repo_root)
+    queue = _load_grade_queue(grade_queue)[:_BASELINE_TARGETS_N]
+    parts = [f"verifier state={state} detail={detail!r}."]
+    if gaps:
+        parts.append("Modules with NO test file (real coverage gaps): " + ", ".join(gaps) + ".")
+    if queue:
+        parts.append("Graded weaknesses (from the strict code rubric): " + "; ".join(
+            f"{q.get('file')} — {q.get('weakness')}" for q in queue if q.get("file")) + ".")
+    parts.append("Pick ONE named target above and close its weakness with a real test "
+                 "or fix (failure paths, timeouts, error handling — not a trivial "
+                 "constant-assert). Keep changes leaf-level (Tier-A) where possible.")
+    return " ".join(parts)
 
 
 def _autonomy_signal(archive=None) -> str:
@@ -402,6 +479,46 @@ def _research_signal(render_fn=None, search_fn=None, failures_fn=None) -> str:
             f"failed ({why}). Propose a small, safe fix to the {source} capability. " + _RESEARCH_ASK)
 
 
+def recent_tasks(k: int = 10, cycles_fn=None) -> list[str]:
+    """The last ``k`` DISTINCT task texts the loop attempted, newest first, from the
+    cycle telemetry. This is the do-not-repeat memory fed into task generation — the
+    missing piece that let the brain re-derive the same 'safest smallest' task every
+    cycle. Defensive + injectable; never raises (dead telemetry → empty memory)."""
+    try:
+        cycles = (cycles_fn or (lambda: sica.recent_cycles(_CYCLE_LOOKBACK)))()
+    except Exception:  # noqa: BLE001 — a dead telemetry log must not break task selection
+        return []
+    out: list[str] = []
+    seen: set[str] = set()
+    for c in cycles or ():
+        if not isinstance(c, dict):
+            continue
+        t = str(c.get("task") or "").strip()
+        if t and t not in seen:
+            seen.add(t)
+            out.append(t)
+        if len(out) >= k:
+            break
+    return out
+
+
+def is_degenerate(task: str, recent=()) -> str | None:
+    """Reject a generated task as degenerate — returns the reason, or ``None`` if OK.
+
+    Two conditions, both observed live (2026-06-12 audit): (1) the task's subject is a
+    banned target (the inert probe file the loop reward-hacked 9 cycles in a row);
+    (2) the task near-duplicates recent work (same task re-worded scores ~max utility,
+    so without this gate repeats are argmax of the reward)."""
+    low = (task or "").lower()
+    for banned in BANNED_TASK_TARGETS:
+        if banned in low:
+            return f"banned target {banned} (the probe target is not a work target)"
+    for r in recent:
+        if sica.task_similar(task, r):
+            return f"near-duplicate of recent task {str(r)[:80]!r}"
+    return None
+
+
 def gather_signals(domain: str, **inject) -> str:
     if domain == "leads":
         return _leads_signal(db_query=inject.get("db_query"))
@@ -417,28 +534,44 @@ def gather_signals(domain: str, **inject) -> str:
         return _research_signal(render_fn=inject.get("render_fn"),
                                 search_fn=inject.get("search_fn"),
                                 failures_fn=inject.get("failures_fn"))
-    return _baseline_signal(read_text=inject.get("read_text"))
+    return _baseline_signal(read_text=inject.get("read_text"),
+                            repo_root=inject.get("repo_root"),
+                            grade_queue=inject.get("grade_queue"))
 
 
 _PROMPT = (
     "You are Utah's autonomous self-improver. Domain THIS cycle: {domain}.\n"
     "Live signals:\n{signals}\n\n"
+    "RECENT WORK — do NOT repeat or near-duplicate ANY of these tasks:\n{recent}\n\n"
     "Propose the SINGLE next concrete improvement task IN THIS DOMAIN: one sentence, "
-    "actionable, small, and SAFE. Touch as few files as possible. NEVER edit the safety "
-    "core (utah/selfcode.py, utah/config.py, utah/brain.py, utah/daemon/peercred.py, "
-    "lifecycle.py, governor.py). Reply with ONLY the task text."
+    "actionable, small, and SAFE. It must add REAL value — a trivial constant-assert "
+    "or anything touching utah/_probe_marker.py will be REJECTED. Touch as few files "
+    "as possible. NEVER edit the safety core (utah/selfcode.py, utah/config.py, "
+    "utah/brain.py, utah/daemon/peercred.py, lifecycle.py, governor.py). "
+    "Reply with ONLY the task text."
 )
 
 
-def build_prompt(domain: str, signals: str) -> str:
-    return _PROMPT.format(domain=domain, signals=signals)
+def build_prompt(domain: str, signals: str, recent=()) -> str:
+    recent_block = "\n".join(f"- {t}" for t in recent) or "(none yet)"
+    return _PROMPT.format(domain=domain, signals=signals, recent=recent_block)
 
 
-def next_task(domain: str, *, brain_fn, **inject) -> str:
-    """Domain signals → prompt → brain → one grounded task (stripped)."""
+def next_task(domain: str, *, brain_fn, rejected: str | None = None,
+              reject_reason: str | None = None, **inject) -> str:
+    """Domain signals + do-not-repeat memory → prompt → brain → one grounded task.
+
+    ``rejected``/``reject_reason`` carry explicit feedback when the previous proposal
+    was vetoed by :func:`is_degenerate`, so the regeneration attempt knows WHY."""
     signals = gather_signals(domain, **inject)
-    return (brain_fn(build_prompt(domain, signals)) or "").strip()
+    recent = recent_tasks(cycles_fn=inject.get("cycles_fn"))
+    prompt = build_prompt(domain, signals, recent=recent)
+    if rejected:
+        prompt += (f"\n\nYour previous proposal was REJECTED as degenerate "
+                   f"({reject_reason}): {rejected!r}. Propose something DIFFERENT.")
+    return (brain_fn(prompt) or "").strip()
 
 
 __all__ = ["DOMAINS", "pick_domain", "select_domain", "COLD_STREAK_N", "next_cycle_index",
-           "gather_signals", "build_prompt", "next_task", "observe_deck", "CYCLE_N", "DASHBOARD_URL"]
+           "gather_signals", "build_prompt", "next_task", "recent_tasks", "is_degenerate",
+           "BANNED_TASK_TARGETS", "observe_deck", "CYCLE_N", "DASHBOARD_URL"]

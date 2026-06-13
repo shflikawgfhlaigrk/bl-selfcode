@@ -216,7 +216,7 @@ def _load_per_core() -> float:
 
 def run_cycle(*, repo=None, brain_fn=None, propose_fn=None, sync_fn=None, task_fn=None,
               propagate_fn=None, verify_fn=None, foundation_gate=None, discover_fn=None,
-              load_fn=None) -> dict:
+              load_fn=None, recent_fn=None) -> dict:
     """One autonomous improvement cycle. Boundaries injected for unit-proof.
 
     The task is chosen by the domain-rotating goal source (sica_goals): each cycle
@@ -274,6 +274,28 @@ def run_cycle(*, repo=None, brain_fn=None, propose_fn=None, sync_fn=None, task_f
             else:
                 task = sica_goals.next_task(domain, brain_fn=brain)
     task = (task or "").strip() or DEFAULT_TASK   # empty/whitespace → safe default
+    regenerated = False
+    if task_fn is None:
+        # DEGENERACY GATE (audit 2026-06-12: 9 merged cycles were the same trivial
+        # `_probe_marker` test — a repeat scores ~max utility, so without this veto the
+        # loop's argmax IS the spam). One regeneration with explicit rejection feedback;
+        # if the brain is incorrigible, skip the cycle HONESTLY — a recorded no-op beats
+        # a merged nothing. task_fn (operator/test override) is never vetoed.
+        recent = (recent_fn or sica_goals.recent_tasks)()
+        reason = sica_goals.is_degenerate(task, recent)
+        if reason:
+            task = sica_goals.next_task(domain, brain_fn=brain,
+                                        rejected=task, reject_reason=reason)
+            regenerated = True
+            still = sica_goals.is_degenerate(task, recent) if task \
+                else "brain silent on regeneration"
+            if still:
+                out = {"ran": False, "reason": f"degenerate task rejected: {still}",
+                       "domain": domain, "task": task, "discover": discover_out}
+                _log_cycle(out)
+                log.info("sica cycle: degenerate task rejected (domain=%s): %s",
+                         domain, still)
+                return out
     default_propose = (lambda t: selfcode.propose_governed(
         t, repo=str(repo), auto_merge=True,
         run_claude=lambda task: sica_overseer.run_claude_supervised(task, cwd=str(repo))))
@@ -283,6 +305,8 @@ def run_cycle(*, repo=None, brain_fn=None, propose_fn=None, sync_fn=None, task_f
         sica_discover.mark_used(pending_rec)
     out = {"ran": True, "discover": discover_out, "domain": domain, "task": task,
            "steps": res.steps, "attempts": res.attempts, "best_after": res.best_after}
+    if regenerated:
+        out["regenerated"] = True   # first proposal was vetoed as degenerate
     if pending_rec:
         out["from_finding"] = pending_rec.get("brief_path")
     if any(a.get("merged") for a in res.attempts):

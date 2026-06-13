@@ -1,0 +1,32 @@
+[
+  {
+    "file": "utah/product/outreach.py",
+    "weakness": "work_leads RPC has zero failure-path tests — add tests for send raising mid-batch, DB unavailable, and invalid/negative limit (tests/test_outreach_work_leads.py covers 3 happy paths only)",
+    "verified_at": "2026-06-12",
+    "source": "RUBRIC-V2 utah-tests #7, re-verified at HEAD"
+  },
+  {
+    "file": "utah/integrations/calendar.py",
+    "weakness": "calendar/notes/contacts commands lack failure-path tests — injected client/runner raising mid-command, partial permissions; tests/test_integrations.py covers gating + happy paths only",
+    "verified_at": "2026-06-12",
+    "source": "RUBRIC-V2 utah-tests #10, re-verified at HEAD"
+  },
+  {
+    "file": "utah/product/tasks.py",
+    "weakness": "no tests for list pagination edges, concurrent inserts, or status filtering (pool-failure path IS covered; these edges are not)",
+    "verified_at": "2026-06-12",
+    "source": "RUBRIC-V2 utah-tests #12, re-verified at HEAD"
+  },
+  {
+    "file": "utah/courier.py",
+    "weakness": "no failure injection into the renderer and no multi-hop routing scenarios in tests/test_browser_courier.py",
+    "verified_at": "2026-06-12",
+    "source": "RUBRIC-V2 utah-tests #9"
+  },
+  {
+    "file": "utah/product/probate_export.py",
+    "weakness": "coverage rides tests/test_product_exports.py only — add direct failure-path tests (empty result set, DB error mid-export)",
+    "verified_at": "2026-06-12",
+    "source": "untested-module scan near-miss (content-matched only)"
+  }
+]

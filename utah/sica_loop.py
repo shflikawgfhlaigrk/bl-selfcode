@@ -33,7 +33,10 @@ _META_PROMPT = (
     "agent). Below is the recent self-coding archive. Propose the SINGLE next "
     "concrete improvement task: one sentence, actionable, LOW-RISK (a leaf capability, "
     "a doc, or a helper — never touch safety files: selfcode/config/brain/peercred/"
-    "lifecycle/governor). Reply with ONLY the task text.\n\n"
+    "lifecycle/governor). NEVER repeat or near-duplicate a past task — repeats are "
+    "utility-discounted toward zero, and utah/_probe_marker.py is OFF-LIMITS as a "
+    "task subject (it is the diff-capture probe target, not a work target). "
+    "Reply with ONLY the task text.\n\n"
     "Best so far (utility {best_u}): {best_task}\n\n"
     "Recent attempts:\n{recent}\n\nNext task:"
 )
@@ -76,14 +79,18 @@ class MetaLoop:
             lambda task: selfcode.propose_governed(task, archive=self.archive))
 
     def _best_u(self) -> float:
-        b = self.archive.best()
+        # Repeat-DISCOUNTED best: a spammed task must not count as the bar to beat
+        # (nor as "improvement" when re-merged) — see sica.effective_entries.
+        b = sica.best_effective(self.archive.entries())
         return float(b.get("utility", 0.0)) if b else 0.0
 
     def next_task_from_archive(self, brain_fn) -> str:
         """Meta-agent: read the archive (best + recent) and ask the brain for the
         next improvement task. ``brain_fn(prompt) -> str`` is injected (the real
-        one is utah.brain)."""
-        best = self.archive.best() or {}
+        one is utah.brain). "Best so far" is the repeat-discounted best — the loop
+        once showcased its own spam (the `_probe_marker` test, merged 9×) as the
+        best work ever done and evolved from it."""
+        best = sica.best_effective(self.archive.entries()) or {}
         recent = self.archive.entries()[-5:]
         recent_str = "\n".join(
             f"- U={e.get('utility')} passed={e.get('passed')} {str(e.get('task', ''))[:80]}"

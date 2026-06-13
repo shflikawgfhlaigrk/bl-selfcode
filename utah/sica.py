@@ -33,6 +33,13 @@ TIME_LIMIT_S = float(os.environ.get("UTAH_SELFCODE_TIME_LIMIT", "300"))
 COST_LIMIT_USD = float(os.environ.get("UTAH_SELFCODE_COST_LIMIT", "10"))
 #: τ — a timed-out run's utility is halved (paper §overseer).
 TIMEOUT_PENALTY = 0.5
+#: Repeat-discount factor. The raw utility (pass-rate + cheap + fast) is argmax-ed by a
+#: trivial repeated task (audit 2026-06-12: the loop merged the same `_probe_marker.py`
+#: test 9 times because every repeat scored ~max utility). At READ time, a task whose
+#: text near-duplicates n-1 other archived attempts has ALL its entries discounted by
+#: REPEAT_PENALTY**(n-1), so spam decays toward zero while once-done work keeps its full
+#: score. Read-time (not stored) so history is fixed without rewriting the archive.
+REPEAT_PENALTY = float(os.environ.get("UTAH_SELFCODE_REPEAT_PENALTY", "0.2"))
 
 #: Legacy file path for the archive — retained for isolated tests (``Archive(path=…)``)
 #: and one-time migration of pre-existing entries. The PRODUCTION store is Postgres
@@ -60,6 +67,47 @@ def utility(score: float, cost_usd: float = 0.0, elapsed_s: float = 0.0,
     if timed_out:
         u *= TIMEOUT_PENALTY
     return round(u, 6)
+
+
+def normalize_task(text: str) -> frozenset[str]:
+    """Order/punctuation-insensitive token fingerprint of a task sentence."""
+    return frozenset(t for t in re.findall(r"[a-z0-9_./]+", (text or "").lower())
+                     if len(t) > 2)
+
+
+def task_similar(a: str, b: str, threshold: float = 0.6) -> bool:
+    """Near-duplicate check: Jaccard overlap of token fingerprints. Catches the
+    observed degeneracy (same task re-worded: 'exposes a module-level constant' vs
+    'defines a module-level constant') without flagging genuinely different work."""
+    ta, tb = normalize_task(a), normalize_task(b)
+    if not ta or not tb:
+        return False
+    return len(ta & tb) / len(ta | tb) >= threshold
+
+
+def effective_entries(entries: list[dict]) -> list[dict]:
+    """Shallow copies with repeat-discounted utility: each entry's utility is
+    multiplied by ``REPEAT_PENALTY ** (number of OTHER near-duplicate entries)``.
+    A task done once is untouched; a task spammed n times decays toward zero, so
+    ``argmax utility`` (the meta-agent's "best so far") stops showcasing spam."""
+    out = []
+    tasks = [str(e.get("task", "")) for e in entries]
+    for i, e in enumerate(entries):
+        dups = sum(1 for j, t in enumerate(tasks) if j != i and task_similar(tasks[i], t))
+        d = dict(e)
+        if dups:
+            d["utility"] = round(float(d.get("utility", 0.0) or 0.0)
+                                 * (REPEAT_PENALTY ** dups), 6)
+            d["repeat_discounted"] = dups + 1
+        out.append(d)
+    return out
+
+
+def best_effective(entries: list[dict]) -> dict | None:
+    """The highest *repeat-discounted* utility attempt — what the meta-agent should
+    treat as best-so-far. ``None`` if empty."""
+    eff = effective_entries(entries or [])
+    return max(eff, key=lambda x: x.get("utility", 0.0)) if eff else None
 
 
 def score_from_pytest(output: str) -> float:
@@ -281,4 +329,6 @@ class Archive:
 
 __all__ = ["utility", "score_from_pytest", "Attempt", "make_attempt", "Archive",
            "get_archive_backend", "set_archive_backend", "record_cycle", "recent_cycles",
-           "ARCHIVE_PATH", "TIME_LIMIT_S", "COST_LIMIT_USD", "TIMEOUT_PENALTY"]
+           "normalize_task", "task_similar", "effective_entries", "best_effective",
+           "ARCHIVE_PATH", "TIME_LIMIT_S", "COST_LIMIT_USD", "TIMEOUT_PENALTY",
+           "REPEAT_PENALTY"]
