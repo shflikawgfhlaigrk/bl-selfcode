@@ -74,6 +74,31 @@ def _brain_answer(prompt: str, timeout: int = 60) -> str:
         return ""
 
 
+def _scrub_conflict_refs(repo) -> int:
+    """Delete iCloud/Finder conflict-copy git refs (e.g. ``refs/heads/main 2``).
+
+    The Desktop repo's ``.git`` is iCloud-synced, which spawns ``<ref> 2`` copies.
+    Such a ref points at a missing object, so ``git fetch`` negotiation aborts with
+    'bad object refs/heads/main 2 ... did not send all necessary objects' — which
+    stalled selfcode propagation for hours (live 2026-06-13). The repo ``.gitignore``
+    ``* 2`` rule cannot cover files INSIDE ``.git``. Returns the count removed; never
+    raises (best-effort — a cleanup failure must not crash the cycle)."""
+    removed = 0
+    try:
+        refs = Path(repo) / ".git" / "refs"
+        if refs.is_dir():
+            for p in refs.rglob("*"):
+                if p.is_file() and " " in p.name:
+                    try:
+                        p.unlink()
+                        removed += 1
+                    except OSError:
+                        pass
+    except Exception:  # noqa: BLE001 — cleanup must never crash the autonomy cycle
+        pass
+    return removed
+
+
 def propagate(live=None, clone=None) -> dict:
     """Flow autonomous improvements OUT of the sandbox clone INTO the real Utah:
     fast-forward the live repo's main to include the clone's autonomous commits.
@@ -92,6 +117,10 @@ def propagate(live=None, clone=None) -> dict:
 
     if not (live / ".git").exists() or not (clone / ".git").exists():
         return {"propagated": False, "reason": "live or clone repo missing"}
+    # Scrub iCloud conflict-copy refs on BOTH sides before the fetch — a stray
+    # 'main 2' on either repo aborts fetch negotiation and stalls propagation.
+    _scrub_conflict_refs(live)
+    _scrub_conflict_refs(clone)
     fetched = g(live, "fetch", str(clone), "main")
     if fetched.returncode != 0:
         # Honest diagnosis: a failed/timed-out fetch used to fall through and read as
@@ -179,6 +208,10 @@ def sync_repo(repo: Path) -> bool:
         return _git_timed(["git", "-C", str(repo), *a], capture_output=True,
                           text=True, cwd=_SAFE_CWD)
 
+    # origin is the live tree (file remote); a stray iCloud 'main 2' on either side
+    # aborts the fetch — scrub both before pulling.
+    _scrub_conflict_refs(repo)
+    _scrub_conflict_refs(LIVE_REPO)
     git("fetch", "origin", "main")
     git("checkout", "-f", "main")          # force back to main, drop in-progress attempt
     git("clean", "-fd")                     # remove untracked leftovers
