@@ -156,6 +156,33 @@ def test_best_effective_ignores_spam():
     assert sica.best_effective([]) is None
 
 
+def test_best_effective_never_showcases_a_banned_subject():
+    """Live finding 2026-06-12: the ORIGINAL 'PROBE diff-capture: add
+    utah/_probe_marker.py' entry was done once (no repeat discount) at u=1.0 — the
+    meta-prompt showcased it as best-so-far, which is what seeded the spam family.
+    A banned-subject task can never be the bar to beat."""
+    entries = [_entry("PROBE diff-capture: add utah/_probe_marker.py", 1.0),
+               _entry("real probate ARV work", 0.7)]
+    best = sica.best_effective(entries)
+    assert best["task"] == "real probate ARV work"
+    only_banned = [_entry("PROBE diff-capture: add utah/_probe_marker.py", 1.0)]
+    assert sica.best_effective(only_banned) is None
+    # The observed family re-wordings are banned too (live archive 2026-06-12).
+    family = [_entry("add a one line docstring to utah probe", 1.0),
+              _entry("Create a new file at utah/_meta.py with a docstring", 0.99),
+              _entry("real probate ARV work", 0.7)]
+    assert sica.best_effective(family)["task"] == "real probate ARV work"
+
+
+def test_best_effective_breaks_utility_ties_by_recency():
+    """utility saturates at 1.0 for any small green change, so all-time argmax with
+    insertion-order ties showcased the OLDEST trivial entry forever. Newest among
+    equals — recent real work is the base to evolve from."""
+    entries = [{"task": "ancient trivial doc tweak", "utility": 1.0, "ts": 100.0},
+               {"task": "recent real outreach failure-path tests", "utility": 1.0, "ts": 900.0}]
+    assert sica.best_effective(entries)["task"] == "recent real outreach failure-path tests"
+
+
 def test_meta_prompt_shows_discounted_best_and_forbids_repeats(tmp_path):
     from utah.sica_loop import MetaLoop
     arch = sica.Archive(tmp_path / "arch.jsonl")

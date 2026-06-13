@@ -176,8 +176,9 @@ def _leads_signal(db_query=None) -> str:
 #: A generated task may never have these as its SUBJECT. `_probe_marker.py` exists so the
 #: diff-capture probe has an inert file to touch; the loop reward-hacked it (2026-06-12:
 #: 9 merged cycles adding the same trivial test there). The probe machinery still uses the
-#: file — it is only banned as a WORK target.
-BANNED_TASK_TARGETS = ("_probe_marker",)
+#: file — it is only banned as a WORK target. Single source of truth lives in sica (which
+#: also excludes these subjects from best-so-far).
+BANNED_TASK_TARGETS = sica.BANNED_TASK_SUBSTRINGS
 
 #: Checked-in weakness queue distilled from the RUBRIC-V2-STRICT grade report (only
 #: entries verified still-open at HEAD). Refreshed by hand or by future rescores.

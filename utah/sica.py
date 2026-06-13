@@ -40,6 +40,15 @@ TIMEOUT_PENALTY = 0.5
 #: REPEAT_PENALTY**(n-1), so spam decays toward zero while once-done work keeps its full
 #: score. Read-time (not stored) so history is fixed without rewriting the archive.
 REPEAT_PENALTY = float(os.environ.get("UTAH_SELFCODE_REPEAT_PENALTY", "0.2"))
+#: Task subjects that can never be "best so far" nor a generated task's target.
+#: `_probe_marker.py` is the diff-capture probe's inert landing file; the loop
+#: reward-hacked it (its original u=1.0 archive entry seeded 9 spam merges).
+#: "utah probe"/"probe marker" are observed re-wordings of the same subject, and
+#: `utah/_meta*` is the ORIGINAL archive-mimicry family (trivial _meta files) that
+#: sica_goals was built to replace — none of these may anchor the meta-prompt.
+#: sica_goals re-exports this as BANNED_TASK_TARGETS for its generation gate.
+BANNED_TASK_SUBSTRINGS: tuple[str, ...] = ("_probe_marker", "probe marker",
+                                           "utah probe", "utah/_meta")
 
 #: Legacy file path for the archive — retained for isolated tests (``Archive(path=…)``)
 #: and one-time migration of pre-existing entries. The PRODUCTION store is Postgres
@@ -105,9 +114,16 @@ def effective_entries(entries: list[dict]) -> list[dict]:
 
 def best_effective(entries: list[dict]) -> dict | None:
     """The highest *repeat-discounted* utility attempt — what the meta-agent should
-    treat as best-so-far. ``None`` if empty."""
-    eff = effective_entries(entries or [])
-    return max(eff, key=lambda x: x.get("utility", 0.0)) if eff else None
+    treat as best-so-far. Banned-subject tasks are excluded outright: the original
+    ``_probe_marker`` entry was done ONCE (so the repeat discount never touched it)
+    yet showcasing its u=1.0 as "best" is what seeded the spam family. ``None`` if
+    nothing eligible."""
+    eff = [e for e in effective_entries(entries or [])
+           if not any(b in str(e.get("task", "")).lower() for b in BANNED_TASK_SUBSTRINGS)]
+    # Newest among equals: utility saturates at 1.0 for any small green change, so an
+    # insertion-order tie-break showcased the oldest trivial entry forever.
+    return max(eff, key=lambda x: (float(x.get("utility", 0.0) or 0.0),
+                                   float(x.get("ts", 0.0) or 0.0))) if eff else None
 
 
 def score_from_pytest(output: str) -> float:
@@ -331,4 +347,4 @@ __all__ = ["utility", "score_from_pytest", "Attempt", "make_attempt", "Archive",
            "get_archive_backend", "set_archive_backend", "record_cycle", "recent_cycles",
            "normalize_task", "task_similar", "effective_entries", "best_effective",
            "ARCHIVE_PATH", "TIME_LIMIT_S", "COST_LIMIT_USD", "TIMEOUT_PENALTY",
-           "REPEAT_PENALTY"]
+           "REPEAT_PENALTY", "BANNED_TASK_SUBSTRINGS"]
