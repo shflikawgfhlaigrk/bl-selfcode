@@ -256,6 +256,97 @@ def prove_meanrev(bars, *, lookback: int = 20, z_enter: float = 2.0, tgt_frac: f
                        f">={min_trades} trades)")}
 
 
+# --- research composite engine (the ported Perplexity/Antigravity "Sniper") ---
+# A trend-CONTINUATION archetype: the research_signal composite scores a direction off
+# the EMA ribbon / slope / momentum / variance-ratio regime, then enters with a
+# volatility-scaled stop and an R-multiple target. Unlike mean-reversion (high win,
+# ~0 R), this is a low-frequency trend rider whose edge is POSITIVE EXPECTANCY, so the
+# proof gate is expectancy>0 (like the breakout archetype), not a high win floor. The
+# entry SIGNAL is closes-only and identical to the live ``trading._research`` rule — the
+# edge gate is only meaningful if the backtest trades what production would.
+
+def _research_trades(bars, *, lookback=20, stop_sd=1.5, target_r=1.5,
+                     min_trades=0, max_hold=0):
+    """Walk *bars*, entering on each research-composite signal with a vol-scaled stop
+    (``stop_sd``×the close-stdev the scorer reports) and a ``target_r``×risk target.
+    One position at a time. Pessimistic fills via :func:`_mr_simulate`. The scorer is
+    fed the SAME trailing ``RESEARCH_RWIN`` window the live rule uses, so the backtested
+    entry is exactly what production would fire."""
+    from utah.product import research_signal as rs
+    closes = _bar_closes(bars)
+    out: list[Trade] = []
+    i = rs._WARMUP
+    n = len(bars)
+    while i < n:
+        s = rs.score(closes[max(0, i - rs.RESEARCH_RWIN):i + 1])
+        if s["direction"] == "flat" or not s.get("vol"):
+            i += 1
+            continue
+        entry = closes[i]
+        stop_pts = stop_sd * s["vol"]
+        if stop_pts <= 0:
+            i += 1
+            continue
+        if s["direction"] == "long":
+            stop, target = entry - stop_pts, entry + target_r * stop_pts
+        else:
+            stop, target = entry + stop_pts, entry - target_r * stop_pts
+        t = _mr_simulate(bars, i, s["direction"], entry, stop, target, max_hold=max_hold)
+        if t is None:
+            i += 1
+            continue
+        out.append(t)
+        i += max(1, t.bars_held)
+    return out
+
+
+def research_backtest(bars, *, lookback=20, stop_sd=1.5, target_r=1.5,
+                      min_trades=30, max_hold=0) -> BacktestResult:
+    """Backtest the research composite engine over OHLC *bars*; edge metrics in R."""
+    _require(stop_sd > 0, f"stop_sd must be > 0, got {stop_sd}")
+    _require(target_r > 0, f"target_r must be > 0, got {target_r}")
+    _require(min_trades >= 1, f"min_trades must be >= 1, got {min_trades}")
+    _require(max_hold >= 0, f"max_hold must be >= 0, got {max_hold}")
+    return _summarize(_research_trades(bars, lookback=lookback, stop_sd=stop_sd,
+                                       target_r=target_r, max_hold=max_hold), min_trades)
+
+
+def prove_research(bars, *, lookback=20, stop_sd=1.5, target_r=1.5, min_trades=30,
+                   oos_frac=0.4, max_hold=0) -> dict:
+    """Fit NOTHING — run the FIXED research composite on a chronological in-sample/
+    out-of-sample split and report the held-out stats. ``edge_proven`` is True only when
+    the OUT-OF-SAMPLE sample is real (``>= min_trades``) AND both expectancy and net
+    points are positive. Mirrors :func:`prove_meanrev`'s verdict shape so the dash and
+    the fire gate read it the same way."""
+    _require(0.0 < oos_frac < 1.0, f"oos_frac must be in (0, 1), got {oos_frac}")
+    bars = list(bars)
+    split = int(len(bars) * (1.0 - oos_frac))
+    cfg = dict(lookback=lookback, stop_sd=stop_sd, target_r=target_r,
+               min_trades=min_trades, max_hold=max_hold)
+
+    def _stats(seg) -> dict:
+        r = research_backtest(seg, **cfg)
+        net_pts = round(sum((t.exit - t.entry) if t.direction == "long"
+                            else (t.entry - t.exit)
+                            for t in _research_trades(seg, **cfg)), 4)
+        return {"trades": r.trades, "wins": r.wins, "losses": r.losses,
+                "win_rate": r.win_rate, "total_r": r.total_r,
+                "expectancy_r": r.expectancy_r, "net_pts": net_pts,
+                "max_drawdown_r": r.max_drawdown_r}
+
+    in_s = _stats(bars[:split])
+    oos = _stats(bars[split:])
+    edge = (oos["trades"] >= min_trades and oos["expectancy_r"] > 0 and oos["net_pts"] > 0)
+    return {"config": cfg, "oos_frac": oos_frac, "edge_basis": "positive OOS expectancy",
+            "in_sample": in_s, "out_of_sample": oos, "edge_proven": edge,
+            "reason": (f"edge proven: OOS expectancy +{oos['expectancy_r']:.3f}R, "
+                       f"net +{oos['net_pts']:.2f} pts on {oos['trades']} trades"
+                       if edge else
+                       f"not proven: OOS expectancy {oos['expectancy_r']:.3f}R / "
+                       f"net {oos['net_pts']:.2f} pts on {oos['trades']} trades "
+                       f"(need expectancy>0, net>0, >={min_trades} trades)")}
+
+
 def _validate_mr(*, lookback, z_enter, tgt_frac, stop_mult, min_trades, max_hold) -> None:
     """One guard for both mean-reversion entrypoints (mr_backtest / prove_meanrev)."""
     _require(lookback >= 1, f"lookback must be >= 1, got {lookback}")
@@ -302,4 +393,4 @@ def _mr_trades(bars, *, lookback, z_enter, tgt_frac, stop_mult, min_trades=0, ma
 
 
 __all__ = ["Trade", "BacktestResult", "backtest", "prove_edge",
-           "mr_backtest", "prove_meanrev"]
+           "mr_backtest", "prove_meanrev", "research_backtest", "prove_research"]

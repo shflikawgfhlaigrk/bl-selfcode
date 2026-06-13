@@ -90,3 +90,48 @@ def test_max_raw_resets_per_poll_window():
     clk.t += 40
     ev = ml.poll()
     assert ev[0]["max_raw_rms"] == 0.0   # the loud frame was the PREVIOUS window
+
+
+# --- 2026-06-13 restart-storm regression -----------------------------------------
+# Overnight (00:40–07:11) the supervisor restarted the voice child every ~90s
+# ("voice wedged → restart"), repeatedly dropping the armed wake word ("wake word
+# not configured again"). Cause was NOT the state machine — it was the calibrated
+# TRUE_SILENCE constant. The recorded mic_silent episodes carried max_raw_rms peaks
+# of 0.000041–0.000770 (every one NON-zero: a live-but-very-quiet room), yet
+# TRUE_SILENCE=0.0008 sat ABOVE that floor, so a quiet room read as a dead device.
+# A genuinely wedged/dead CoreAudio device delivers EXACT 0.0; the threshold must sit
+# below the live 16-bit mic dither floor (~3e-5) so only true zeros trip deaf.
+
+#: The lowest max-raw peak seen across the overnight false episodes.
+_OBSERVED_QUIET_FLOOR_MIN = 0.000041
+
+
+def test_true_silence_is_below_real_room_floor():
+    from utah.voice.loop import TRUE_SILENCE
+    assert TRUE_SILENCE < _OBSERVED_QUIET_FLOOR_MIN, (
+        f"TRUE_SILENCE={TRUE_SILENCE} sits at/above the observed quiet-room floor "
+        f"{_OBSERVED_QUIET_FLOOR_MIN} → quiet room misread as dead mic → restart storm"
+    )
+
+
+def test_observed_quiet_room_floor_never_goes_deaf():
+    from utah.voice.loop import TRUE_SILENCE
+    clk = Clock()
+    ml = make(clk, threshold=TRUE_SILENCE)
+    # The exact recorded episode peaks — a live room, never a dead device.
+    for peak in (0.000041, 0.000138, 0.000770, 0.000218, 0.000524):
+        for _ in range(4):           # well past the 30s alert window
+            clk.t += 10
+            ml.feed_frame(peak)
+    assert ml.poll() == [], "a live-but-quiet room must never be flagged deaf"
+
+
+def test_truly_dead_device_zeros_still_detected():
+    from utah.voice.loop import TRUE_SILENCE
+    clk = Clock()
+    ml = make(clk, threshold=TRUE_SILENCE)
+    ml.feed_frame(0.0)               # wedged CoreAudio handle: pure zeros
+    clk.t += 31
+    ml.feed_frame(0.0)
+    ev = ml.poll()
+    assert ev and ev[0]["event"] == "deaf"   # a real outage is still caught

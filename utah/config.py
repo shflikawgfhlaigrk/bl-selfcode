@@ -147,16 +147,24 @@ BRAIN_SYSTEM_PROMPT: str = (
 #: together the brain runs as a pure LLM that ANSWERS, not the Claude Code agent. Used by
 #: one-shot, streaming, AND sica_autonomy's brain path (one source of truth).
 #:
+#: The model EVERY brain/selfcode spawn pins. 2026-06-13: we used to omit ``--model`` and
+#: ride the CLI default — safe until Anthropic shipped Fable 5 as the new default, which
+#: this account can't access ("Claude Fable 5 is currently unavailable"), so every spawn
+#: exited 1 (selfcode dead, brain at the same latent risk). Pinning removes the dependency
+#: on whatever the default becomes next. It MUST be the full ``[1m]`` id, NOT the bare
+#: ``opus`` alias (the alias drops the 1M-context variant). Env-overridable for a future
+#: model bump without a code edit.
+BRAIN_MODEL: str = os.environ.get("UTAH_BRAIN_MODEL", "claude-opus-4-8[1m]")
+
 #: ``--setting-sources project`` is a LATENCY fix, not a capability cut: the CLI otherwise
 #: loads the user's 18 plugins + 65 skills + global CLAUDE.md + pyright-LSP + auto-memory
 #: on EVERY spawn — pure cold-start tax the pure-reasoning brain never uses. Measured: it
 #: ~halves time-to-first-token (chat 6.5s→2.9s, voice 3.2s→1.7s). It loads ONLY project
 #: ``.claude`` (the daemon's cwd is ProjectUtah, which has none → loads nothing) and never
-#: the ``user`` source, so it can't pick up ~/.claude. The model is UNCHANGED —
-#: ``claude-opus-4-8[1m]`` with or without it (verified); do NOT add ``--model`` (the
-#: ``opus`` alias drops the [1m] 1M-context variant). Brain is not reduced; only its
-#: startup is.
+#: the ``user`` source, so it can't pick up ~/.claude — which is also why the model must be
+#: pinned explicitly here (no user settings to inherit ``model`` from). See ``BRAIN_MODEL``.
 BRAIN_NO_AGENT: tuple[str, ...] = (
+    "--model", BRAIN_MODEL,
     "--append-system-prompt", BRAIN_SYSTEM_PROMPT, "--tools", "", "--strict-mcp-config",
     "--setting-sources", "project",
 )

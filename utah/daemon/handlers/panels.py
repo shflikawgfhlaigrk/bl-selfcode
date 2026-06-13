@@ -132,6 +132,24 @@ async def _panel_engines(ctx: Context) -> dict:
     return await _panel_ledger(ctx, panel="engines", domain="fires")
 
 
+async def _panel_pipeline(ctx: Context) -> dict:
+    """Lead-pipeline funnel: staged conversion + leak diagnosis, all live COUNT(*)."""
+    from utah.product import pipeline
+
+    with ctx.governor.read_admission():
+        data = await ctx.pool.run(pipeline.funnel)
+    return {"panel": "pipeline", **data}
+
+
+async def _panel_scope(ctx: Context) -> dict:
+    """System scheme: every area, live row counts, real cron roster, growth surface."""
+    from utah.product import pipeline
+
+    with ctx.governor.read_admission():
+        data = await ctx.pool.run(pipeline.scope)
+    return {"panel": "scope", **data}
+
+
 async def _panel_audit(ctx: Context) -> dict:
     with ctx.governor.read_admission():
         rows = await ctx.pool.run(_audit_detail, 50)
@@ -359,6 +377,8 @@ PANEL_REGISTRY: dict[str, PanelHandler] = {
     "probate": _panel_probate,
     "outreach": _panel_outreach,
     "engines": _panel_engines,
+    "pipeline": _panel_pipeline,
+    "scope": _panel_scope,
     "audit": _panel_audit,
     "memory": _panel_memory,
     "voice": _panel_voice,

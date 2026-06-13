@@ -111,7 +111,8 @@ def run_claude_supervised(task: str, *, cwd: str, poll_s: float = POLL_S,
     # (its Bash tool) survived as orphans, kept coding past the limit, AND held the
     # stdout pipe open so the post-cancel drain stalled until they exited.
     proc = subprocess.Popen(
-        [config.BRAIN_CMD, "-p", "--allowedTools", "Edit", "Write", "Read", "Bash"],
+        [config.BRAIN_CMD, "-p", "--model", config.BRAIN_MODEL,
+         "--allowedTools", "Edit", "Write", "Read", "Bash"],
         stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
         cwd=cwd, text=True, start_new_session=True,
     )

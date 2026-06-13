@@ -31,7 +31,13 @@ FRAME = vad.FRAME               # 512 samples = 32 ms (Silero-native)
 CHANNELS = 1
 MONITOR_S = 5.0                 # how often the level monitor logs observed mic RMS
 SILENCE_ALERT_S = 30.0          # mic delivering TRUE silence (zeros) this long -> failure
-TRUE_SILENCE = 0.0008           # below this = mic delivering zeros (deaf); a room reads higher
+# Below this RAW RMS = the device is delivering zeros (deaf). A WEDGED/dead CoreAudio
+# handle delivers EXACT 0.0; a live 16-bit mic — even in a silent room — never floors
+# below its ~3e-5 LSB-dither floor. The old 0.0008 sat ABOVE the real quiet-room floor:
+# overnight (00:40–07:11 on 2026-06-13) the room's raw peaks fell to 0.00004–0.00077,
+# tripping false "deaf" → supervisor restart storm → wake word repeatedly dropped. This
+# sits below the dither floor so only literal zeros trip it. Env-overridable for retune.
+TRUE_SILENCE = float(os.environ.get("UTAH_TRUE_SILENCE", "0.00001"))
 MIC_SILENT_COOLDOWN_S = 1800.0  # 30 min
 
 # ── Gated AGC ───────────────────────────────────────────────────────────────

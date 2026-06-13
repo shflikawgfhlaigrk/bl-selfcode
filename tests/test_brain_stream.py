@@ -180,15 +180,17 @@ def test_think_stream_disables_tools_so_it_cannot_go_agentic():
 def test_think_stream_skips_user_plugins_for_latency_without_downgrading_model():
     """LATENCY: ``--setting-sources project`` stops the CLI loading the user's
     18 plugins / 65 skills / global CLAUDE.md / LSP on every spawn (~halved TTFT).
-    It must NOT pin ``--model`` — the bare ``opus`` alias would drop the [1m]
-    1M-context variant, i.e. a quieter brain downgrade. Same brain, faster start."""
+    The model is pinned to the FULL ``claude-opus-4-8[1m]`` id — NOT a downgrade
+    (the bare ``opus`` alias would be, dropping [1m]); the explicit pin is required
+    because ``--setting-sources project`` means there are no user settings to
+    inherit ``model`` from, and the CLI default has flipped to Fable 5 (2026-06-13)."""
     runner = ScriptedStreamRunner(_stream_lines_for("x", "y"))
     brain.set_stream_runner(runner)
     list(brain.think_stream("q"))
     argv = runner.last_argv
     assert "--setting-sources" in argv
     assert argv[argv.index("--setting-sources") + 1] == "project"
-    assert "--model" not in argv  # never downgrade the model to chase latency
+    assert argv[argv.index("--model") + 1] == "claude-opus-4-8[1m]"  # full 1M variant, not a downgrade
 
 
 def test_think_stream_raises_brain_unavailable_on_runner_failure():

@@ -13,6 +13,9 @@ venv/
 # logs / scratch
 *.log
 
+# claude-flow tool state (regenerated; churns the tree and blocks selfcode propagation)
+.claude-flow/
+
 # build artifacts (Flutter/Xcode regenerate these)
 /build/
 

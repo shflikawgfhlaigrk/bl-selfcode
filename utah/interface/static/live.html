@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8"/>
-<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"/>
 <title>UTAH — Local Command Deck</title>
 <style>
   :root{
@@ -21,14 +21,14 @@
   ::-webkit-scrollbar{width:7px;height:7px}::-webkit-scrollbar-thumb{background:#23222c;border-radius:4px}
   ::-webkit-scrollbar-track{background:transparent}
 
-  /* ---- app shell: 3 independent grid rows. The DECK (1fr) absorbs all slack and
-       scrolls INTERNALLY, so 2s polling can never reflow the header or the command
-       dock — the chat box no longer jumps. ---- */
-  #app{height:100dvh;display:grid;grid-template-rows:auto 1fr auto;overflow:hidden}
+  /* ---- app shell: header + deck (1fr) + dock. Deck scrolls internally. ---- */
+  #app{height:100dvh;display:grid;grid-template-rows:auto 1fr auto;overflow:hidden;
+    padding-top:env(safe-area-inset-top,0);padding-bottom:env(safe-area-inset-bottom,0)}
 
   /* header */
-  header{display:flex;align-items:center;gap:16px;padding:10px 20px;border-bottom:1px solid var(--line);
+  header{display:flex;flex-direction:column;border-bottom:1px solid var(--line);
     background:linear-gradient(180deg,#0d0c08,transparent)}
+  .header-row{display:flex;align-items:center;gap:16px;padding:10px 20px;flex-wrap:wrap}
   .logo{display:flex;align-items:center;gap:10px}
   .logo .mark{width:22px;height:22px;border:1.5px solid var(--gold);border-radius:5px;transform:rotate(45deg);box-shadow:0 0 14px var(--goldglow)}
   .logo b{color:var(--gold2);letter-spacing:3px;font-size:15px} .logo span{color:var(--mut);font-size:10px;letter-spacing:3px}
@@ -41,12 +41,15 @@
   .hstat{margin-left:auto;display:flex;gap:24px;align-items:center}
   .hstat .m{text-align:right} .hstat .m b{color:var(--gold2);font-size:15px} .hstat .m span{color:var(--mut);font-size:9px;display:block;letter-spacing:2px}
   #clock{color:var(--gold2);font-size:13px}
-  /* join-discord button (mirrors the server that mirrors this deck) */
-  .dbtn{display:none;align-items:center;gap:7px;padding:6px 13px;border:1px solid #5865F2;border-radius:8px;
-    background:linear-gradient(180deg,rgba(88,101,242,.22),rgba(88,101,242,.08));color:#cdd3ff;
-    font-size:10px;letter-spacing:1.6px;text-decoration:none;cursor:pointer;white-space:nowrap}
-  .dbtn.on{display:inline-flex} .dbtn:hover{border-color:#7984ff;box-shadow:0 0 12px rgba(88,101,242,.5)}
-  .dbtn b{color:#fff;letter-spacing:1.6px}
+  .discord-strip{display:none;width:100%;box-sizing:border-box;padding:8px 12px;
+    border-bottom:1px solid #5865F2;text-decoration:none;text-align:center;
+    background:linear-gradient(180deg,rgba(88,101,242,.28),rgba(88,101,242,.1));color:#cdd3ff;
+    font-size:10px;letter-spacing:1.2px;line-height:1.35;
+    white-space:normal;overflow-wrap:anywhere;word-break:break-word}
+  .discord-strip.on{display:block}
+  .discord-strip:hover{background:linear-gradient(180deg,rgba(88,101,242,.38),rgba(88,101,242,.14));color:#fff}
+  .discord-strip b{color:#fff;letter-spacing:1.4px;font-size:11px}
+  .discord-strip .ds-meta{color:#9aa3ff;font-size:9px}
 
   /* hamburger menu — labs & consoles */
   .hamb{background:#0f0e0a;border:1px solid var(--line);color:var(--gold2);width:34px;height:34px;border-radius:8px;cursor:pointer;font-size:15px;flex:none}
@@ -65,7 +68,6 @@
 
   /* deck */
   .deck{display:grid;grid-template-columns:262px 1fr 312px;gap:14px;padding:14px 16px;overflow:hidden;min-height:0}
-  @media(max-width:1180px){.deck{grid-template-columns:1fr;overflow:auto}}
   .rail,.hud{min-height:0;display:flex;flex-direction:column;gap:12px}
   .rail{overflow:auto;padding-right:2px}
   .hud{overflow:hidden}
@@ -135,7 +137,7 @@
   .kpis{display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:10px;margin-bottom:10px}
   .kpi{background:var(--panel2);border:1px solid var(--line);border-radius:7px;padding:10px 11px}
   .kpi b{color:var(--gold2);font-size:18px;display:block} .kpi span{color:var(--mut);font-size:9px;letter-spacing:1.5px}
-  .empty{height:100%;min-height:80px;display:flex;align-items:center;justify-content:center;color:var(--dim);letter-spacing:3px;font-size:11px}
+  .empty{min-height:48px;display:flex;align-items:center;justify-content:center;color:var(--dim);letter-spacing:3px;font-size:11px}
 
   /* ===== ACE TERMINAL — TUI shell living inside the center dash (Discord-slot tab).
      A real terminal into Ace: typed line POSTs the existing /api/tell brain and streams
@@ -238,7 +240,7 @@
   .ticker{height:120px;overflow:auto;font-size:11px}
   .ticker div{padding:2px 0;color:#a39c84;border-bottom:1px dotted #16161e}.ticker .ch{color:var(--gold)}
 
-  /* ---- command dock (pinned bottom row; structurally independent of the deck) ---- */
+  /* ---- command dock (pinned bottom; structurally independent of the deck) ---- */
   .dock{border-top:1px solid var(--line);background:linear-gradient(0deg,#0b0a07,transparent)}
   .stream-bar{display:none;justify-content:space-between;align-items:center;padding:8px 20px 2px}
   .stream-bar.open{display:flex}
@@ -432,11 +434,93 @@
   .leg-led.off,.leg-led.error{background:var(--err);box-shadow:0 0 8px rgba(226,85,75,.5)}
   .leg-led.gated{background:var(--dim)}
   .leg-led.dormant{background:var(--dormant);border:1px solid var(--dim)}
+
+  /* desktop: orbit above data in center column */
+  .hud .core-wrap{order:1}
+  .hud .dash{order:2}
+
+  /* ===== PHONE / NARROW — MUST BE LAST (overrides .core-wrap{display:flex} above) ===== */
+  @media(max-width:1180px){
+    .deck{display:flex;flex-direction:column;overflow:hidden;padding:4px 8px;gap:0;min-height:0}
+    .deck .hud-core{flex:1;min-height:0;overflow:hidden}
+    .deck .rail-spine,.deck .rail-fn{display:none}
+    .core-wrap{display:none !important}
+    .hud{gap:4px;flex:1;min-height:0}
+    .dash{flex:1;min-height:0}
+    .dbody{padding:8px 10px}
+    .dtabs{margin-bottom:4px;gap:4px}
+    .dtab{padding:4px 10px}
+    .header-row{padding:4px 10px;gap:6px}
+    .logo b{font-size:14px}
+    .logo span{display:none}
+    .chips{display:none}
+    .hstat{gap:8px;margin-left:auto}
+    .hstat .m.drillable{display:none}
+    .dock .footer,.dock .legend,.dock .quick{display:none}
+    .cmd{padding:6px 10px 8px}
+    #stream.open{height:22vh}
+    #stream.expanded{height:40vh}
+    .term-banner pre{display:none}
+    .term-banner{padding:8px 12px}
+    .term-banner .sub{margin-top:0;font-size:10px}
+    .discord-strip{padding:5px 8px;font-size:9px;line-height:1.3;letter-spacing:.8px}
+    .discord-strip b{font-size:10px}
+    .xp{display:none}
+  }
+  html.phone .core-wrap{display:none !important}
+  html.phone .deck .rail-spine,html.phone .deck .rail-fn{display:none !important}
+  html.phone .discord-strip{padding:5px 8px;font-size:9px;line-height:1.3}
+
+  /* ---- lead-pipeline funnel (PIPELINE tab + side-rail snapshot) ---- */
+  .funnel{display:flex;flex-direction:column;gap:7px;margin:4px 0 6px}
+  .fstage{display:grid;grid-template-columns:120px 1fr auto;align-items:center;gap:9px}
+  .fstage .flab{color:var(--txt);font-size:11px;letter-spacing:.4px}
+  .fstage .fbar{height:20px;background:var(--panel2);border:1px solid var(--line);border-radius:5px;overflow:hidden;position:relative}
+  .fstage .ffill{height:100%;background:linear-gradient(90deg,var(--gold),var(--gold2));border-radius:4px;min-width:2px;box-shadow:0 0 12px var(--goldglow);transition:width .5s ease}
+  .fstage.won .ffill{background:linear-gradient(90deg,#1c3a28,#2c5a3e);box-shadow:none}
+  .fstage .fnum{position:absolute;right:7px;top:50%;transform:translateY(-50%);font-size:10.5px;color:#1a1407;font-weight:700;mix-blend-mode:screen}
+  .fstage .fpct{color:var(--mut);font-size:10px;min-width:46px;text-align:right}
+  .fstage .fpct b{color:var(--gold2)}
+  .fnote{color:var(--mut);font-size:10px;line-height:1.4;margin:-2px 0 2px 129px}
+  .leak{background:#15130b;border:1px solid #2c2614;border-radius:9px;padding:10px 12px;margin-top:9px}
+  .leak.free::after{content:"FREE FIX";float:right;color:#1a1407;background:linear-gradient(90deg,var(--gold),var(--gold2));font-size:8px;letter-spacing:1.5px;padding:2px 7px;border-radius:10px;font-weight:700}
+  .leak b{color:var(--gold2);font-size:12px}
+  .leak p{color:#b7ab86;font-size:11px;line-height:1.45;margin:5px 0 0}
+  /* rail funnel snapshot — the small side window */
+  .mini-funnel{display:flex;flex-direction:column;gap:4px}
+  .mfrow{display:grid;grid-template-columns:1fr auto;gap:6px;font-size:10.5px;align-items:center}
+  .mfrow .mfbar{height:6px;background:var(--panel2);border-radius:3px;overflow:hidden;grid-column:1/3;margin-top:-1px}
+  .mfrow .mffill{height:100%;background:linear-gradient(90deg,var(--gold),var(--gold2));border-radius:3px}
+  .mfrow .k{color:var(--mut)} .mfrow .v{color:var(--gold2);font-weight:600}
+  /* ---- system-map scheme (hamburger + side-rail) ---- */
+  .scope-grp{margin-bottom:14px}
+  .scope-h{display:flex;align-items:center;gap:8px;color:var(--gold2);font-size:11px;letter-spacing:2px;margin-bottom:7px;border-bottom:1px solid var(--line);padding-bottom:5px}
+  .scope-h .sx{color:var(--gold);font-size:13px} .scope-h .srows{margin-left:auto;color:var(--mut);font-size:10px;letter-spacing:1px}
+  .scope-areas{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:8px}
+  .scope-area{background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:9px 11px}
+  .scope-area .san{display:flex;justify-content:space-between;align-items:baseline;gap:8px}
+  .scope-area .san b{color:var(--txt);font-size:12px} .scope-area .san .cnt{color:var(--gold2);font-size:13px;font-weight:700}
+  .scope-area .san .cnt.dim{color:var(--err);font-size:10px}
+  .scope-area .saw{color:var(--mut);font-size:10px;line-height:1.4;margin-top:3px}
+  .scope-area .sag{color:#9a833f;font-size:9.5px;line-height:1.4;margin-top:5px}
+  .scope-area .sag::before{content:"↗ GROW · ";color:var(--gold);letter-spacing:.5px}
+  .scope-crons{display:flex;flex-wrap:wrap;gap:5px;margin-top:4px}
+  .scope-crons .cron{background:var(--panel2);border:1px solid var(--line);border-radius:5px;padding:3px 8px;font-size:9.5px;color:#cdc6ad}
+  .scope-tot{display:flex;gap:14px;flex-wrap:wrap;margin-bottom:13px;font-size:11px;color:var(--mut)}
+  .scope-tot b{color:var(--gold2);font-size:17px;display:block}
+  .map-link{background:#0f0e0a;border:1px solid var(--line);border-radius:8px;padding:8px 10px;cursor:pointer;color:var(--txt);font:inherit;width:100%;text-align:left}
+  .map-link:hover{border-color:var(--gold)} .map-link b{color:var(--gold2)} .map-link span{color:var(--mut);font-size:10px}
 </style>
+<script>(function(){function p(){document.documentElement.classList.toggle("phone",matchMedia("(max-width:1180px)").matches||/iPhone|iPad|Android|Mobi/i.test(navigator.userAgent));}p();addEventListener("resize",p);})();</script>
 </head>
 <body>
 <div id="app">
   <header>
+    <a class="discord-strip" id="dbtn" href="/discord" target="_blank" rel="noopener"
+       title="Join the Utah Discord — same structure as this deck, open to guests">
+      <b>JOIN UTAH DISCORD</b> · live deck · guests welcome<span class="ds-meta" id="dbtn-meta"></span>
+    </a>
+    <div class="header-row">
     <button class="hamb" id="hamb" title="labs & consoles" onclick="toggleMenu()">☰</button>
     <div class="logo"><div class="mark"></div><b>UTAH</b><span>LOCAL COMMAND DECK</span></div>
     <div class="chips">
@@ -450,17 +534,18 @@
       <div class="m drillable" onclick="drill('memory')" title="click for memory detail"><b id="h-mem">—</b><span>MEMORY ROWS</span></div>
       <div class="m drillable" onclick="drill('bus')" title="click for event-bus detail"><b id="h-bus">—</b><span>BUS EVENTS</span></div>
       <div class="m drillable" onclick="drillGated()" title="what's gated and why"><b id="h-gates">—</b><span>GATED</span></div>
-      <a class="dbtn" id="dbtn" href="/discord" target="_blank" rel="noopener" title="Join the Utah Discord — same structure as this deck">
-        <span>💬</span><b>JOIN DISCORD</b><span id="dbtn-meta"></span></a>
       <div class="m" id="clock">—</div>
+    </div>
     </div>
   </header>
 
   <div class="deck">
     <!-- LEFT RAIL — SYSTEM SPINE -->
-    <aside class="rail">
+    <aside class="rail rail-spine">
       <div class="rail-title"><span>◆ SYSTEM SPINE</span><span id="spine-state" class="state-badge idle">—</span></div>
       <div class="card"><div id="spine"></div></div>
+      <div class="rail-title" style="margin-top:2px"><span>◆ LEAD PIPELINE</span><span id="pipe-state" class="state-badge idle">—</span></div>
+      <div class="card drillable" id="mini-funnel-card" title="open the full lead pipeline"><div id="mini-funnel"><div class="empty">…</div></div></div>
       <div class="card"><h2>TRANSPORT</h2>
         <div class="row"><span class="k">control plane</span><span class="v">binary · len-prefix</span></div>
         <div class="row"><span class="k">ipc</span><span class="v">unix socket</span></div>
@@ -469,8 +554,12 @@
       </div>
     </aside>
 
-    <!-- CENTER — REASONING CORE + LIVE DATA DASH -->
-    <section class="hud">
+    <!-- CENTER — LIVE DATA FIRST on phone, orbit above on desktop -->
+    <section class="hud hud-core">
+      <div class="dash">
+        <div class="dtabs" id="dtabs"></div>
+        <div class="dbody" id="dbody"><div class="empty">LOADING…</div></div>
+      </div>
       <div class="core-wrap">
         <div class="core">
           <div class="ring r1"></div><div class="ring r2"></div><div class="ring r3"></div>
@@ -484,21 +573,19 @@
           <div class="tile"><b>ON-DEVICE</b><span>EMBED · RERANK</span></div>
         </div>
       </div>
-      <div class="dash">
-        <div class="dtabs" id="dtabs"></div>
-        <div class="dbody" id="dbody"><div class="empty">LOADING…</div></div>
-      </div>
     </section>
 
     <!-- RIGHT RAIL — FUNCTIONS + LIVE BUS -->
-    <aside class="rail">
+    <aside class="rail rail-fn">
       <div class="rail-title"><span>◆ FUNCTIONS</span><span id="fn-count">—</span></div>
       <div class="card"><div id="fns"></div></div>
+      <div class="rail-title" style="margin-top:2px"><span>◆ SYSTEM MAP</span><span id="scope-state" class="state-badge idle">—</span></div>
+      <div class="card drillable" id="mini-scope-card" onclick="openScope()" title="open the full system map — how big this has gotten"><div id="mini-scope"><div class="empty">…</div></div></div>
       <div class="card"><h2>EVENT BUS · LIVE</h2><div class="ticker" id="ticker"><div>awaiting events…</div></div></div>
     </aside>
   </div>
 
-  <!-- COMMAND DOCK (pinned; deck polling cannot move it) -->
+  <!-- COMMAND DOCK (pinned bottom; deck polling cannot move it) -->
   <div class="dock">
     <div class="stream-bar" id="stream-bar">
       <span class="sb-title">◆ CONVERSATION <span id="turn-count"></span></span>
@@ -534,6 +621,7 @@
 <div id="menu" class="menu" onclick="if(event.target===this)toggleMenu()">
   <div class="menu-box">
     <div class="menu-h">◆ LABS &amp; CONSOLES</div>
+    <button class="menu-item" onclick="openScope()"><b>🗺 System Map</b><span id="menu-scope-sub">every area · live row counts · the whole scheme + where it grows</span></button>
     <button class="menu-item" onclick="openLab()"><b>⚡ Trading Engine Lab</b><span id="menu-lab-sub">engine roster · paper/sim · WealthCharts feed</span></button>
     <button class="menu-item" onclick="openTerminal()"><b>⌨️ Self-Code Console</b><span>genuine / commands · /code · /findings · /do · /ask · propose-only</span></button>
     <button class="menu-item" onclick="openConsole('selfcode','🤖 SELF-CODING BAY')"><b>🤖 Self-Coding Bay</b><span>propose-only · isolated branch · suite-gated · never main</span></button>
@@ -777,6 +865,7 @@ function renderFns(s,m,st,voice){
 /* ============================ CENTER DASH (tabbed real data) ============================ */
 const TABS=[
   {id:"overview", label:"OVERVIEW"},
+  {id:"pipeline", label:"PIPELINE"},
   {id:"terminal", label:"ACE TERMINAL"},
   {id:"memory",   label:"MEMORY"},
   {id:"leads",    label:"LEADS"},
@@ -800,6 +889,7 @@ function metaOf(r){return [r.kind,r.region,r.county,r.campaign,r.channel,r.sourc
 /* plain-English one-liner shown at the top of every center tab */
 const TAB_INTRO={
   overview:"A quick snapshot of everything. Tap any tile or row for the full story.",
+  pipeline:"How a lead moves from discovered to paid — every stage live, where it leaks, and the free next win. SMB no-website lane + probate real-estate lane.",
   terminal:"A live terminal straight into Ace. Type a line, press Enter — it streams his reasoning and answer in real time.",
   memory:"Everything Utah has learned and remembers. Tap a fact to read it in full.",
   leads:"Local businesses with no website — your prospects. Tap one for its type, location and contact info.",
@@ -833,6 +923,110 @@ function itemRows(arr,tab){
 function wireRows(){ document.querySelectorAll("#dbody .item[data-row]").forEach(el=>el.onclick=()=>{
   const arr=_tabRows[el.dataset.tab]; if(arr) recordDrill(el.dataset.tab, arr[+el.dataset.row]); }); }
 async function getPanel(name){ const d=await fetch("/panel/"+name).then(r=>r.json()); if(d.error)throw new Error(d.error); return d; }
+
+/* ===== LEAD PIPELINE FUNNEL ===== bar width ∝ stage count / funnel mouth. Every number is
+   a live COUNT(*) from /panel/pipeline; conversion % is computed off the mouth, not painted. */
+function funnelStages(stages){
+  const mouth=(stages[0]&&stages[0].n)||0;
+  return '<div class="funnel">'+stages.map(s=>{
+    const w=mouth?Math.max(1.2,100*s.n/mouth):0;
+    const pct=mouth?(100*s.n/mouth):0;
+    const cls="fstage"+(s.key==="won"?" won":"");
+    return `<div class="${cls}"><span class="flab">${esc(s.label)}</span>`+
+      `<div class="fbar"><div class="ffill" style="width:${w.toFixed(1)}%"></div>`+
+      `<span class="fnum">${Number(s.n).toLocaleString()}</span></div>`+
+      `<span class="fpct"><b>${pct.toFixed(pct<10?1:0)}%</b></span></div>`+
+      (s.note?`<div class="fnote">${esc(s.note)}</div>`:"");
+  }).join("")+'</div>';
+}
+function renderFunnel(d){
+  const diag=d.diagnosis||{};
+  let h="";
+  if(diag.headline) h+=`<div class="verdict warn"><span class="vled"></span>${esc(diag.headline)}</div>`;
+  h+='<div class="drill-sec">SMB · NO-WEBSITE LANE — DISCOVERED → PAID</div>';
+  h+=funnelStages(d.smb||[]);
+  (diag.leaks||[]).forEach(l=>{
+    h+=`<div class="leak${l.free?' free':''}"><b>${esc(l.title)}</b><p>${esc(l.detail)}</p></div>`;
+  });
+  if(d.probate&&d.probate.length){
+    h+='<div class="drill-sec" style="margin-top:16px">PROBATE · REAL-ESTATE LANE</div>';
+    h+=funnelStages(d.probate);
+  }
+  return h;
+}
+
+/* ===== SYSTEM MAP / SCHEME ===== the full scope of Utah — every area, live row counts, the
+   real launchd crons, and where each area can still grow. Opens in the drill drawer. */
+function renderScope(d){
+  const t=d.totals||{};
+  let h='<div class="scope-tot">'+
+    `<div><b>${Number(t.rows||0).toLocaleString()}</b>LIVE ROWS</div>`+
+    `<div><b>${t.areas||0}</b>AREAS</div>`+
+    `<div><b>${t.tables||0}</b>DATA TABLES</div>`+
+    `<div><b>${t.crons||0}</b>AUTONOMOUS CRONS</div></div>`;
+  (d.groups||[]).forEach(g=>{
+    h+=`<div class="scope-grp"><div class="scope-h"><span class="sx">${esc(g.icon||"◆")}</span>`+
+       `${esc(g.group)}<span class="srows">${Number(g.rows||0).toLocaleString()} rows</span></div>`+
+       '<div class="scope-areas">'+(g.areas||[]).map(a=>{
+         const c=(a.count==null)?'<span class="cnt dim">no data</span>':`<span class="cnt">${Number(a.count).toLocaleString()}</span>`;
+         return `<div class="scope-area"><div class="san"><b>${esc(a.name)}</b>${c}</div>`+
+           `<div class="saw">${esc(a.what||"")}</div>`+(a.grow?`<div class="sag">${esc(a.grow)}</div>`:"")+`</div>`;
+       }).join("")+'</div></div>';
+  });
+  if(d.crons&&d.crons.length)
+    h+='<div class="scope-grp"><div class="scope-h"><span class="sx">⟳</span>AUTONOMOUS CRON ROSTER<span class="srows">'+d.crons.length+' jobs</span></div>'+
+       '<div class="scope-crons">'+d.crons.map(c=>`<span class="cron">com.utah.${esc(c)}</span>`).join("")+'</div></div>';
+  return h;
+}
+async function openScope(){
+  closeMenu();
+  drillOpen("◆ SYSTEM MAP — HOW BIG THIS HAS GOTTEN", emptyBox("LOADING…"));
+  try{
+    const d=await fetch("/panel/scope").then(r=>r.json());
+    $("drill-body").innerHTML=(!d||d.error)?emptyBox("unavailable — "+esc((d&&d.error)||"no data")):renderScope(d);
+  }catch(e){ $("drill-body").innerHTML=emptyBox("unavailable — "+esc(String(e.message||e))); }
+}
+
+/* ===== SIDE-RAIL MINI-WINDOWS ===== the funnel + system-map at a glance, refreshed on a
+   slow cadence (counts move on daily crons, not per-tick — no need to hammer the ledger). */
+function miniFunnel(d){
+  const by={}; (d.smb||[]).forEach(s=>by[s.key]=s.n);
+  const mouth=by.discovered||0;
+  const er=(d.diagnosis&&d.diagnosis.email_rate);
+  const pick=[["Discovered","discovered"],["Reachable","reachable"],["Email","email"],
+              ["Sent","sent"],["Replied","replied"]];
+  let h='<div class="mini-funnel">';
+  pick.forEach(([lab,k])=>{
+    const n=by[k]||0, w=mouth?Math.max(2,100*n/mouth):0;
+    h+=`<div class="mfrow"><span class="k">${lab}</span><span class="v">${Number(n).toLocaleString()}</span>`+
+       `<div class="mfbar"><div class="mffill" style="width:${w.toFixed(1)}%"></div></div></div>`;
+  });
+  h+='</div>';
+  setStateBadge($("pipe-state"), er!=null?(er+"% EMAIL"):"LIVE", er!=null&&er<10?"warn":"ok");
+  return h;
+}
+function miniScope(d){
+  const t=d.totals||{};
+  let h=`<div class="mfrow" style="margin-bottom:5px"><span class="k">TOTAL ROWS</span>`+
+        `<span class="v">${Number(t.rows||0).toLocaleString()}</span></div>`;
+  (d.groups||[]).forEach(g=>{
+    h+=`<div class="mfrow"><span class="k">${esc(g.group.split(" · ")[0])}</span>`+
+       `<span class="v">${Number(g.rows||0).toLocaleString()}</span></div>`;
+  });
+  setStateBadge($("scope-state"), (t.crons||0)+" CRONS", "ok");
+  return h;
+}
+async function refreshMinis(){
+  try{
+    const f=await fetch("/panel/pipeline").then(r=>r.json());
+    if(f&&f.smb) $("mini-funnel").innerHTML=miniFunnel(f);
+  }catch(_){}
+  try{
+    const s=await fetch("/panel/scope").then(r=>r.json());
+    if(s&&s.groups) $("mini-scope").innerHTML=miniScope(s);
+  }catch(_){}
+}
+
 async function loadDash(tab, quiet){
   const body=$("dbody"); if(!quiet) body.innerHTML=emptyBox("LOADING…");
   try{
@@ -853,6 +1047,11 @@ async function loadDash(tab, quiet){
       body.innerHTML=h;
       body.querySelectorAll("[data-drill]").forEach(el=>el.onclick=()=>drill(el.dataset.drill));
       return;
+    }
+    if(tab==="pipeline"){
+      const d=await fetch("/panel/pipeline").then(r=>r.json());
+      if(!d||d.error||!d.smb){ body.innerHTML=intro("pipeline")+emptyBox("LEDGER UNREACHABLE — "+esc((d&&d.error)||"no data")); return; }
+      body.innerHTML=intro("pipeline")+renderFunnel(d); return;
     }
     if(tab==="memory"){
       const d=await getPanel("memory"); tabCounts.memory=(d.rows||[]).length; _tabRows.memory=d.rows||[];
@@ -1671,13 +1870,16 @@ function clock(){$("clock").textContent=new Date().toLocaleTimeString([],{hour:"
 $("ticker").innerHTML=`<div${markerAttrs("awaiting events…")}>awaiting events…</div>`;
 renderLegend(); renderMarkerLegend(); renderTabs(); loadDash("overview");
 poll(); setInterval(poll,2500);
+// side-rail mini-windows (funnel + system map) — slow cadence; counts move on daily crons.
+{const mfc=$("mini-funnel-card"); if(mfc) mfc.onclick=()=>{curTab="pipeline";renderTabs();loadDash("pipeline");};}
+refreshMinis(); setInterval(refreshMinis,30000);
 if(_labBoot) setTimeout(()=>openLab(), 800);
 clock(); setInterval(clock,1000);
-// JOIN DISCORD — light the header button only when an invite is configured.
+// JOIN DISCORD — full-width top strip when an invite is configured (guest-visible).
 async function discordChip(){try{const d=await(await fetch("/api/discord")).json();
   const b=$("dbtn"); if(!b) return;
   if(d.invite){ b.classList.add("on"); b.href=d.invite||"/discord";
-    const t=d.totals||{}; if(t.channels) $("dbtn-meta").textContent=" · "+t.channels+"ch";
+    const t=d.totals||{}; $("dbtn-meta").textContent=t.channels?(" · "+t.channels+" ch"):"";
   } else { b.classList.remove("on"); }
 }catch(e){}}
 discordChip(); setInterval(discordChip,60000);

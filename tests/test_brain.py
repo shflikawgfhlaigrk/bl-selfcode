@@ -42,6 +42,16 @@ def test_context_truncation_cuts_on_a_fact_boundary(monkeypatch):
     assert not out.endswith(("muc", "longe"))     # never a torn word
 
 
+def test_brain_args_pin_the_model_to_opus_48():
+    """Every brain spawn (one-shot, streaming, selfcode meta-task) MUST pin
+    --model claude-opus-4-8[1m]. 2026-06-13: relying on the CLI default broke when
+    the default flipped to Fable 5 (unavailable on this account). The full [1m] id
+    keeps the 1M-context variant the bare `opus` alias drops."""
+    for args in (config.BRAIN_NO_AGENT, config.BRAIN_ARGS, config.BRAIN_STREAM_ARGS):
+        assert "--model" in args
+        assert args[args.index("--model") + 1] == "claude-opus-4-8[1m]"
+
+
 def test_build_prompt_is_shared_shape_for_think_and_stream():
     """_build_prompt is the single prompt assembler — PERSONA + NO_FAB + CONTEXT + Q,
     with optional voice-brief and thinking blocks."""

@@ -35,6 +35,24 @@ log = logging.getLogger("utah.mail_replies")
 IMAP_HOST_DEFAULT = "imap.gmail.com"
 STATE = runtime.UTAH_HOME / "run" / "mail_replies_state.json"
 
+
+def imap_host_for(account: dict) -> str:
+    """The IMAP host for *account*: an explicit ``imap_host`` wins; otherwise it's derived
+    from the SMTP host by swapping the leading ``smtp`` for ``imap`` (smtp.privateemail.com
+    → imap.privateemail.com, smtp.gmail.com → imap.gmail.com).
+
+    Regression this kills: the Private Email inboxes (info@/delivery@blacklabelbots.com) set
+    only ``smtp_host``, so the reader fell back to the gmail default and threw Namecheap creds
+    at ``imap.gmail.com`` — AUTHENTICATIONFAILED every 15 min, with real replies stranded
+    unread. Deriving the host from SMTP means a sending account is always readable from the
+    SAME provider, and the gmail default still applies when nothing is configured at all."""
+    if account.get("imap_host"):
+        return account["imap_host"]
+    smtp = (account.get("smtp_host") or "").strip().lower()
+    if smtp.startswith("smtp."):
+        return "imap." + smtp[len("smtp."):]
+    return IMAP_HOST_DEFAULT
+
 _BOUNCE_SENDERS = frozenset({"mailer-daemon", "postmaster"})  # exact DSN local parts
 _EMAIL_RE = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
 
@@ -161,7 +179,7 @@ def _imap_fetch(account: dict, last_uid: int, *, conn_factory=None) -> list[dict
     socket. Exceptions propagate: ``poll`` documents them per-inbox as
     ``imap_failed`` without losing the other accounts.
     """
-    host = account.get("imap_host", IMAP_HOST_DEFAULT)
+    host = imap_host_for(account)
     conn = (conn_factory or _default_conn)(host)
     try:
         conn.login(account["from"], account["app_password"])

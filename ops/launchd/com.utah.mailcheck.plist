@@ -23,7 +23,7 @@
   <array>
     <string>/Users/michaelbarber/.utah/venv/bin/python</string>
     <string>-c</string>
-    <string>from utah import mail, failures; from utah.integrations import pushover; r=mail.verify(); (failures.record('mail','auth_check_failed', 'SMTP auth REJECTED — brief & outreach email down: '+str(r.get('error'))[:200]) or pushover.send('Gmail SMTP auth is REJECTED — brief & outreach email are down until you drop a fresh app-password in ~/.utah/secrets/gmail.json.', title='Utah: email auth DOWN', priority=0)) if (not r.get('ok') and not r.get('gated')) else None; print(r)</string>
+    <string>from utah import mail, failures; from utah.integrations import pushover; r=mail.verify(); (failures.record('mail','auth_check_failed', 'SMTP auth REJECTED — brief &amp; outreach email down: '+str(r.get('error'))[:200]) or pushover.send('Gmail SMTP auth is REJECTED — brief &amp; outreach email are down until you drop a fresh app-password in ~/.utah/secrets/gmail.json.', title='Utah: email auth DOWN', priority=0)) if (not r.get('ok') and not r.get('gated')) else None; print(r)</string>
   </array>
 
   <key>WorkingDirectory</key>

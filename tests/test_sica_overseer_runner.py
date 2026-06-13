@@ -35,6 +35,22 @@ def test_nonzero_exit_raises_with_stderr_tail(tmp_path, monkeypatch):
     assert "kaboom detail" in str(exc.value)
 
 
+def test_coding_run_pins_the_model(tmp_path, monkeypatch):
+    """The coding run MUST pin --model claude-opus-4-8[1m]. 2026-06-13: with no
+    --model it took the CLI default, which had flipped to Fable 5 (unavailable on
+    this account) → every selfcode run exited 1. The full [1m] id (not the bare
+    `opus` alias, which drops 1M context) keeps selfcode awake regardless of what
+    the CLI default becomes next."""
+    argv_log = tmp_path / "argv.txt"
+    _stub_brain(tmp_path, monkeypatch,
+                f'printf "%s\\n" "$@" > {argv_log}\ncat >/dev/null\nexit 0')
+    ov.run_claude_supervised("task", cwd=str(tmp_path), poll_s=0.05)
+    argv = argv_log.read_text().splitlines()
+    assert "--model" in argv
+    assert "claude-opus-4-8[1m]" in argv
+    assert argv[argv.index("--model") + 1] == "claude-opus-4-8[1m]"
+
+
 def test_runaway_run_is_cancelled_and_its_whole_tree_killed(tmp_path, monkeypatch):
     """A run past the time limit raises TimeoutExpired AND the whole process
     TREE is dead — a bare proc.kill() left grandchildren (claude's Bash tool)

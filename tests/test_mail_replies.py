@@ -159,3 +159,25 @@ def test_bounced_recipient_extraction():
     body = f"550 address not found: <{PITCH_TARGET}> rejected; ref support@google.com"
     assert mail_replies.bounced_recipient(body, pitched) == PITCH_TARGET
     assert mail_replies.bounced_recipient("no emails here", pitched) is None
+
+
+def test_imap_host_explicit_wins():
+    """An explicit imap_host is used verbatim — never overridden by derivation."""
+    assert mail_replies.imap_host_for(
+        {"from": "x@y.com", "smtp_host": "smtp.gmail.com",
+         "imap_host": "imap.custom.example"}) == "imap.custom.example"
+
+
+def test_imap_host_derived_from_smtp():
+    """No imap_host → derive from the SMTP host (same provider). This is the fix for the
+    Private Email inboxes that only set smtp_host and were defaulting to imap.gmail.com →
+    AUTHENTICATIONFAILED every poll."""
+    assert mail_replies.imap_host_for(
+        {"from": "info@blacklabelbots.com",
+         "smtp_host": "smtp.privateemail.com"}) == "imap.privateemail.com"
+    assert mail_replies.imap_host_for(
+        {"from": "m@gmail.com", "smtp_host": "smtp.gmail.com"}) == "imap.gmail.com"
+
+
+def test_imap_host_falls_back_to_default_when_nothing_set():
+    assert mail_replies.imap_host_for({"from": "m@x.com"}) == mail_replies.IMAP_HOST_DEFAULT

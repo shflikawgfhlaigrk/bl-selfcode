@@ -13,7 +13,7 @@ separate hourly cron processes. Utah never fakes a send: with no creds it docume
 and returns ``sent=False``. The sender is injectable for tests.
 
 Single-account creds shape:
-    {"from": "info@blacklabelbots.com", "app_password": "abcd efgh ijkl mnop", "smtp_host": "smtp.gmail.com"}
+    {"from": "info@blacklabelbots.com", "app_password": "...", "smtp_host": "smtp.privateemail.com"}
 
 Set ``from`` to :data:`utah.config.BLB_FROM_EMAIL` (default ``info@blacklabelbots.com``).
 If using Google Workspace, authorize that address as a Gmail **Send mail as** alias for

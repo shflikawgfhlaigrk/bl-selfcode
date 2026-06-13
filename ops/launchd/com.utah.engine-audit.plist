@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  com.utah.engine-audit — nightly trading-engine audit (02:30 daily).
+
+  Michael's standing order (2026-06-13): every night, audit the engines, give a full
+  review, converge over 6 months. Runs utah.product.engine_audit.run_scheduled(): for
+  every implemented engine x every backtestable symbol it runs the held-out OOS backtest,
+  records which (engine,symbol) pairs prove edge (and why the rest don't), writes a dated
+  report to ~/.utah/audit/audit-YYYY-MM-DD.json + .md (+ latest.md), and pushes the
+  one-line verdict to the brief. Nothing is painted — a pair with no edge says so. The
+  dated reports accumulate into the 6-month trail that makes convergence measurable.
+
+  Install:
+    cp ops/launchd/com.utah.engine-audit.plist ~/Library/LaunchAgents/
+    launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.utah.engine-audit.plist
+  Force-run now:  launchctl kickstart gui/$(id -u)/com.utah.engine-audit
+  Stop:           launchctl bootout  gui/$(id -u)/com.utah.engine-audit
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.utah.engine-audit</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/michaelbarber/.utah/venv/bin/python</string>
+    <string>-c</string>
+    <string>import logging; logging.basicConfig(level=logging.INFO); from utah.product import engine_audit; print(engine_audit.run_scheduled())</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>/Users/michaelbarber/Desktop/ProjectUtah</string>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PYTHONPATH</key>
+    <string>/Users/michaelbarber/Desktop/ProjectUtah</string>
+    <key>PYTHONUNBUFFERED</key>
+    <string>1</string>
+    <key>PATH</key>
+    <string>/Users/michaelbarber/.utah/venv/bin:/opt/homebrew/bin:/usr/local/bin:/Users/michaelbarber/.local/bin:/usr/bin:/bin</string>
+  </dict>
+
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Hour</key>
+    <integer>2</integer>
+    <key>Minute</key>
+    <integer>30</integer>
+  </dict>
+
+  <key>RunAtLoad</key>
+  <false/>
+
+  <key>StandardOutPath</key>
+  <string>/Users/michaelbarber/.utah/logs/engine-audit.log</string>
+
+  <key>StandardErrorPath</key>
+  <string>/Users/michaelbarber/.utah/logs/engine-audit.err</string>
+</dict>
+</plist>

@@ -87,10 +87,24 @@ def _meanrev(closes: list[float], lookback: int) -> dict | None:
     return None
 
 
+def _research(closes: list[float], lookback: int) -> dict | None:
+    """The ported Perplexity/Antigravity composite ("Sniper") on OHLC closes. Scores a
+    trend-continuation direction off the EMA ribbon / slope / momentum / variance-ratio
+    regime (the components OHLC supports; the order-flow voters are documented-gated in
+    :mod:`research_signal`). Fires only on a graded (A/B) signal — chop/noise → None.
+    Closes-only and identical to the backtest's entry signal so the edge gate is honest."""
+    from utah.product import research_signal as rs
+
+    s = rs.score(closes[-rs.RESEARCH_RWIN:] if len(closes) > rs.RESEARCH_RWIN else closes)
+    if s["direction"] == "flat":
+        return None
+    return {"engine": "research", "direction": s["direction"], "entry": s["entry"]}
+
+
 #: Engines with REAL rules. Everything else on the roster is an honest nameplate
 #: awaiting its port from the Ace bundles — the deck must never show it live
 #: (2026-06-10: feed-live flipped all nine to LIVE while one produced).
-ENGINE_RULES = {"breakout": _breakout, "meanrev": _meanrev}
+ENGINE_RULES = {"breakout": _breakout, "meanrev": _meanrev, "research": _research}
 
 
 #: Each implemented engine's BACKTEST archetype — the function (in backtest.py) that
@@ -103,6 +117,7 @@ ENGINE_RULES = {"breakout": _breakout, "meanrev": _meanrev}
 ENGINE_ARCHETYPE = {
     "meanrev": "mean-reversion",
     "breakout": "breakout",
+    "research": "research-composite",
 }
 
 #: Default mean-reversion config — a single robust cfg held out-of-sample (NOT fitted
@@ -122,6 +137,11 @@ MEANREV_CFG = {"lookback": 20, "z_enter": 2.0, "tgt_frac": 0.6, "stop_mult": 8.0
                "win_floor": 0.87, "oos_frac": 0.4, "min_trades": EDGE_MIN_TRADES,
                "max_hold": 80}
 BREAKOUT_CFG = {"lookback": 20, "target_r": 2.0, "min_trades": EDGE_MIN_TRADES}
+#: Research composite (trend-continuation) held-out OOS config. ``stop_sd``×close-stdev
+#: stop, ``target_r``×risk target; positive-expectancy proof gate (not a win floor — a
+#: trend rider wins less often but bigger). ``max_hold`` caps the open-trade tail.
+RESEARCH_CFG = {"stop_sd": 1.5, "target_r": 1.5, "oos_frac": 0.4,
+                "min_trades": EDGE_MIN_TRADES, "max_hold": 80}
 
 
 def implemented_engines() -> tuple[str, ...]:
@@ -148,6 +168,14 @@ def _backtest_engine(engine: str, bars: list) -> dict:
     archetype = ENGINE_ARCHETYPE.get(engine, engine)
     if engine == "meanrev":
         v = backtest.prove_meanrev(bars, **MEANREV_CFG)
+        oos = v["out_of_sample"]
+        return {"engine": engine, "archetype": archetype,
+                "trades": oos["trades"], "wins": oos["wins"],
+                "win_rate": oos["win_rate"] if oos["trades"] else None,
+                "net_pts": oos["net_pts"], "total_r": oos["total_r"],
+                "edge_proven": v["edge_proven"], "reason": v["reason"]}
+    if engine == "research":
+        v = backtest.prove_research(bars, **RESEARCH_CFG)
         oos = v["out_of_sample"]
         return {"engine": engine, "archetype": archetype,
                 "trades": oos["trades"], "wins": oos["wins"],

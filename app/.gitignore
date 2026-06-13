@@ -43,3 +43,6 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+# Local Apple Developer signing (Team ID)
+/ios/Signing.xcconfig

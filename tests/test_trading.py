@@ -72,13 +72,16 @@ def test_lab_state_roster_is_gated_and_dormant(monkeypatch):
 
 def test_lab_state_never_shows_an_unimplemented_engine_live(monkeypatch):
     """The dash lie (2026-06-10): feed live flipped ALL nine roster engines to LIVE
-    while one had logic. Per-engine truth: live only for implemented engines."""
+    while one had logic. Per-engine truth: live only for implemented engines. After the
+    research composite port (2026-06-13) three engines have real rules; the unported
+    nameplates still read 'awaiting port' and the live count tracks ENGINE_RULES."""
     monkeypatch.setattr(trading, "feed_available", lambda: True)
     st = trading.lab_state(fires=3)
     by = {e["name"]: e["state"] for e in st["engines"]}
-    assert by["breakout"] == "live" and by["meanrev"] == "live"
+    assert by["breakout"] == "live" and by["meanrev"] == "live" and by["research"] == "live"
     assert by["antigrav"] == "awaiting port" and by["shadow"] == "awaiting port"
-    assert st["live_engines"] == 2 and "2 of" in st["note"]
+    n = len(trading.implemented_engines())
+    assert st["live_engines"] == n and f"{n} of" in st["note"]
 
 
 def test_lab_state_carries_per_engine_fire_counts(monkeypatch):

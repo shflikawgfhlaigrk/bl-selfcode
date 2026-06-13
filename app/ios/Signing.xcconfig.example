@@ -1,0 +1,4 @@
+// Copy to Signing.xcconfig (same folder) after enrolling in Apple Developer.
+// Find Team ID: developer.apple.com/account → Membership → Team ID
+//            or Xcode → Settings → Accounts → your team → Team ID
+DEVELOPMENT_TEAM = XXXXXXXXXX
