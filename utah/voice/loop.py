@@ -90,6 +90,13 @@ _FORCE_CAPTURE_DELAY_S = float(os.environ.get("UTAH_VOICE_FORCE_CAPTURE_DELAY", 
 #: runs rms ≥0.03; 0.012 sits safely between hiss and voice. Silence cannot wake Ace.
 _WAKE_MIN_RMS = float(os.environ.get("UTAH_VOICE_WAKE_MIN_RMS", "0.012"))
 _WAKE_LOUD_WINDOW_S = float(os.environ.get("UTAH_VOICE_WAKE_LOUD_WINDOW_S", "2.0"))
+#: Empty-wake cooldown: after a wake produces no command (ambient/TV/echo false-fire that
+#: clears the loud-audio guard but isn't a real "hey ace"+command), suppress re-arming for
+#: this long so the model can't churn a 5.5s Whisper pass every few seconds (2026-06-13:
+#: 1,080 empty-command wakes in one log). A real command never stamps it, so genuine use is
+#: unaffected; set 0 to disable. Short enough that a real wake right after a false one waits
+#: only briefly.
+_EMPTY_WAKE_COOLDOWN_S = float(os.environ.get("UTAH_VOICE_EMPTY_WAKE_COOLDOWN", "12.0"))
 
 # ── Barge-in ("no time to stop") ─────────────────────────────────────────────
 # While Ace is SPEAKING, the mic callback normally drops every frame (the echo guard:
@@ -265,6 +272,16 @@ def _should_capture(*, audio_wake_ok: bool, armed_until: float) -> bool:
     return time.monotonic() < armed_until
 
 
+def _empty_wake_cooling(now: float, last_empty_at: float, cooldown: float) -> bool:
+    """True if a recent wake produced NO command and we're still inside the cooldown —
+    used to suppress re-arming so an ambient false-wake can't churn Whisper every few
+    seconds (2026-06-13: openWakeWord misfired ~10x/min on room/TV/echo speech at conf up
+    to 0.99 — ABOVE the loud-audio storm guard — yielding 1,080 empty-command wakes, each
+    a 5.5s Whisper pass + agent call). ``cooldown<=0`` disables it; a wake that yields a
+    REAL command never stamps ``last_empty_at``, so genuine 'hey ace' use is unaffected."""
+    return cooldown > 0 and last_empty_at > 0 and (now - last_empty_at) < cooldown
+
+
 def _needs_input_bump(current: int, floor: int) -> bool:
     """True when the macOS mic input volume is below the floor and the floor is
     active. A failed read (current < 0) or a disabled floor (<= 0) never acts."""
@@ -321,6 +338,9 @@ def run() -> None:
 
     q: "queue.Queue[bytes]" = queue.Queue()
     processing = threading.Event()
+    # Monotonic ts of the last wake that produced NO command — drives the empty-wake
+    # cooldown (see _empty_wake_cooling). 0.0 = none yet.
+    _last_empty_wake_at = 0.0
     # Barge-in: detector + event, shared between the mic callback (which detects the
     # interruption during playback) and the main loop (which captures the new utterance).
     # The detector latches after firing and is reset before each playback (see arming).
@@ -510,6 +530,7 @@ def run() -> None:
 
                 def _process_segment(pcm: bytes, *, segment_armed: bool,
                                      button_barge: bool = False) -> None:
+                    nonlocal _last_empty_wake_at
                     secs = len(pcm) / 2 / SAMPLE_RATE
                     seg_rms = _rms(pcm)
                     log.info("voice: speech segment %.1fs rms=%.4f → transcribing (audio_wake=%s)",
@@ -531,6 +552,7 @@ def run() -> None:
                                     "voice: empty quiet segment after wake (rms=%.4f) — skip",
                                     seg_rms,
                                 )
+                                _last_empty_wake_at = time.monotonic()   # arm empty-wake cooldown
                                 return
                             if text and not _ECHO.allow(text):
                                 log.info("voice: echo-dropped duplicate transcript")
@@ -545,6 +567,10 @@ def run() -> None:
                             cmd = result.get("command") if result else None
                             log.info("voice: wake_fired=%s command=%r",
                                      result is not None, cmd)
+                            if segment_armed and not cmd:
+                                # Wake fired but produced no command — an ambient/echo
+                                # false-fire. Arm the cooldown so it can't re-churn at once.
+                                _last_empty_wake_at = time.monotonic()
                             if result is not None and not vstate.get("last_wake"):
                                 vstate["last_wake"] = cmd or "ace"
                             if result and result.get("command"):
@@ -608,6 +634,13 @@ def run() -> None:
                                 log.info("voice: oww hit %.2f ignored — no loud audio "
                                          "in %.1fs (storm guard)",
                                          hit.confidence, _WAKE_LOUD_WINDOW_S)
+                                continue
+                            # Empty-wake cooldown: a recent wake produced no command
+                            # (ambient/TV/echo false-fire). Don't re-arm/re-transcribe yet.
+                            if _empty_wake_cooling(time.monotonic(), _last_empty_wake_at,
+                                                   _EMPTY_WAKE_COOLDOWN_S):
+                                log.info("voice: oww hit %.2f ignored — empty-wake cooldown "
+                                         "(%.0fs)", hit.confidence, _EMPTY_WAKE_COOLDOWN_S)
                                 continue
                             log.info("voice: openWakeWord hit %s=%.2f",
                                      hit.keyword, hit.confidence)
