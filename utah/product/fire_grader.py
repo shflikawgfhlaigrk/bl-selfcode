@@ -222,6 +222,15 @@ def run_scheduled(ledger=None, *, horizon_min: int = HORIZON_MIN,
         out["assessments"] = trade_lore.run_assessments(ledger)
     except Exception as exc:  # noqa: BLE001
         log.debug("think-on-fire skipped: %s", exc)
+    # Surface proven-but-unfed edges on the same beat: if an engine proves edge on a
+    # symbol the passive WC feed isn't streaming, page Michael to open that chart so the
+    # opportunity isn't lost in silence (2026-06-13: CM.NQM6 meanrev proved while the feed
+    # was on ETFs). Best-effort — never blocks grading.
+    try:
+        from utah.product import trading
+        out["unfed_edges"] = trading.alert_unfed_edges()
+    except Exception as exc:  # noqa: BLE001
+        log.debug("unfed-edge check skipped: %s", exc)
     return out
 
 

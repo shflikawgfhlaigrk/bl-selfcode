@@ -267,6 +267,22 @@ def trade_fire(engine: str, direction: str, entry, *, fire_id=None,
                  sender=sender)
 
 
+def unfed_edge(engine: str, symbol: str, *, win_rate=None, net_pts=None,
+               sender=None) -> dict:
+    """Page that an engine PROVES edge on a symbol that isn't in the live feed — the
+    actionable gap (open that chart). Rides the 'brief' stream (informational, respects
+    quiet hours; this is a 'do this when you can', not an emergency). Dedup is
+    engine+symbol on the TRADE TTL so a standing gap re-pages at most every couple hours,
+    not every 15-min grader tick."""
+    wr = f"{win_rate:.0%}" if isinstance(win_rate, (int, float)) else "?"
+    net = f"{net_pts:+.0f}pt" if isinstance(net_pts, (int, float)) else "?"
+    msg = (f"Edge PROVEN: {symbol} {engine} ({wr} / {net}) — not in the live feed. "
+           f"Open the {symbol} chart in WealthCharts to trade it.")
+    return _send("brief", msg, title="🎯 Utah unfed edge",
+                 dedup_key=f"unfed:{engine}:{symbol}",
+                 dedup_ttl=config.TRADE_ALERT_DEDUP_SECONDS, sender=sender)
+
+
 def brief(text: str, *, sender=None) -> dict:
     """Push the morning brief with a tap-through to the deck over the tailnet."""
     return _send("brief", text, title="☀️ Utah morning brief",

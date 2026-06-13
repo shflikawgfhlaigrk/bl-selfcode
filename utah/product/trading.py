@@ -330,6 +330,98 @@ def edge_ok(engine: str, symbol: str, *, ohlc_fn=None, score_fn=None,
     return verdict
 
 
+#: A symbol counts as "live" if a bar arrived within this window (ts_recorded). The feed
+#: is passive — it streams whatever WC charts are open — so a proven-edge symbol that
+#: stops streaming is INVISIBLE to firing until its chart is reopened. 10 min spans the
+#: 15-min grader cadence without flapping on a single slow bar.
+LIVE_SYMBOL_WINDOW_MIN = int(os.environ.get("UTAH_LIVE_SYMBOL_WINDOW_MIN", "10"))
+
+
+def _backtestable_symbols(min_bars: int | None = None) -> list[str]:
+    """Symbols with enough persisted bars to OOS-backtest — the edge-search universe.
+    Read-only, defensive (DB error → []), same lazy psycopg pattern as _ohlc_bars."""
+    import psycopg
+
+    from utah import config
+    floor = min_bars if min_bars is not None else (MEANREV_CFG["lookback"] + EDGE_MIN_TRADES)
+    try:
+        with psycopg.connect(config.DB_DSN, autocommit=True,
+                             connect_timeout=config.DB_CONNECT_TIMEOUT,
+                             options=f"-c statement_timeout={config.DB_STATEMENT_TIMEOUT_MS}") as cx:
+            rows = cx.execute("SELECT symbol FROM bars GROUP BY symbol "
+                              "HAVING count(*) >= %s ORDER BY symbol", (int(floor),)).fetchall()
+        return [r[0] for r in rows]
+    except Exception:  # noqa: BLE001 — cold/unreachable DB => no universe, never crash
+        return []
+
+
+def _live_symbols(window_min: int | None = None) -> list[str]:
+    """Symbols streaming RIGHT NOW — a bar recorded within the live window. Read-only,
+    defensive ([] on any DB error)."""
+    import psycopg
+
+    from utah import config
+    win = window_min if window_min is not None else LIVE_SYMBOL_WINDOW_MIN
+    try:
+        with psycopg.connect(config.DB_DSN, autocommit=True,
+                             connect_timeout=config.DB_CONNECT_TIMEOUT,
+                             options=f"-c statement_timeout={config.DB_STATEMENT_TIMEOUT_MS}") as cx:
+            rows = cx.execute("SELECT DISTINCT symbol FROM bars "
+                              "WHERE ts_recorded > now() - (%s * interval '1 minute')",
+                              (int(win),)).fetchall()
+        return [r[0] for r in rows]
+    except Exception:  # noqa: BLE001
+        return []
+
+
+def unfed_edges(*, candidate_symbols_fn=None, live_symbols_fn=None,
+                edge_fn=None, engines=None) -> list[dict]:
+    """(engine, symbol) pairs that PROVE held-out OOS edge but are NOT in the live feed —
+    the actionable gap: the edge can't be captured because its chart isn't streaming
+    (2026-06-13: CM.NQM6 meanrev proved 88%/+491pt while the feed was on US ETFs). All
+    boundaries injected for unit-proof; production reads the bars table + the edge gate.
+    Defensive: any source error → ``[]`` (a dead DB must never break the cron)."""
+    try:
+        cands = (candidate_symbols_fn or _backtestable_symbols)()
+        live = set((live_symbols_fn or _live_symbols)())
+    except Exception:  # noqa: BLE001 — symbol-source failure = no actionable gap this tick
+        return []
+    ef = edge_fn or (lambda e, s: edge_ok(e, s))
+    out: list[dict] = []
+    for sym in cands:
+        if sym in live:
+            continue                      # streaming now → firing path already sees it
+        for eng in (engines or implemented_engines()):
+            try:
+                v = ef(eng, sym)
+            except Exception:  # noqa: BLE001 — one bad backtest never sinks the sweep
+                continue
+            if v.get("ok"):
+                sc = v.get("scorecard", {})
+                out.append({"engine": eng, "symbol": sym,
+                            "win_rate": sc.get("win_rate"), "net_pts": sc.get("net_pts"),
+                            "trades": sc.get("trades"), "reason": v.get("reason", "")})
+    return out
+
+
+def alert_unfed_edges(*, edges_fn=None, sender=None) -> dict:
+    """Page Michael (once per engine+symbol, deduped) about a proven-but-unfed edge so the
+    opportunity isn't lost in silence — 'open the NQ chart'. Rides the periodic grade-fires
+    cron. Best-effort: a paging failure is recorded, never raised."""
+    edges = (edges_fn or unfed_edges)()
+    paged = 0
+    for e in edges:
+        try:
+            from utah import alerts
+            r = alerts.unfed_edge(e["engine"], e["symbol"], win_rate=e.get("win_rate"),
+                                  net_pts=e.get("net_pts"), sender=sender)
+            if r.get("sent"):
+                paged += 1
+        except Exception as exc:  # noqa: BLE001 — alerting must never break the cron
+            failures.record("trading", "unfed_alert_failed", f"{e.get('symbol')}: {exc}")
+    return {"unfed": len(edges), "paged": paged, "edges": edges}
+
+
 def evaluate(closes: list[float], *, lookback: int = 20, engine: str = "breakout") -> dict | None:
     """One engine's signal on the closed-bar series. Pure. Unknown/unported engine
     names NEVER fabricate a signal — they return None until their rules land."""
@@ -488,4 +580,5 @@ def run(ledger, *, feed_fn=None, lookback: int = 20, engine: str = "breakout",
 
 __all__ = ["evaluate", "run", "feed_available", "lab_state", "ENGINES", "ENGINE_RULES",
            "implemented_engines", "fleet_backtest", "dash_config", "ENGINE_ARCHETYPE",
-           "MEANREV_CFG", "APEX_DASH_CONFIG", "edge_ok", "EDGE_TTL_S"]
+           "MEANREV_CFG", "APEX_DASH_CONFIG", "edge_ok", "EDGE_TTL_S",
+           "unfed_edges", "alert_unfed_edges"]
