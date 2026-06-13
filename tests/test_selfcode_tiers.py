@@ -106,6 +106,35 @@ def test_kill_switch_smoke_refuses_self_edit_to_safety(monkeypatch, tmp_path):
     assert result["refused"] is True and result["tier"] == "D"
 
 
+def test_kill_switch_smoke_caches_within_ttl(monkeypatch, tmp_path):
+    """The smoke is wired into the deck's selfcode panel, which the UI polls continuously —
+    running the full propose() path (git ops + SMOKE_LOG write) on EVERY poll fired it
+    3,902x (2026-06-13 live). The verdict is cached for ttl_s so it runs at most ~once/TTL;
+    force=True or a past-TTL call re-runs."""
+    monkeypatch.setattr(selfcode, "KILL_SWITCH", tmp_path / "nope")
+    smoke_log = tmp_path / "smoke.jsonl"
+    monkeypatch.setattr(selfcode, "SMOKE_LOG", smoke_log)
+    failures.set_store(FakeFailureStore())
+    selfcode._SMOKE_CACHE.clear()
+    runs = lambda: (smoke_log.read_text().count("\n") if smoke_log.exists() else 0)
+
+    clock = [1000.0]
+    r1 = selfcode.kill_switch_smoke(ttl_s=600, now=lambda: clock[0])
+    n1 = runs()
+    assert r1["refused"] is True and n1 >= 1
+
+    r2 = selfcode.kill_switch_smoke(ttl_s=600, now=lambda: clock[0] + 60)   # within TTL
+    assert r2["refused"] is True and runs() == n1                          # served from cache
+
+    clock[0] += 10_000                                                     # past TTL
+    selfcode.kill_switch_smoke(ttl_s=600, now=lambda: clock[0])
+    assert runs() > n1                                                     # re-ran
+
+    before = runs()
+    selfcode.kill_switch_smoke(ttl_s=10_000, now=lambda: clock[0], force=True)  # force
+    assert runs() > before
+
+
 def test_kill_switch_smoke_does_not_pollute_failure_feed(monkeypatch, tmp_path):
     """B14: the nightly smoke deliberately triggers a refusal — its synthetic
     off_limits outcome must go to SMOKE_LOG, never the production failures feed

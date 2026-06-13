@@ -85,6 +85,13 @@ def _restore_boundaries():
         _trading_mod._EDGE_CACHE.clear()
     except Exception:  # noqa: BLE001 — trading import optional in minimal test subsets
         pass
+    # Clear the kill-switch smoke cache so a cached verdict from one test never serves
+    # another (the smoke is TTL-cached to keep the deck panel off the full propose() path).
+    try:
+        from utah import selfcode as _selfcode_mod
+        _selfcode_mod._SMOKE_CACHE.clear()
+    except Exception:  # noqa: BLE001
+        pass
     local_mod.set_runner(_local_down)
     local_mod.set_stream_runner(_local_down)
     local_mod.set_load_probe(lambda: 0.0)  # never read the host's real load in tests
