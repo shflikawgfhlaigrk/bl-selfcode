@@ -39,6 +39,13 @@ SILENCE_ALERT_S = 30.0          # mic delivering TRUE silence (zeros) this long 
 # sits below the dither floor so only literal zeros trip it. Env-overridable for retune.
 TRUE_SILENCE = float(os.environ.get("UTAH_TRUE_SILENCE", "0.00001"))
 MIC_SILENT_COOLDOWN_S = 1800.0  # 30 min
+# A built-in MacBook mic at a LOW macOS input volume is the root signal-level cause
+# of the voice stack's troubles: it floors raw RMS below TRUE_SILENCE, starves
+# openWakeWord's SNR (false-fires), and makes real commands transcribe EMPTY
+# (2026-06-13: input volume sat at 48/100). The loop floors it on startup so a
+# drifted-down level can't silently cripple voice. Env-tunable; floor 0 disables.
+MIC_INPUT_FLOOR = int(os.environ.get("UTAH_MIC_INPUT_FLOOR", "80"))
+MIC_INPUT_TARGET = int(os.environ.get("UTAH_MIC_INPUT_TARGET", "85"))
 
 # ── Gated AGC ───────────────────────────────────────────────────────────────
 # Measured on Michael's built-in mic: real commands arrive QUIET and erratic — most
@@ -258,6 +265,39 @@ def _should_capture(*, audio_wake_ok: bool, armed_until: float) -> bool:
     return time.monotonic() < armed_until
 
 
+def _needs_input_bump(current: int, floor: int) -> bool:
+    """True when the macOS mic input volume is below the floor and the floor is
+    active. A failed read (current < 0) or a disabled floor (<= 0) never acts."""
+    return floor > 0 and 0 <= current < floor
+
+
+def _ensure_input_volume(floor: int | None = None, target: int | None = None) -> None:
+    """Floor the macOS mic input volume on startup so a low/drifted level can't
+    silently cripple voice (empty transcripts, openWakeWord false-fires). Best-effort
+    via osascript — any failure is logged at debug and ignored; voice never depends
+    on it succeeding."""
+    import subprocess
+    floor = MIC_INPUT_FLOOR if floor is None else floor
+    target = MIC_INPUT_TARGET if target is None else target
+    if floor <= 0:
+        return
+    try:
+        out = subprocess.run(["osascript", "-e", "input volume of (get volume settings)"],
+                             capture_output=True, text=True, timeout=5)
+        cur = int((out.stdout or "").strip() or "-1")
+    except Exception as exc:  # noqa: BLE001 — diagnostics must never block voice startup
+        log.debug("voice: input-volume read failed: %s", exc)
+        return
+    if _needs_input_bump(cur, floor):
+        try:
+            subprocess.run(["osascript", "-e", f"set volume input volume {target}"],
+                           capture_output=True, text=True, timeout=5)
+            log.info("voice: raised mic input volume %d → %d (was below floor %d)",
+                     cur, target, floor)
+        except Exception as exc:  # noqa: BLE001
+            log.debug("voice: input-volume set failed: %s", exc)
+
+
 def run() -> None:
     """Run the mic loop forever. Degrades (logs + retries) instead of crashing."""
     try:
@@ -271,6 +311,7 @@ def run() -> None:
 
     from utah import config, failures
 
+    _ensure_input_volume()   # floor the mic input level before arming (signal-level fix)
     wake_det = oww.get_oww()
     audio_wake_ok = wake_det is not None
     if audio_wake_ok:

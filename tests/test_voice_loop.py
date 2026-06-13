@@ -10,6 +10,19 @@ import numpy as np
 from utah.voice import loop, vad
 
 
+def test_input_volume_floor_bumps_only_when_below():
+    """A low macOS input volume (2026-06-13: 48/100) is the root signal-level cause
+    of the voice stack's troubles — sub-TRUE_SILENCE floor, openWakeWord false-fires,
+    empty transcripts. The loop floors it on startup; the decision raises ONLY when
+    below the floor, leaves an already-loud level alone, treats a failed read (-1) as
+    no-op, and is disabled by floor=0."""
+    assert loop._needs_input_bump(48, 80) is True       # the real case
+    assert loop._needs_input_bump(85, 80) is False      # already above floor
+    assert loop._needs_input_bump(80, 80) is False      # at floor — fine
+    assert loop._needs_input_bump(-1, 80) is False      # read failed — never act on garbage
+    assert loop._needs_input_bump(10, 0) is False       # floor=0 disables the feature
+
+
 def test_write_wav_roundtrips_pcm_at_16k_mono():
     pcm = (np.ones(vad.FRAME * 4, dtype="int16") * 5000).tobytes()
     path = loop._write_wav(pcm)
