@@ -176,7 +176,7 @@ def test_run_cycle_propagates_on_merge(monkeypatch, tmp_path):
     r = sica_autonomy.run_cycle(
         repo=tmp_path, sync_fn=lambda repo: True, task_fn=lambda: "do x",
         propose_fn=lambda t: {"utility": 0.9, "tests_passed": True, "merged": True, "cost_usd": 0},
-        propagate_fn=lambda clone=None: called.update(ok=True) or {"propagated": True, "to": "abc"},
+        propagate_fn=lambda clone=None, verify_fn=None: called.update(ok=True) or {"propagated": True, "to": "abc"},
         discover_fn=_SKIP_DISCOVER)
     assert called.get("ok") is True
     assert r["propagation"]["propagated"] is True
@@ -188,7 +188,7 @@ def test_run_cycle_no_propagate_when_not_merged(monkeypatch, tmp_path):
     r = sica_autonomy.run_cycle(
         repo=tmp_path, sync_fn=lambda repo: True, task_fn=lambda: "do x",
         propose_fn=lambda t: {"utility": 0.5, "tests_passed": False, "merged": False, "cost_usd": 0},
-        propagate_fn=lambda clone=None: called.update(ok=True) or {},
+        propagate_fn=lambda clone=None, verify_fn=None: called.update(ok=True) or {},
         discover_fn=_SKIP_DISCOVER)
     assert "ok" not in called and "propagation" not in r
 
@@ -208,7 +208,7 @@ def test_run_cycle_verifies_frontend_in_browser_after_merge(monkeypatch, tmp_pat
     r = sica_autonomy.run_cycle(
         repo=tmp_path, sync_fn=lambda repo: True,
         propose_fn=lambda t: {"utility": 0.9, "tests_passed": True, "merged": True, "cost_usd": 0},
-        propagate_fn=lambda clone=None: {"propagated": True},
+        propagate_fn=lambda clone=None, verify_fn=None: {"propagated": True},
         verify_fn=lambda: obs, discover_fn=_SKIP_DISCOVER)
     assert r["domain"] == "frontend"
     assert r["frontend_verify"] == obs            # browser re-looked at the live deck after the change
@@ -268,7 +268,7 @@ def test_run_cycle_no_frontend_verify_on_nonfrontend_merge(monkeypatch, tmp_path
     r = sica_autonomy.run_cycle(
         repo=tmp_path, sync_fn=lambda repo: True, task_fn=lambda: "do x",   # domain="injected"
         propose_fn=lambda t: {"utility": 0.9, "tests_passed": True, "merged": True, "cost_usd": 0},
-        propagate_fn=lambda clone=None: {"propagated": True},
+        propagate_fn=lambda clone=None, verify_fn=None: {"propagated": True},
         verify_fn=lambda: called.update(ran=True) or {}, discover_fn=_SKIP_DISCOVER)
     assert "frontend_verify" not in r and "ran" not in called
 

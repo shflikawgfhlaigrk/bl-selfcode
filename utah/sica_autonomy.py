@@ -99,15 +99,27 @@ def _scrub_conflict_refs(repo) -> int:
     return removed
 
 
-def propagate(live=None, clone=None) -> dict:
+def _default_live_verify(repo) -> bool:
+    """Post-merge live-suite gate for transactional propagation — True iff pytest is
+    green in *repo*. Used so an autonomous change that breaks the live suite is rolled
+    back instead of landing."""
+    from utah import selfcode
+    ok, _ = selfcode._real_tests(cwd=str(repo))
+    return ok
+
+
+def propagate(live=None, clone=None, verify_fn=None) -> dict:
     """Flow autonomous improvements OUT of the sandbox clone INTO the real Utah:
     fast-forward the live repo's main to include the clone's autonomous commits.
 
     SAFE BY CONSTRUCTION: (1) refuses if the live working tree is DIRTY — never
     clobbers uncommitted dev work; (2) ff-ONLY — never a force/merge-commit, so it
     only applies when live's main is a strict ancestor of the clone's (no
-    divergence). On a skip the autonomous commits stay in the clone (preserved by
-    sync_repo) and propagate on a later clean cycle. Never raises."""
+    divergence); (3) NO-REGRESSION — when *verify_fn* is supplied (production passes
+    the live suite), the merged tree is verified and AUTO-ROLLED-BACK on red, so an
+    autonomous change can never leave the live suite broken. On a skip/rollback the
+    autonomous commits stay in the clone (preserved by sync_repo) and re-try on a
+    later clean cycle. Never raises."""
     live = Path(live) if live else LIVE_REPO
     clone = Path(clone) if clone else REPO_DIR
 
@@ -156,7 +168,42 @@ def propagate(live=None, clone=None) -> dict:
             return {"propagated": False, "reason": "live tree dirty — stash failed; skipped (safe)"}
 
     res = g(live, "merge", "--ff-only", "FETCH_HEAD")
+    if res.returncode != 0:
+        if stashed:
+            g(live, "stash", "pop")          # merge didn't land — restore dev work as-is
+        return {"propagated": False, "reason": f"not a fast-forward: {res.stderr.strip()[:120]}"}
     after = g(live, "rev-parse", "HEAD").stdout.strip()
+    if before == after:
+        if stashed:
+            g(live, "stash", "pop")
+        return {"propagated": False, "reason": "already up to date"}
+
+    # NO-REGRESSION GUARANTEE: with a verifier supplied (production passes the live
+    # suite), run it on the merged tree and AUTO-ROLLBACK to the prior state on red —
+    # an autonomous change can NEVER leave the live suite broken. Verify BEFORE popping
+    # the stash so the rollback (reset --hard) can't discard dev work. A verify crash is
+    # fail-CLOSED (treated as red → rolled back).
+    if verify_fn is not None:
+        try:
+            green = bool(verify_fn(str(live)))
+        except Exception as exc:  # noqa: BLE001 — never trust a crashing verifier; roll back
+            green = False
+            log.warning("propagate verify crashed (treating as red): %s", exc)
+        if not green:
+            g(live, "reset", "--hard", before)   # roll back to the prior green state
+            if stashed:
+                g(live, "stash", "pop")           # restore dev work onto the rolled-back tree
+            try:
+                from utah import failures
+                failures.record("selfcode", "propagate_rolled_back",
+                                f"{before[:8]}->{after[:8]} live suite RED after merge — auto-reverted")
+            except Exception:  # noqa: BLE001
+                pass
+            log.warning("propagate ROLLED BACK %s->%s: live suite red after merge",
+                        before[:8], after[:8])
+            return {"propagated": False, "rolled_back": True,
+                    "reason": f"verify red after merge — rolled back to {before[:8]}"}
+
     pop_conflict = False
     if stashed:
         pop = g(live, "stash", "pop")
@@ -169,10 +216,6 @@ def propagate(live=None, clone=None) -> dict:
             pop_conflict = True
             g(live, "reset", "--hard", "HEAD")   # clear conflict markers; stash@{0} preserved
             _alert_propagate_conflict()
-    if res.returncode != 0:
-        return {"propagated": False, "reason": f"not a fast-forward: {res.stderr.strip()[:120]}"}
-    if before == after:
-        return {"propagated": False, "reason": "already up to date"}
     log.info("propagated autonomous work to live main: %s -> %s", before[:8], after[:8])
     out = {"propagated": True, "from": before[:8], "to": after[:8]}
     if pop_conflict:
@@ -343,7 +386,10 @@ def run_cycle(*, repo=None, brain_fn=None, propose_fn=None, sync_fn=None, task_f
     if pending_rec:
         out["from_finding"] = pending_rec.get("brief_path")
     if any(a.get("merged") for a in res.attempts):
-        out["propagation"] = (propagate_fn or propagate)(clone=repo)
+        # Transactional: the live suite is re-verified after the merge and auto-rolled
+        # back on red, so an autonomous change can never regress the live tree.
+        out["propagation"] = (propagate_fn or propagate)(clone=repo,
+                                                         verify_fn=_default_live_verify)
         # Closed loop: after a FRONTEND change lands, Ace re-renders its OWN live deck through
         # headless Chrome and records what actually came back — verifying the change in the real
         # UI instead of guessing it worked. Other domains don't touch the browser.

@@ -85,3 +85,47 @@ def test_propagate_survives_corrupt_conflict_ref_in_clone(tmp_path):
     r = sica_autonomy.propagate(live=live, clone=clone)
     assert r["propagated"] is True, r
     assert (live / "f.txt").read_text() == "2"   # the autonomous change landed
+
+
+def _live_and_ahead_clone(tmp_path):
+    """A live repo + a clone one autonomous commit ahead (ff-able into live)."""
+    live, clone = tmp_path / "live", tmp_path / "clone"
+    live.mkdir()
+    _git(live, "init", "-q", "-b", "main")
+    _git(live, "config", "user.email", "t@t"); _git(live, "config", "user.name", "t")
+    (live / "f.txt").write_text("1")
+    _git(live, "add", "-A"); _git(live, "commit", "-qm", "base")
+    _git(tmp_path, "clone", "-q", str(live), "clone")
+    _git(clone, "config", "user.email", "t@t"); _git(clone, "config", "user.name", "t")
+    (clone / "f.txt").write_text("2")
+    _git(clone, "add", "-A"); _git(clone, "commit", "-qm", "autonomous change")
+    return live, clone
+
+
+def test_propagate_rolls_back_when_live_verify_red(tmp_path):
+    """NO-REGRESSION GUARANTEE: a merged change whose live suite is RED is auto-reverted
+    — the live tree returns to its prior state and the change does NOT land."""
+    live, clone = _live_and_ahead_clone(tmp_path)
+    before = _git(live, "rev-parse", "HEAD").stdout.strip()
+    r = sica_autonomy.propagate(live=live, clone=clone, verify_fn=lambda _repo: False)
+    assert r["propagated"] is False and r.get("rolled_back") is True, r
+    assert (live / "f.txt").read_text() == "1"                       # change reverted
+    assert _git(live, "rev-parse", "HEAD").stdout.strip() == before  # back to prior commit
+
+
+def test_propagate_keeps_change_when_live_verify_green(tmp_path):
+    """A merged change whose live suite is GREEN lands normally."""
+    live, clone = _live_and_ahead_clone(tmp_path)
+    r = sica_autonomy.propagate(live=live, clone=clone, verify_fn=lambda _repo: True)
+    assert r["propagated"] is True, r
+    assert (live / "f.txt").read_text() == "2"                       # change landed
+
+
+def test_propagate_crashing_verifier_is_fail_closed(tmp_path):
+    """A verifier that raises is treated as RED (fail-closed) → rolled back, never landed."""
+    live, clone = _live_and_ahead_clone(tmp_path)
+    def boom(_repo):
+        raise RuntimeError("verifier blew up")
+    r = sica_autonomy.propagate(live=live, clone=clone, verify_fn=boom)
+    assert r["propagated"] is False and r.get("rolled_back") is True, r
+    assert (live / "f.txt").read_text() == "1"
