@@ -808,6 +808,57 @@ class OriginGuard(BaseHTTPMiddleware):
         return await call_next(request)
 
 
+async def api_truth(request):
+    """The Proof Ledger scoreboard: every claim's live tier, grouped by department."""
+    from utah import proof
+    with proof._pool().connection() as c:
+        rows = c.execute(
+            "SELECT id,claim,system,artifact,proof_kind,last_result,last_run,owner "
+            "FROM proof_ledger ORDER BY system,id").fetchall()
+    by_system, score = {}, {"total": 0, "proven": 0, "promoted": 0, "red": 0}
+    for rid, claim, system, artifact, kind, lr, lrun, owner in rows:
+        tier = proof.effective_tier(rid)
+        score["total"] += 1
+        score[tier] = score.get(tier, 0) + 1
+        if tier not in proof.GREEN_TIERS:
+            score["red"] += 1
+        by_system.setdefault(system, []).append(
+            {"id": rid, "claim": claim, "tier": tier, "artifact": artifact,
+             "kind": kind, "owner": owner, "last_result": lr,
+             "last_run": lrun.isoformat() if lrun else None})
+    return JSONResponse({"scoreboard": score, "by_system": by_system})
+
+
+async def api_truth_detail(request):
+    """Drill-down: the proof command, the captured output, and the LIVE source file."""
+    from utah import proof
+    pid = request.path_params["pid"]
+    with proof._pool().connection() as c:
+        row = c.execute(
+            "SELECT claim,system,artifact,proof_kind,proof_cmd,stress_cmd,last_result,"
+            "last_output,owner FROM proof_ledger WHERE id=%s", (pid,)).fetchone()
+    if not row:
+        return JSONResponse({"error": "unknown proof id"}, status_code=404)
+    claim, system, artifact, kind, cmd, stress, lr, out, owner = row
+    fpath = (artifact or "").split(":", 1)[0]
+    src = ""
+    if fpath:
+        base = pathlib.Path(__file__).resolve().parents[2]
+        p = (pathlib.Path(fpath).expanduser() if fpath.startswith(("/", "~")) else base / fpath)
+        try:
+            src = p.read_text()[:20000] if p.exists() else f"(artifact not found on disk: {fpath})"
+        except Exception as exc:  # noqa: BLE001
+            src = f"(unreadable: {exc})"
+    return JSONResponse({"id": pid, "claim": claim, "system": system, "owner": owner,
+                         "tier": proof.effective_tier(pid), "artifact": artifact,
+                         "proof_kind": kind, "proof_cmd": cmd, "stress_cmd": stress,
+                         "last_result": lr, "last_output": out, "source": src})
+
+
+async def truth_page(request):
+    return FileResponse(STATIC / "truth.html")
+
+
 def build_app() -> Starlette:
     routes = [
         Route("/", index),                # THE REAL DECK: live.html — actively maintained, full live
@@ -844,6 +895,9 @@ def build_app() -> Starlette:
         Route("/sw.js", service_worker),
         Route("/icon-{size}.png", app_icon),
         Mount("/assets", StaticFiles(directory=str(DASH / "assets"))),
+        Route("/truth", truth_page),         # Proof Ledger — the nervous-system truth page
+        Route("/api/truth", api_truth),
+        Route("/api/truth/{pid:path}", api_truth_detail),
         Route("/{route:path}", deck_data),  # catch-all data routes (last)
     ]
     return Starlette(routes=routes, middleware=[Middleware(OriginGuard)])
