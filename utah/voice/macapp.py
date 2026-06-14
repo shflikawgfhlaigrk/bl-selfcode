@@ -138,6 +138,14 @@ def _info_plist() -> dict:
         "NSMicrophoneUsageDescription": MIC_REASON,
         # Background agent: no Dock icon, but still allowed to show the TCC prompt.
         "LSUIElement": True,
+        # Opt OUT of App Nap. An LSUIElement background app is a prime App Nap target:
+        # when macOS throttles it, the always-on CoreAudio input callback starves and
+        # hands back zero-filled buffers — the loop reads that as mic_silent and the
+        # supervisor restart-storms (the recurring voice failure). caffeinate stops
+        # SYSTEM idle sleep but never per-process App Nap; only this declarative key
+        # (plus the runtime NSProcessInfo assertion in the loop) keeps the audio thread
+        # scheduled. Load-bearing — do not remove.
+        "NSAppSleepDisabled": True,
         "LSMinimumSystemVersion": "13.0",
     }
 
@@ -161,6 +169,12 @@ def _needs_rebuild(stub_src: str) -> bool:
         data = plistlib.loads(plist.read_bytes())
         if data.get("CFBundleIdentifier") != BUNDLE_ID or "NSMicrophoneUsageDescription" not in data:
             return True
+        # NOTE: intentionally do NOT rebuild merely because NSAppSleepDisabled is absent.
+        # This bundle is adhoc-signed, so its TCC designated requirement is cdhash-only;
+        # any rebuild changes the cdhash and ORPHANS the microphone grant (deaf under
+        # launchd, no UI to re-consent). New installs get the key from _info_plist(); the
+        # App Nap opt-out for an already-granted bundle is applied via its user defaults
+        # (see loop._set_app_nap_default) — no bundle change, no cdhash change, no risk.
     except Exception:  # noqa: BLE001
         return True
     # Signature still valid? An unverifiable signature (codesign wedged/missing)

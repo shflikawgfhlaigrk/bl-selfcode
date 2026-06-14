@@ -105,3 +105,32 @@ def test_bundle_info_env_has_pythonhome_and_pythonpath(sandbox):
 def test_non_darwin_returns_none(monkeypatch):
     monkeypatch.setattr(macapp.sys, "platform", "linux")
     assert macapp.ensure() is None
+
+
+def test_info_plist_disables_app_nap():
+    """App Nap throttles the LSUIElement background voice app and STARVES the CoreAudio
+    input callback → zero-filled buffers → the loop logs mic_silent and the supervisor
+    restart-storms (the recurring 2026-06-14 voice failure). FRESH builds get the
+    NSAppSleepDisabled opt-out baked in (consent is granted once, with the key present).
+    caffeinate stops SYSTEM sleep, never per-process App Nap — this key is the fix for
+    new installs; already-granted bundles use the user-defaults path (see loop)."""
+    assert macapp._info_plist().get("NSAppSleepDisabled") is True
+
+
+@needs_framework_stub
+def test_missing_app_nap_key_does_NOT_force_rebuild(sandbox):
+    """An EXISTING adhoc bundle must NOT be rebuilt just to add NSAppSleepDisabled: the
+    rebuild changes the cdhash, and the cdhash-only TCC designated requirement would
+    orphan the mic grant (deaf under launchd, no UI to re-consent). The App Nap opt-out
+    for granted bundles goes through user defaults instead (loop._set_app_nap_default)."""
+    macapp.ensure(force=True)
+    plist_path = sandbox / "Contents" / "Info.plist"
+    data = plistlib.loads(plist_path.read_bytes())
+    data.pop("NSAppSleepDisabled", None)  # simulate a pre-fix bundle
+    plist_path.write_bytes(plistlib.dumps(data))
+    # Re-sign so the seal matches the edited plist — otherwise _needs_rebuild returns True
+    # for a DIFFERENT, legitimate reason (broken signature) and wouldn't isolate the
+    # App-Nap-key behavior under test.
+    subprocess.run(["codesign", "--force", "--sign", "-", "--identifier", "com.utah.voice",
+                    str(sandbox)], capture_output=True)
+    assert macapp._needs_rebuild(macapp._source_stub_and_home()[0]) is False

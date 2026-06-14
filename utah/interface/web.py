@@ -763,7 +763,10 @@ async def deck_data(request):
         parts = parts[1:]
     route = parts[0] if parts and parts[0] else "state"
     st = await _daemon_status()
-    log.info("deck GET /%s (daemon=%s)", route, "up" if st is not None else "down")
+    # DEBUG, not INFO: the deck polls /state ~2×/s, so at INFO this single line wrote
+    # ~99% of the supervisor stderr (19.6 MB in one session) and buried every real voice
+    # diagnostic. Per-poll access logging belongs at DEBUG.
+    log.debug("deck GET /%s (daemon=%s)", route, "up" if st is not None else "down")
     state = _deck_state(st)
     # Memory counts — daemon ``status`` is spine-only; pull real counts for /state.
     try:
