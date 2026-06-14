@@ -2,6 +2,10 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
   <key>Label</key><string>com.utah.proof</string>
+  <key>EnvironmentVariables</key><dict>
+    <key>PYTHONPATH</key><string>/Users/michaelbarber/Desktop/ProjectUtah</string>
+  </dict>
+  <key>WorkingDirectory</key><string>/Users/michaelbarber/Desktop/ProjectUtah</string>
   <key>ProgramArguments</key><array>
     <string>/Users/michaelbarber/.utah/venv/bin/python</string>
     <string>-c</string>

@@ -7,6 +7,7 @@ is only ever set by an actual proof run — there is no "mark proven" button.
 from __future__ import annotations
 
 import dataclasses
+import pathlib
 import subprocess
 import sys
 import time
@@ -14,6 +15,8 @@ import urllib.request
 
 from utah import config
 from utah.db_pool import get_pool
+
+_REPO = pathlib.Path(__file__).resolve().parents[1]   # repo root: proofs always run from here
 
 PROOF_KINDS = ("pytest", "sql", "shell", "http")
 GREEN_TIERS = ("proven", "promoted")
@@ -136,10 +139,10 @@ def _run_one(kind: str, cmd: str, timeout: float = 120) -> tuple[str, str]:
     try:
         if kind == "pytest":
             p = subprocess.run([sys.executable, "-m", "pytest", *cmd.split(), "-q"],
-                               capture_output=True, text=True, timeout=timeout)
+                               capture_output=True, text=True, timeout=timeout, cwd=_REPO)
             return ("pass" if p.returncode == 0 else "fail"), (p.stdout + p.stderr)[-4000:]
         if kind == "shell":
-            p = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=timeout)
+            p = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=timeout, cwd=_REPO)
             return ("pass" if p.returncode == 0 else "fail"), (p.stdout + p.stderr)[-4000:]
         if kind == "sql":
             with _pool().connection() as c:
