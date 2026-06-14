@@ -135,6 +135,29 @@ def test_no_fab_overrides_known_facts_not_in_context():
     assert "even if" in c
 
 
+def test_prompts_scope_no_tools_to_step_not_aces_identity():
+    """Regression: Ace told Michael it was a 'pure text reasoning engine' with 'no hands'
+    that 'can't run code' — denying its own agency to the user (it IS an autonomous operator
+    that acts via capabilities + crons). The anti-fake-tool guard (no tool calls, answer
+    from CONTEXT) must stay; the IDENTITY-denial must not, and the no-tools limit must be
+    scoped to the reasoning STEP, with Ace's agency affirmed."""
+    from utah import config
+    sysp = config.BRAIN_SYSTEM_PROMPT.lower()
+    nofab = brain.NO_FAB.lower()
+    # the old identity-denial wording is gone
+    assert "pure text reasoning engine" not in sysp
+    assert "not an agent" not in sysp
+    assert "you cannot read files, run code" not in nofab
+    # anti-fake-tool guard preserved in BOTH
+    assert "tool call" in sysp and "tool call" in nofab
+    assert "context" in sysp and "context" in nofab
+    # limitation scoped to THIS step + Ace's agency affirmed
+    assert "this reasoning step" in sysp
+    assert "operator" in sysp
+    assert "capabilities" in sysp and "capabilities" in nofab
+    assert "i don't know." in nofab
+
+
 @pytest.mark.parametrize(
     "text",
     [
