@@ -78,22 +78,46 @@ FRONTIER_REGIONS: list[tuple[str, tuple[float, float, float, float]]] = [
     ("Tennessee Frontier", (35.0, -90.3, 36.7, -81.6)),
     ("North Carolina Frontier", (33.8, -84.3, 36.6, -75.5)),
     ("Florida North Frontier", (29.2, -87.6, 31.0, -81.4)),
+    # Expanded territory for the 3,000/day email-supply goal — each region is its own
+    # tile bucket with an independent cursor, so the frontier has years of fresh ground.
+    ("Florida South Frontier", (25.1, -82.5, 29.2, -80.0)),
+    ("Texas East Frontier", (29.0, -98.0, 33.5, -93.5)),
+    ("Texas Central Frontier", (29.3, -101.0, 33.8, -98.0)),
+    ("Louisiana Mississippi Frontier", (29.5, -94.0, 35.0, -88.5)),
+    ("Virginia Frontier", (36.5, -83.7, 39.5, -75.2)),
+    ("Kentucky Frontier", (36.5, -89.6, 39.1, -82.0)),
+    ("Ohio Valley Frontier", (38.4, -84.9, 41.9, -80.5)),
+    ("Missouri Arkansas Frontier", (33.0, -94.6, 40.6, -89.1)),
+    ("Oklahoma Kansas Frontier", (33.6, -100.0, 39.0, -94.6)),
+    ("Pennsylvania Frontier", (39.7, -80.5, 42.0, -74.7)),
 ]
 
-#: Daily floor + per-run safety cap on tiles. The cap is generous so even a sparse
-#: rural sweep (~7 new/tile) can still clear the 500 floor (~72 tiles); dense metro
-#: sweeps hit it in <10 tiles and stop early.
-DAILY_TARGET = 500
-MAX_TILES_PER_RUN = 80
+#: Daily floor + per-run safety cap on tiles. Scaled for the 3,000/day email-supply goal:
+#: at ~7 new/tile on a sparse rural sweep, clearing 3,000 needs ~430 tiles, so the tile
+#: cap is raised to match; dense metro sweeps still hit the target in far fewer tiles and
+#: stop early. Override per-run with UTAH_LEADS_DAILY_TARGET for bursts.
+DAILY_TARGET = int(os.environ.get("UTAH_LEADS_DAILY_TARGET", "3000"))
+MAX_TILES_PER_RUN = int(os.environ.get("UTAH_LEADS_MAX_TILES", "600"))
 #: Persistent frontier cursor — which tile index to resume from next run.
 FRONTIER_STATE = runtime.RUN_DIR / "leads-frontier.json"
 #: Maps trade-scout cursor (rotates query × metro center each run).
 MAPS_SCOUT_STATE = runtime.RUN_DIR / "leads-maps-scout.json"
 
-#: Google Maps text queries for local trades — handyman / home-repair buyers.
+#: Google Maps text queries for local trades — service SMBs that are prime website buyers
+#: (own-operated, phone-first, often only a thin or no site → highest pitch yield). Widened
+#: for the 3,000/day supply goal: more verticals = more fresh businesses per metro.
 MAPS_TRADE_QUERIES: list[str] = [
     "handyman", "general contractor", "home repair", "plumber", "electrician",
     "hvac contractor", "roofing contractor", "landscaping service",
+    "pest control", "cleaning service", "house painter", "fencing contractor",
+    "concrete contractor", "tree service", "appliance repair", "auto repair",
+    "towing service", "moving company", "pressure washing", "garage door repair",
+    "pool service", "lawn care", "junk removal", "drywall contractor",
+    "flooring contractor", "window installation", "gutter service", "locksmith",
+    "septic service", "masonry contractor", "deck builder", "fence company",
+    "remodeling contractor", "kitchen remodeling", "bathroom remodeling",
+    "auto detailing", "mobile mechanic", "carpet cleaning", "chimney sweep",
+    "irrigation service", "paving contractor", "demolition contractor",
 ]
 #: Handyman-focused queries for the phone pipeline (no website + phone).
 MAPS_HANDYMAN_QUERIES: list[str] = [
@@ -158,6 +182,10 @@ _CATEGORIES: list[tuple[str, str]] = [
     ("amenity", "veterinary"), ("leisure", "fitness_centre"),
     ("office", "company"), ("office", "estate_agent"),
     ("office", "insurance"), ("office", "accountant"),
+    # Widened for the 3,000/day supply goal — more owner-operated SMB verticals.
+    ("office", "lawyer"), ("office", "financial"), ("office", "it"),
+    ("amenity", "childcare"), ("amenity", "driving_school"),
+    ("amenity", "dentist"), ("leisure", "sports_centre"), ("shop", "beauty"),
 ]
 
 #: ``shop=*`` is broad — these sub-values are retail AREAS / big-box, not a single
