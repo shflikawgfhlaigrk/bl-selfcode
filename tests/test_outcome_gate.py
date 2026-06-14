@@ -23,12 +23,25 @@ def test_outcome_gate_red_when_no_sends_or_sales(monkeypatch):
     assert revenue_heal.is_revenue_green() is False
 
 
-def test_outcome_gate_green_when_a_real_send_landed(monkeypatch):
+def test_outcome_gate_activity_only_when_sends_but_no_sales(monkeypatch):
+    """Sends without sales is activity, not revenue (J-021 / BLA-435)."""
     monkeypatch.setattr(revenue_heal, "_count_since",
                         lambda table, hours: 3 if table == "mail_ledger" else 0)
     g = revenue_heal.outcome_gate()
-    assert g["ok"] is True and g["sends"] == 3 and "flowing" in g["reason"]
-    assert revenue_heal.is_revenue_green() is True
+    assert g["ok"] is False and g["sends"] == 3 and g["sales"] == 0
+    assert "activity only" in g["reason"] and "flowing" not in g["reason"]
+    assert revenue_heal.is_revenue_green() is False
+
+
+def test_outcome_gate_red_on_269_sends_zero_sales(monkeypatch):
+    """Stress audit case: 269 sends / 0 sales must not read as revenue flowing."""
+    monkeypatch.setattr(revenue_heal, "_count_since",
+                        lambda table, hours: 269 if table == "mail_ledger" else 0)
+    g = revenue_heal.outcome_gate(window_h=26.0)
+    assert g["ok"] is False and g["assessable"] is True
+    assert g["sends"] == 269 and g["sales"] == 0
+    assert "activity only" in g["reason"]
+    assert "269" in g["reason"] and "revenue flowing" not in g["reason"]
 
 
 def test_outcome_gate_green_when_a_sale_landed(monkeypatch):

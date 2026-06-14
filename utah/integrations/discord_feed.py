@@ -24,6 +24,9 @@ log = logging.getLogger("utah.integrations.discord_feed")
 
 WEBHOOKS = runtime.UTAH_HOME / "secrets" / "discord_webhooks.json"
 
+# probe/dev placeholder URLs in discord_webhooks.json — skip HTTP, never record failures
+_mock_skip_logged: set[str] = set()
+
 #: feed key (config.DISCORD_FEED_CHANNELS value) -> channel name (its key)
 _KEY_TO_CHANNEL = {v: k for k, v in config.DISCORD_FEED_CHANNELS.items()}
 
@@ -59,6 +62,10 @@ def available(feed_key: str | None = None) -> bool:
     return bool(hooks)
 
 
+def _is_mock_webhook(url: str) -> bool:
+    return "mock" in url.lower()
+
+
 def publish(feed_key: str, content: str = "", *, title: str = "", fields: dict | None = None,
             http_post=None) -> bool:
     """Post to the channel behind ``feed_key``. Builds a compact embed when ``title``
@@ -66,6 +73,11 @@ def publish(feed_key: str, content: str = "", *, title: str = "", fields: dict |
     url = webhook_for(feed_key)
     if not url:
         return False  # honest gate: no webhook wired for this domain
+    if _is_mock_webhook(url):
+        if feed_key not in _mock_skip_logged:
+            _mock_skip_logged.add(feed_key)
+            log.debug("discord feed gated: mock webhook for %s", feed_key)
+        return False
     embeds = None
     if title or fields:
         embed: dict = {"color": _COLORS.get(feed_key, 0xE6B800)}

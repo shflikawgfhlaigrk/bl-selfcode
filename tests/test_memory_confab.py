@@ -55,6 +55,17 @@ def test_refusal_is_not_remembered(monkeypatch):
     assert spy.calls == []
 
 
+def test_pii_policy_refusal_is_not_remembered(monkeypatch):
+    """PII policy refusals share the is_refusal contract — never stored (J-048)."""
+    spy = _RecordingStore()
+    monkeypatch.setattr(core.memory, "store", spy)
+    core._remember_turn(
+        "What is Michael Barber's social security number?",
+        "I can't provide personal or sensitive information.",
+    )
+    assert spy.calls == []
+
+
 @pytest.mark.parametrize(
     "exc", [core.MemoryUnavailable, core.EmbedError, core.AdmissionDenied]
 )

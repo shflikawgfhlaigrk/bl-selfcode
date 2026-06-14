@@ -19,6 +19,7 @@ from __future__ import annotations
 import logging
 import os
 import pathlib
+import plistlib
 import re
 import socket
 import subprocess
@@ -52,9 +53,78 @@ _CONFLICT_COPY = re.compile(r" \d+\.py$")
 #: Vendored/metadata trees where a numbered .py is not OUR drift.
 _SKIP_DIRS = frozenset({".git", ".venv", "venv", "node_modules", "__pycache__"})
 
+#: Repo root spellings that resolve to the same tree (Desktop symlink → ~/ProjectUtah).
+_REPO_ROOT_TOKEN = "__UTAH_ROOT__"
+
+
+def _repo_root_aliases(repo: pathlib.Path) -> tuple[str, ...]:
+    """Every filesystem spelling of the Utah tree on this host."""
+    candidates = [
+        repo,
+        repo.resolve(),
+        pathlib.Path.home() / "ProjectUtah",
+        pathlib.Path.home() / "Desktop" / "ProjectUtah",
+    ]
+    out: list[str] = []
+    seen: set[str] = set()
+    for p in candidates:
+        for spelling in (str(p), str(p.resolve())):
+            if spelling not in seen:
+                seen.add(spelling)
+                out.append(spelling)
+    return tuple(out)
+
+
+def _normalize_repo_paths(value: object, aliases: tuple[str, ...]) -> object:
+    """Rewrite equivalent repo-root paths to one token for semantic compare."""
+    if isinstance(value, str):
+        normalized = value
+        for root in aliases:
+            normalized = normalized.replace(root, _REPO_ROOT_TOKEN)
+        return normalized
+    if isinstance(value, dict):
+        return {k: _normalize_repo_paths(v, aliases) for k, v in sorted(value.items())}
+    if isinstance(value, list):
+        return [_normalize_repo_paths(v, aliases) for v in value]
+    return value
+
+
+def _plist_payload(raw: bytes) -> object | None:
+    """Parse plist bytes; strip XML comments first (launchd ignores them)."""
+    stripped = re.sub(rb"<!--.*?-->", b"", raw, flags=re.DOTALL)
+    try:
+        return plistlib.loads(stripped)
+    except Exception:
+        return None
+
+
+def plists_semantically_equal(
+    installed_raw: bytes,
+    repo_raw: bytes,
+    *,
+    repo: pathlib.Path,
+) -> bool:
+    """True when two plists carry the same launchd job (ignoring comments/format/alias paths)."""
+    aliases = _repo_root_aliases(repo)
+    installed = _plist_payload(installed_raw)
+    repo_pl = _plist_payload(repo_raw)
+    if installed is not None and repo_pl is not None:
+        return _normalize_repo_paths(installed, aliases) == _normalize_repo_paths(repo_pl, aliases)
+    # Unparseable (tests / hand-edited junk): fall back to alias-normalized bytes.
+    def norm_bytes(raw: bytes) -> bytes:
+        text = raw.decode("utf-8", "replace")
+        for root in aliases:
+            text = text.replace(root, _REPO_ROOT_TOKEN)
+        return text.encode("utf-8")
+
+    return norm_bytes(installed_raw) == norm_bytes(repo_raw)
+
 
 def plist_drift(*, repo: pathlib.Path = REPO, agents: pathlib.Path = AGENTS) -> list[str]:
     """Installed com.utah.* plists must match the repo's ops/launchd copies.
+
+    Compares parsed plist payloads (not raw bytes) so ``~/ProjectUtah`` vs
+    ``~/Desktop/ProjectUtah`` symlink spellings and XML comments do not false-alarm.
 
     An unreadable copy (perms, iCloud eviction) is reported as its own finding —
     a probe that crashes on it would hide every OTHER plist's drift too.
@@ -66,11 +136,12 @@ def plist_drift(*, repo: pathlib.Path = REPO, agents: pathlib.Path = AGENTS) -> 
             out.append(f"{repo_plist.name}: in repo but NOT installed")
             continue
         try:
-            differs = installed.read_bytes() != repo_plist.read_bytes()
+            repo_raw = repo_plist.read_bytes()
+            installed_raw = installed.read_bytes()
         except OSError as exc:
             out.append(f"{repo_plist.name}: unreadable ({exc.__class__.__name__}) — cannot verify")
             continue
-        if differs:
+        if not plists_semantically_equal(installed_raw, repo_raw, repo=repo):
             out.append(f"{repo_plist.name}: installed copy differs from repo")
     return out
 
@@ -247,6 +318,7 @@ __all__ = [
     "empty_secrets",
     "icloud_conflicts",
     "plist_drift",
+    "plists_semantically_equal",
     "port_squatters",
     "scan",
     "sovereign_hijack",

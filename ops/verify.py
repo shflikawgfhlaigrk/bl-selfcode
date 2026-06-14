@@ -24,7 +24,9 @@ Usage:
   python ops/verify.py --loop     # permanent: quiescence-gated continuous verify
 
 Knobs (env, all test-injectable): UTAH_HOME, UTAH_ROOT, UTAH_PY, UTAH_TEST_DSN,
-UTAH_VERIFY_QUIET, UTAH_VERIFY_INTERVAL, UTAH_VERIFY_TIMEOUT.
+UTAH_VERIFY_QUIET, UTAH_VERIFY_INTERVAL, UTAH_VERIFY_TIMEOUT (suite bound in
+seconds; default 1200 — full pytest here runs ~10–15 min under CPU load; launchd
+``com.utah.verify`` sets 1500 for extra headroom).
 """
 from __future__ import annotations
 
@@ -48,7 +50,8 @@ PY = os.environ.get("UTAH_PY", str(HOME / "venv" / "bin" / "python"))
 TEST_DSN = os.environ.get("UTAH_TEST_DSN", "host=/tmp port=5433 dbname=utah_test")
 QUIET = int(os.environ.get("UTAH_VERIFY_QUIET", "40"))        # secs of no .py change = build paused
 INTERVAL = int(os.environ.get("UTAH_VERIFY_INTERVAL", "90"))  # gap between green sweeps
-SUITE_TIMEOUT = int(os.environ.get("UTAH_VERIFY_TIMEOUT", "600"))
+_DEFAULT_SUITE_TIMEOUT = 1200  # was 600 — false-red rc 124 when concurrent pytest loads the box
+SUITE_TIMEOUT = int(os.environ.get("UTAH_VERIFY_TIMEOUT", str(_DEFAULT_SUITE_TIMEOUT)))
 
 #: Known macOS CoreML/onnxruntime stderr noise — never a test failure.
 _NOISE = ("onnxruntime", "coreml", "context leak")
@@ -108,7 +111,7 @@ def _failure_lines(out: str) -> list[str]:
 def run_suite() -> tuple[int, float, list[str]]:
     """Run the full suite once, bounded. Returns (exit_code, duration_s, failure_lines).
     Never raises: a hung suite is rc 124, an unrunnable pytest is rc 125."""
-    env = dict(os.environ, UTAH_TEST_DSN=TEST_DSN)
+    env = dict(os.environ, UTAH_TEST_DSN=TEST_DSN, HF_HUB_OFFLINE="1", TRANSFORMERS_OFFLINE="1")
     start = time.time()
     try:
         # iCloud Desktop spawns "<name> 2.py"/".orig"/".bak" conflict copies that

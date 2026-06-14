@@ -4,6 +4,8 @@ daemon), honest-empty where none has landed yet (real-or-DORMANT, never faked),
 so a new producer lights its panel with no frontend change."""
 from __future__ import annotations
 
+import json
+
 from utah.interface import web
 
 # every panel on the deck maps to a domain in the single /state feed
@@ -144,6 +146,63 @@ def test_memory_endpoint_degrades_to_last_good_counts(monkeypatch):
     second = client.get("/memory")                     # shed → cached + degraded, not 503
     assert second.status_code == 200
     assert second.json()["total"] == 9755 and "shed" in second.json()["degraded"]
+
+
+def test_operator_snapshot_reads_operator_json(tmp_path, monkeypatch):
+    """operator.json outcome + mail_gated must reach the deck via /state."""
+    payload = {
+        "ts": 1718380800.0,
+        "ok": True,
+        "mail_gated": True,
+        "outcome": {
+            "ok": False,
+            "assessable": True,
+            "sends": 269,
+            "sales": 0,
+            "window_h": 26,
+            "reason": "NO outcome in 26h — 269 sends, 0 sales",
+        },
+    }
+    (tmp_path / "operator.json").write_text(json.dumps(payload), encoding="utf-8")
+    monkeypatch.setattr(web.runtime, "RUN_DIR", tmp_path)
+
+    snap = web._operator_snapshot()
+    assert snap["present"] is True
+    assert snap["mail_gated"] is True
+    assert snap["revenue_ok"] is False
+    assert snap["outcome"]["sends"] == 269
+
+
+def test_state_includes_operator_snapshot(monkeypatch, tmp_path):
+    from starlette.testclient import TestClient
+
+    (tmp_path / "operator.json").write_text(
+        json.dumps({"ok": True, "mail_gated": False,
+                    "outcome": {"ok": True, "sends": 3, "sales": 1, "window_h": 26}}),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(web.runtime, "RUN_DIR", tmp_path)
+
+    async def no_daemon():
+        return None
+
+    async def no_snapshot():
+        return {}
+
+    monkeypatch.setattr(web, "_daemon_status", no_daemon)
+    monkeypatch.setattr(web, "_ledger_snapshot", no_snapshot)
+    monkeypatch.setattr(web, "_audit_rows", lambda: [])
+
+    client = TestClient(web.build_app())
+    op = client.get("/state").json()["operator"]
+    assert op["present"] is True
+    assert op["revenue_ok"] is True
+    assert op["mail_gated"] is False
+
+
+def test_operator_snapshot_honest_when_missing(tmp_path, monkeypatch):
+    monkeypatch.setattr(web.runtime, "RUN_DIR", tmp_path)
+    assert web._operator_snapshot() == {"present": False}
 
 
 def test_csrf_guard_blocks_cross_origin_state_change(monkeypatch):

@@ -17,6 +17,7 @@ from utah import social
     "hi", "hello", "hey", "yo", "hiya", "howdy", "hey ace", "Hello!", "  hi  ",
     "good morning", "good evening", "morning",
     "thanks", "thank you", "thanks so much", "thx", "ty", "cheers", "appreciate it",
+    "thanks ace", "thank you ace", "Thanks ace, you're the best",
     "bye", "goodbye", "see ya", "good night", "later",
     "how are you", "how's it going", "what's up", "you there",
     "cool", "nice", "great", "awesome", "perfect", "got it", "sounds good", "no problem",
@@ -29,6 +30,7 @@ def test_social_matches(t):
     "what's the weather", "debug the parser", "who won the super bowl",
     "hello can you debug the parser", "good morning what's the weather",
     "thanks for fixing the weather bug", "explain recursion",
+    "thanks ace, can you debug the parser",
     "yes", "no", "ok", "okay", "yeah", "k",   # ambiguous answers — must NOT be hijacked
 ])
 def test_non_social_does_not_match(t):
@@ -58,3 +60,21 @@ def test_greeting_addresses_michael_by_name():
 def test_reply_is_none_for_non_social():
     assert social.reply("debug the parser") is None
     assert social.reply("who won the 2020 world series") is None
+
+
+@pytest.mark.parametrize("t", ["ok", "okay", "k", "kk", "  OK  "])
+def test_threaded_bare_ack_detected(t):
+    assert social.is_threaded_bare_ack(t)
+
+
+@pytest.mark.parametrize("t", ["yes", "no", "cool", "got it", "hello", "ok sure"])
+def test_threaded_bare_ack_not_detected(t):
+    assert not social.is_threaded_bare_ack(t)
+
+
+def test_threaded_ack_reply_is_short_and_deterministic():
+    r1 = social.threaded_ack_reply("ok")
+    r2 = social.threaded_ack_reply("ok")
+    assert r1 and len(r1) <= 20
+    assert r1 == r2
+    assert social.threaded_ack_reply("debug the parser") is None

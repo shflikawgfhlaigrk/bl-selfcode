@@ -322,18 +322,22 @@ def run(
         "permissions": permissions_fn(),
     }
     mail = payload["integrations"].get("mail") or {}
+    outcome = payload["outcome"]
     # Honest health: "ok" means what this sweep checked GENUINELY works. A gated
     # (never-configured) mail integration is intentionally off, not healthy — it is
     # surfaced separately via mail_gated so the deck can tell "working" from "off".
     # The permissions bootstrap is a one-time Michael action; its absence is reported
-    # above but does not flip the sweep red.
+    # above but does not flip the sweep red. Substrate green ≠ revenue green: when the
+    # outcome gate is assessable, top-level ok requires outcome.ok (J-033 / BLA-446).
     payload["mail_gated"] = bool(mail.get("gated"))
+    payload["revenue_ok"] = bool(outcome.get("ok"))
     substrate_ok = all(step.get("ok") for step in payload["substrate"])
     payload["ok"] = bool(
         substrate_ok
         and (payload["tailserve"] or {}).get("ok")
         and (payload["app"] or {}).get("ok")
         and mail.get("ok")
+        and (not outcome.get("assessable") or outcome.get("ok"))
     )
 
     if write_status:

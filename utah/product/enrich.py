@@ -349,6 +349,22 @@ def enrich_lead(ledger, lead: dict, *, find_fn=None) -> dict:
     return result
 
 
+def enrich_and_generate(ledger, lead: dict, *, find_fn=None, out_dir=None) -> dict:
+    """Enrich one lead (email onto the row) then render + record the sitegen preview through
+    the same ledger path outreach uses. Returns the find result with a ``site`` bag from
+    :func:`utah.product.sitegen.generate`. Hermetic tests inject ``find_fn`` + a fake ledger."""
+    result = enrich_lead(ledger, lead, find_fn=find_fn)
+    gen_lead = dict(lead)
+    if result.get("email"):
+        contact = dict(gen_lead.get("contact") or {})
+        contact["email"] = result["email"]
+        gen_lead["contact"] = contact
+    from utah.product import sitegen
+
+    result["site"] = sitegen.generate(gen_lead, out_dir=out_dir, ledger=ledger)
+    return result
+
+
 def _leads_needing_email(limit: int) -> list[dict]:
     """SMB leads (osm|google_maps) with a phone or website but no email yet — phone-first,
     since those are the most contactable. The pool enrichment drains toward outreach.
@@ -412,4 +428,4 @@ def run_scheduled(limit: int = 50, *, ledger=None, lead_fetch=None, find_fn=None
 
 
 __all__ = ["extract_emails", "best_email", "domain_resolves", "domain_accepts_mail",
-           "verify_email", "find_email", "enrich_lead", "run_scheduled"]
+           "verify_email", "find_email", "enrich_lead", "enrich_and_generate", "run_scheduled"]

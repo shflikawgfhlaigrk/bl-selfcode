@@ -33,6 +33,16 @@ _REFUSAL_PREFIXES = (
     "not in the context",
     "not in context",
     "not supported by the context",
+    # PII / policy refusals — the local 3B sometimes emits these instead of the
+    # canonical "I don't know."; they carry nothing durable (J-048).
+    "i can't provide personal",
+    "i cannot provide personal",
+    "i can't provide sensitive",
+    "i cannot provide sensitive",
+    "i can't share personal",
+    "i cannot share personal",
+    "i'm not able to provide personal",
+    "i am not able to provide personal",
 )
 
 

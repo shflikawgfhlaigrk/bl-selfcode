@@ -86,6 +86,9 @@ _MAIL = re.compile(
     r"\b(how many|number of|count of|total)\s+(e-?mails?|texts?|messages?|sms|sends?)\b|"
     r"\b(e-?mails?|texts?|messages?|sms|mail)\s+(sent|sends?|count|counts|today|so far|this morning|this week)\b|"
     r"\b(e-?mails?|texts?|messages?)\s+(did we|have we|were)\s+(sent|send)\b|"
+    r"\b(did we|have we|were we)\s+(send|sent)\s+(any\s+)?(mail|e-?mails?|texts?|messages?|outreach|anything)\b|"
+    r"\bany\s+(mail|e-?mails?|texts?|messages?|outreach)\s+sent\b|"
+    r"\boutreach\s+(status|sent|today|so far|this morning|this week|going out)\b|"
     r"\bhow many\b[^.?!]*\b(e-?mails?|texts?|messages?)\b[^.?!]*\bsent\b|"
     r"\bmail\s+(count|ledger|sent)\b",
     re.I,
@@ -106,6 +109,7 @@ _JOBS = re.compile(
 _ENGINE = re.compile(
     r"\b(engine|lab)\s+(state|status|health)\b|"
     r"\bengine\s+lab\b|"
+    r"\btrading\s+(edge|lab|engine|engines?|status|state|audit|panel)\b|"
     r"\b(what|which|how many)\s+engines?\s+(are\s+)?(live|running|firing|active|up|going)\b|"
     r"\bare\s+(your|the)\s+engines?\s+(live|running|firing|up|on)\b|"
     r"\b(your|the)\s+engines?\s+(live|running|firing|state|status)\b",
@@ -153,6 +157,15 @@ _FACTUAL_RECALL = re.compile(
     re.I,
 )
 
+#: Sensitive PII intent — SSN/social-security questions must never hit LOCAL_QUICK
+#: (the 3B improvises a policy refusal that :func:`utah.brain.is_refusal` once missed,
+#: so the exchange was storable). Route to the brain for a structural no-fab answer.
+_SENSITIVE_PII = re.compile(
+    r"\b(ssn|social[\s-]?security(\s+number)?)\b|"
+    r"\bsocial[\s-]?security\s+(number|#|no\.?)\b",
+    re.I,
+)
+
 
 #: Self / project / identity questions — about Utah, Ace/AceOS, "who/what are you",
 #: "what can you do", "what do you know/remember about …", "tell me about yourself".
@@ -168,6 +181,12 @@ _SELF_OR_PROJECT = re.compile(
     r"\bwhat\s+do\s+you\s+(know|remember)\s+about\b",
     re.I,
 )
+
+
+def is_sensitive_pii(text: str) -> bool:
+    """True for a sensitive-PII question (SSN / social security). These must route to
+    the brain — never LOCAL_QUICK — so policy refusals stay non-storable."""
+    return bool(_SENSITIVE_PII.search(text or ""))
 
 
 def is_factual_recall(text: str) -> bool:
@@ -211,6 +230,9 @@ def route(text: str) -> Route:
     if actions.is_action(t):
         return Route.ACTION
     if _AGENTIC.search(t):
+        return Route.BRAIN
+    # Sensitive PII (SSN, social security) → brain, never the 3B local lane.
+    if _SENSITIVE_PII.search(t):
         return Route.BRAIN
     if _WEATHER.search(t):
         return Route.WEATHER

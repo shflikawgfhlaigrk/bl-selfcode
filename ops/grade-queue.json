@@ -64,5 +64,23 @@
     "weakness": "Only imported in tests; thin wrapper not wired live. Orphan cap 55.",
     "verified_at": "2026-06-13",
     "source": "utah_grade_index (v2-core, score=55, cap=orphan/55)"
+  },
+  {
+    "file": "tests/test_recall_eval.py",
+    "weakness": "eval_exec",
+    "verified_at": "2026-06-14",
+    "source": "utah_grade_index (heuristic, score=40, cap=eval_exec)"
+  },
+  {
+    "file": "utah/proof.py",
+    "weakness": "shell_true; no_timeout",
+    "verified_at": "2026-06-14",
+    "source": "utah_grade_index (heuristic, score=40, cap=shell_true)"
+  },
+  {
+    "file": "tests/test_supervisor.py",
+    "weakness": "swallowed_exception",
+    "verified_at": "2026-06-14",
+    "source": "utah_grade_index (heuristic, score=58, cap=swallowed_exception)"
   }
 ]

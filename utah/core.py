@@ -33,11 +33,41 @@ log = logging.getLogger("utah.core")
 #: Recent (question, answer) turns — the live conversation thread shared by chat
 #: AND voice, so follow-ups ("why?", "prove it") have context. Small + in-memory.
 _CONVO: "deque[tuple[str, str]]" = deque(maxlen=6)
+#: Last question Ace refused in-thread — binds anaphoric follow-ups ("why?") to the
+#: refused topic instead of drifting to CORE manifesto (J-051).
+_LAST_REFUSED: str | None = None
+
+#: Short follow-ups that refer back to Ace's most recent refusal, not a new question.
+_ANAPHORIC_REFUSAL_FOLLOWUP = re.compile(
+    r"^(?:why(?:n't| not)?\??|prove it|how do you know)\.?$",
+    re.I,
+)
 
 
 def reset_conversation() -> None:
     """Clear the conversation thread (new conversation / tests)."""
     _CONVO.clear()
+    global _LAST_REFUSED
+    _LAST_REFUSED = None
+
+
+def _thread_turn(question: str, answer: str) -> None:
+    """Append one exchange to the live thread and track refusals for follow-ups."""
+    global _LAST_REFUSED
+    _CONVO.append((question, answer))
+    if answer and brain.is_refusal(answer):
+        _LAST_REFUSED = question
+
+
+def _brain_question(text: str) -> str:
+    """Rewrite anaphoric refusal follow-ups so the brain binds to the refused topic."""
+    t = (text or "").strip()
+    if not (_CONVO and _LAST_REFUSED and t and _ANAPHORIC_REFUSAL_FOLLOWUP.match(t)):
+        return text
+    return (
+        f'{t} — about your earlier refusal on: "{_LAST_REFUSED}" '
+        f"(explain why you could not answer from context, not general background)"
+    )
 
 
 def _conversation_context() -> str:
@@ -115,6 +145,13 @@ def _build_context(hits: list, web: str = "", *, text: str = "") -> str:
 
 
 _TURN_ANSWER = re.compile(r"\bA:\s*(.*)$", re.S)
+
+#: LOCAL_QUICK sometimes wraps a bare ack in meta-preface ("After reviewing the provided
+#: context…") — treat as a miss and escalate (J-050).
+_LOCAL_META_PREFACE = re.compile(
+    r"after reviewing (the )?(provided )?context|I can answer the question:",
+    re.I,
+)
 
 
 def _present_memory_answer(answer: str, hits: list) -> str:
@@ -197,6 +234,27 @@ def _capability_reply(text: str, route: Route, hits: list) -> Reply | None:
     return None
 
 
+def _local_output_ok(out: str) -> bool:
+    """True when a local answer is safe to surface (not a refusal or meta-garbage)."""
+    return bool(out) and not local.is_refusal(out) and not _LOCAL_META_PREFACE.search(out)
+
+
+def _thread_skips_local(text: str) -> bool:
+    """In an active thread, short turns must not hit LOCAL_QUICK (3B meta-garbage)."""
+    if not _CONVO:
+        return False
+    if social.is_threaded_bare_ack(text):
+        return True
+    return len((text or "").strip().split()) <= 2
+
+
+def _effective_route(text: str, route: Route) -> Route:
+    """Upgrade LOCAL_QUICK when an in-thread short turn would garble on the 3B lane."""
+    if route is Route.LOCAL_QUICK and _thread_skips_local(text):
+        return Route.BRAIN
+    return route
+
+
 def _try_local(text: str, context: str, *, heavy: bool) -> str | None:
     """A local-model answer, or ``None`` to escalate to the brain (a refusal or an
     unavailable Ollama — never a fabrication)."""
@@ -206,7 +264,7 @@ def _try_local(text: str, context: str, *, heavy: bool) -> str | None:
         log.warning("local lane unavailable, escalating to brain: %s", exc)
         failures.record("local", "unavailable", str(exc))
         return None
-    return out if out and not local.is_refusal(out) else None
+    return out if _local_output_ok(out) else None
 
 
 def _is_substantive_turn(text: str) -> bool:
@@ -346,6 +404,11 @@ def _prelude(text: str) -> "tuple[str, Route | None, Reply | None]":
     if not text:
         return text, None, Reply(text="I didn't catch that.", source=ReplySource.UNAVAILABLE)
     route = router.route(text)
+    # Bare "ok"/"k" in an active thread → canned ack, never LOCAL_QUICK meta-garbage (J-050).
+    if _CONVO and social.is_threaded_bare_ack(text):
+        canned = social.threaded_ack_reply(text)
+        if canned:
+            return text, Route.SOCIAL, Reply(text=canned, source=ReplySource.SOCIAL)
     if route is Route.SOCIAL:
         canned = social.reply(text)
         if canned:
@@ -395,7 +458,7 @@ def _tell_core(text: str, *, persist: bool = True) -> Reply:
     text, route, instant = _prelude(text)
     if instant is not None:
         if instant.source is not ReplySource.UNAVAILABLE:
-            _CONVO.append((text, instant.text))
+            _thread_turn(text, instant.text)
         return instant
 
     # 2. RECALL + GROUND: answer general factual turns from memory only if confident
@@ -410,12 +473,13 @@ def _tell_core(text: str, *, persist: bool = True) -> Reply:
         answer = None
     if answer is not None:
         clean = _present_memory_answer(answer, hits)
-        _CONVO.append((text, clean))
+        _thread_turn(text, clean)
         return Reply(text=clean, source=ReplySource.MEMORY, hits=hits)
 
     context = _build_context(hits, text=text)
 
     # 3. LOCAL: a free resident model answers quick things; a miss escalates.
+    route = _effective_route(text, route)
     if route in (Route.LOCAL_QUICK, Route.LOCAL_HEAVY):
         local_text = _try_local(text, context, heavy=route is Route.LOCAL_HEAVY)
         if local_text is not None:
@@ -423,7 +487,7 @@ def _tell_core(text: str, *, persist: bool = True) -> Reply:
             # is not a trusted source of durable facts (it hallucinates), and a
             # stored hallucination poisons recall. Durable memory = the brain +
             # explicit facts + consolidation. (See 20-l1-tier.md, the poisoning fix.)
-            _CONVO.append((text, local_text))
+            _thread_turn(text, local_text)
             return Reply(text=local_text, source=ReplySource.LOCAL, hits=hits)
         # miss (refusal / Ollama down) → escalate to the brain below.
 
@@ -440,7 +504,7 @@ def _tell_core(text: str, *, persist: bool = True) -> Reply:
             except BrainUnavailable:
                 grounded = ""
             if grounded and not brain.is_refusal(grounded):
-                _CONVO.append((text, grounded))
+                _thread_turn(text, grounded)
                 if persist:
                     _remember_turn(text, grounded)
                 return Reply(text=grounded, source=ReplySource.LEARNED, hits=hits)
@@ -450,12 +514,12 @@ def _tell_core(text: str, *, persist: bool = True) -> Reply:
     #     Ace's self-build surface — a new capability is one file he writes, no core edit.
     agent_out = agents.route(text)
     if agent_out is not None:
-        _CONVO.append((text, agent_out))
+        _thread_turn(text, agent_out)
         return Reply(text=agent_out, source=ReplySource.CAPABILITY, hits=hits)
 
     # 4. REASON: Claude CLI brain, grounded in the conversation thread + recall.
     try:
-        reply_text = brain.think(text, context)
+        reply_text = brain.think(_brain_question(text), context)
     except BrainRateLimited as exc:
         # A subscription limit is TRANSIENT and expected (shared Claude plan), not an
         # outage — record it as such so the AUDIT panel/alerts don't read a routine
@@ -482,7 +546,7 @@ def _tell_core(text: str, *, persist: bool = True) -> Reply:
     # 5. REMEMBER (best-effort): store the exchange so future recall compounds.
     #    Refusals ("I don't know…", verbose or not) carry nothing durable → skip.
     if reply_text:
-        _CONVO.append((text, reply_text))
+        _thread_turn(text, reply_text)
     if persist:
         _remember_turn(text, reply_text)
 
@@ -520,7 +584,7 @@ def _tell_stream_core(text: str, *, want_thinking: bool = True, voice: bool = Fa
         yield ("source", instant.source.value)
         yield ("answer", instant.text)
         if instant.source is not ReplySource.UNAVAILABLE:
-            _CONVO.append((text, instant.text))
+            _thread_turn(text, instant.text)
         yield ("done", instant.text)
         return
 
@@ -551,6 +615,7 @@ def _tell_stream_core(text: str, *, want_thinking: bool = True, voice: bool = Fa
         ]))
 
     # 1.6 L1 LOCAL — free resident model; stream thinking live, escalate on a miss.
+    route = _effective_route(text, route)
     if route in (Route.LOCAL_QUICK, Route.LOCAL_HEAVY):
         answered = yield from _stream_local(text, context, heavy=route is Route.LOCAL_HEAVY)
         if answered:
@@ -577,7 +642,7 @@ def _tell_stream_core(text: str, *, want_thinking: bool = True, voice: bool = Fa
                 text, _build_context(hits, web=web, text=text), want_thinking=want_thinking)
             if grounded and not brain.is_refusal(grounded):
                 yield ("answer", grounded)
-                _CONVO.append((text, grounded))
+                _thread_turn(text, grounded)
                 _remember_turn(text, grounded)
                 yield ("done", grounded)
                 return
@@ -587,7 +652,7 @@ def _tell_stream_core(text: str, *, want_thinking: bool = True, voice: bool = Fa
     #     the paid brain (same surface as tell()). Declines (None) pass through.
     _agent_out = agents.route(text)
     if _agent_out is not None:
-        _CONVO.append((text, _agent_out))
+        _thread_turn(text, _agent_out)
         yield ("source", "capability")
         yield ("answer", _agent_out)
         yield ("done", _agent_out)
@@ -601,7 +666,7 @@ def _tell_stream_core(text: str, *, want_thinking: bool = True, voice: bool = Fa
     parts: list[str] = []
     try:
         for channel, chunk in brain.think_stream(
-                text, context, want_thinking=want_thinking, brief=voice):
+                _brain_question(text), context, want_thinking=want_thinking, brief=voice):
             if channel == "answer":
                 parts.append(chunk)
                 if not learnable:
@@ -636,7 +701,7 @@ def _tell_stream_core(text: str, *, want_thinking: bool = True, voice: bool = Fa
 
     # 3. REMEMBER (best-effort) — skip refusals (nothing durable).
     if reply_text:
-        _CONVO.append((text, reply_text))  # conversation thread (incl. honest refusals)
+        _thread_turn(text, reply_text)  # conversation thread (incl. honest refusals)
     _remember_turn(text, reply_text)
     yield ("done", reply_text)
 
@@ -666,14 +731,14 @@ def _stream_local(text: str, context: str, *, heavy: bool) -> Iterator[tuple[str
         failures.record("local", "unavailable", str(exc))
         return False
     answer = "".join(answer_parts).strip()
-    if not answer or local.is_refusal(answer):
+    if not _local_output_ok(answer):
         return False
     if not source_sent:
         yield ("source", "local")
     yield ("answer", answer)
     # Threaded for follow-ups, but NOT durably stored — a small local model is not a
     # trusted source of durable facts (see 20-l1-tier.md, the poisoning fix).
-    _CONVO.append((text, answer))
+    _thread_turn(text, answer)
     yield ("done", answer)
     return True
 

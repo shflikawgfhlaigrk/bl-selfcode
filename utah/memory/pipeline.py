@@ -11,6 +11,8 @@ from utah.memory.exceptions import AdmissionDenied, MemoryUnavailable
 from utah.memory.logic import (
     decide_write,
     entity_grounds,
+    is_canspam_address_query,
+    is_untrusted_canspam_content,
     lexical_overlap,
     passes_gate,
     recall_pool,
@@ -95,6 +97,11 @@ def store(
         if head.startswith("[acesd/") or (head.startswith("Q:") and "\nA:" in text):
             raise AdmissionDenied(
                 "admission denied: turn-shaped or dead-code content is not a durable fact")
+    # Profile poison gate: adversarial CAN-SPAM/address facts must not land at high
+    # confidence via remember_profile (stress row 42048: "123 Fake St" at 0.9).
+    if source in ("user", "fact") and is_untrusted_canspam_content(text):
+        raise AdmissionDenied(
+            "admission denied: untrusted CAN-SPAM/address profile fact")
 
     vector = embed(text)  # EmbedError propagates: no vector, no admission
     backend = get_backend()
@@ -250,7 +257,13 @@ def answer(query: str, k: int = config.RECALL_K) -> tuple[str | None, list[Hit]]
     hits = recall(query, k)
     if not hits:
         return None, []
-    best = hits[0]
+    candidates = hits
+    if is_canspam_address_query(query):
+        trusted = [h for h in hits if not is_untrusted_canspam_content(h.content)]
+        if not trusted:
+            return None, hits
+        candidates = trusted
+    best = candidates[0]
     # A conversational TURN is a record of a PAST exchange — keep it as CONTEXT for the
     # brain, but never re-serve it verbatim as the authoritative answer. Echoing a past
     # hedge/refusal ossifies it and bypasses fresh reasoning over NEWER context (e.g. the

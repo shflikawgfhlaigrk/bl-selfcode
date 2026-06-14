@@ -31,6 +31,11 @@ def _load(tmp_path, env: dict | None = None):
     root = tmp_path / "root"
     (root / "utah").mkdir(parents=True, exist_ok=True)
     (root / "tests").mkdir(parents=True, exist_ok=True)
+    
+    saved_timeout = os.environ.get("UTAH_VERIFY_TIMEOUT")
+    if "UTAH_VERIFY_TIMEOUT" not in (env or {}):
+        os.environ.pop("UTAH_VERIFY_TIMEOUT", None)
+
     env = {
         "UTAH_HOME": str(tmp_path / ".utah"),
         "UTAH_ROOT": str(root),
@@ -52,6 +57,10 @@ def _load(tmp_path, env: dict | None = None):
                 os.environ.pop(key, None)
             else:
                 os.environ[key] = val
+        if saved_timeout is not None:
+            os.environ["UTAH_VERIFY_TIMEOUT"] = saved_timeout
+        else:
+            os.environ.pop("UTAH_VERIFY_TIMEOUT", None)
 
 
 # ---------------------------------------------------------------------------
@@ -78,6 +87,12 @@ def test_run_suite_collects_failure_lines_on_red(tmp_path):
     assert any("collecting" in line for line in fails)
     assert not any("onnxruntime" in line for line in fails), \
         "known onnxruntime noise must not masquerade as a failure"
+
+
+def test_default_suite_timeout_is_1200_seconds(tmp_path):
+    mod = _load(tmp_path)
+    assert mod.SUITE_TIMEOUT == 1200
+    assert mod._DEFAULT_SUITE_TIMEOUT == 1200
 
 
 def test_run_suite_hung_suite_is_bounded_rc_124(tmp_path):

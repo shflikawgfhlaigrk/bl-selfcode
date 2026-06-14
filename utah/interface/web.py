@@ -31,6 +31,7 @@ from sse_starlette.sse import EventSourceResponse
 
 from utah import config, failures
 from utah.daemon import client as ctl
+from utah.daemon import runtime
 from utah.integrations import discord as discord_mod
 from utah.voice import state as voice_state
 
@@ -695,6 +696,37 @@ def _audit_rows() -> list[str]:
     ]
 
 
+def _operator_snapshot() -> dict:
+    """Last Ace operator sweep — outcome gate + mail_gated for the deck.
+
+    Reads ``~/.utah/run/operator.json`` (written every ``com.utah.operator`` pass).
+    Honest ``present: False`` when absent/unreadable; never fabricates revenue truth.
+    """
+    path = runtime.RUN_DIR / "operator.json"
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, json.JSONDecodeError):
+        return {"present": False}
+    if not isinstance(data, dict):
+        return {"present": False}
+    outcome = data.get("outcome") if isinstance(data.get("outcome"), dict) else {}
+    return {
+        "present": True,
+        "ts": data.get("ts"),
+        "ok": bool(data.get("ok")),
+        "mail_gated": bool(data.get("mail_gated")),
+        "revenue_ok": bool(outcome.get("ok")),
+        "outcome": {
+            "ok": bool(outcome.get("ok")),
+            "assessable": outcome.get("assessable"),
+            "sends": outcome.get("sends"),
+            "sales": outcome.get("sales"),
+            "window_h": outcome.get("window_h"),
+            "reason": outcome.get("reason"),
+        },
+    }
+
+
 #: route → last good payload. When the daemon sheds under load, the deck serves
 #: this (labeled ``degraded``) instead of {} — stale-but-real beats blank panels
 #: that read as "no producer wired" while 4,666 real rows sit in Postgres.
@@ -751,6 +783,8 @@ async def deck_data(request):
             state.setdefault("degraded", {})["memory"] = str(exc)
     # AUDIT LEDGER panel — live from the durable failure log (off-loop; empty on error)
     state["audit"] = await run_in_threadpool(_audit_rows)
+    # Operator outcome gate — substrate can be green while $0 sales / mail gated.
+    state["operator"] = await run_in_threadpool(_operator_snapshot)
     # Revenue panels — live from the Postgres product ledger (real rows or empty).
     snap = await _ledger_snapshot()
     if snap:

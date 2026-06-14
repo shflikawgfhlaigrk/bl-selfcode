@@ -7,6 +7,7 @@ is only ever set by an actual proof run — there is no "mark proven" button.
 from __future__ import annotations
 
 import dataclasses
+import json
 import pathlib
 import subprocess
 import sys
@@ -14,11 +15,12 @@ import time
 import urllib.request
 
 from utah import config
+from utah.daemon import runtime
 from utah.db_pool import get_pool
 
 _REPO = pathlib.Path(__file__).resolve().parents[1]   # repo root: proofs always run from here
 
-PROOF_KINDS = ("pytest", "sql", "shell", "http")
+PROOF_KINDS = ("pytest", "sql", "shell", "http", "verify_json")
 GREEN_TIERS = ("proven", "promoted")
 
 _DDL = """
@@ -147,8 +149,35 @@ def require_proven(proof_id: str) -> None:
         raise ProofBlocked(f"{proof_id} is {tier} — unproven work cannot be built upon")
 
 
+def _check_verify_json(max_age_s: float = 1200) -> tuple[str, str]:
+    """Truth for ``infra.verify.gate``: recent green ``verify.json``, not launchd presence."""
+    path = runtime.RUN_DIR / "verify.json"
+    if not path.is_file():
+        return "fail", "verify.json missing"
+    try:
+        data = json.loads(path.read_text())
+    except (OSError, ValueError) as exc:
+        return "fail", f"verify.json unreadable: {exc}"
+    ts = data.get("ts")
+    if not isinstance(ts, (int, float)):
+        return "fail", "verify.json missing ts"
+    age_s = time.time() - ts
+    if age_s > max_age_s:
+        return "fail", f"verify.json stale ({int(age_s)}s > {int(max_age_s)}s)"
+    state = data.get("state")
+    ok = data.get("ok")
+    if state == "red" or ok is False:
+        return "fail", f"verify.json red (state={state!r} ok={ok!r})"
+    if state == "green" and ok is True:
+        return "pass", f"verify.json green ({int(age_s)}s old)"
+    return "fail", f"verify.json not green (state={state!r} ok={ok!r})"
+
+
 def _run_one(kind: str, cmd: str, timeout: float = 120) -> tuple[str, str]:
     try:
+        if kind == "verify_json":
+            max_age = float(cmd.strip()) if cmd.strip() else 1200
+            return _check_verify_json(max_age)
         if kind == "pytest":
             p = subprocess.run([sys.executable, "-m", "pytest", *cmd.split(), "-q"],
                                capture_output=True, text=True, timeout=timeout, cwd=_REPO)

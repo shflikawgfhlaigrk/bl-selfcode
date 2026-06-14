@@ -122,6 +122,18 @@ def test_post_falsy_transport_result_is_false():
                         http_post=lambda url, payload: False) is False
 
 
+def test_post_skips_mock_webhook_without_failure_record():
+    store = FakeFailureStore()
+    failures.set_store(store)
+
+    def should_not_run(url, payload):
+        raise AssertionError("mock webhook must not hit transport")
+
+    ok = discord.post("https://example.com/mock_webhook_123", "hi", http_post=should_not_run)
+    assert ok is False
+    assert store.rows == []
+
+
 # --- creds + invite resolution ----------------------------------------------------
 def test_env_token_fills_in_when_file_is_missing(tmp_path, monkeypatch):
     monkeypatch.setattr(discord, "SECRET", tmp_path / "absent.json")

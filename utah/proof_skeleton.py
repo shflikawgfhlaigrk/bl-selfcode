@@ -94,7 +94,8 @@ _SKELETON = [
       freshness_sla="10 minutes",
       proof_kind="shell", proof_cmd="launchctl list com.utah.operator >/dev/null"),
     P(id="infra.verify.gate", claim="verify gate runs", system="infra", artifact="ops/verify.py",
-      proof_kind="shell", proof_cmd="launchctl list com.utah.verify >/dev/null"),
+      freshness_sla="20 minutes",
+      proof_kind="verify_json", proof_cmd="1200"),
     # --- Comms ---
     P(id="comms.brief.sends", claim="morning brief sends", system="comms", artifact="utah/product/brief.py",
       freshness_sla="26 hours",

@@ -1,22 +1,42 @@
 {
-  "generated": "2026-06-13",
-  "repo": "/Users/michaelbarber/Desktop/ProjectUtah",
+  "generated": "2026-06-14",
+  "repo": "/Users/michaelbarber/ProjectUtah",
   "rubric": "RUBRIC-V2-STRICT + v1 fallback + heuristic caps",
   "counts": {
-    "total": 507,
+    "total": 544,
     "by_letter": {
-      "A": 48,
-      "B": 306,
-      "C": 146,
-      "D": 7,
-      "F": 0,
+      "A": 0,
+      "B": 329,
+      "C": 209,
+      "D": 4,
+      "F": 2,
       "?": 0
     },
-    "below_60": 7,
-    "with_cap": 10,
-    "heuristic_only": 248
+    "below_60": 6,
+    "with_cap": 8,
+    "heuristic_only": 544
   },
   "files": [
+    {
+      "path": "tests/test_proof_scheduled.py",
+      "score": 35,
+      "letter": "F",
+      "cap": "fake_test",
+      "failure": "Few/no assertions \u2014 verify manually",
+      "source": "heuristic",
+      "tag": "#grade/F",
+      "dims": null
+    },
+    {
+      "path": "tests/test_proof_schema.py",
+      "score": 35,
+      "letter": "F",
+      "cap": "fake_test",
+      "failure": "Few/no assertions \u2014 verify manually",
+      "source": "heuristic",
+      "tag": "#grade/F",
+      "dims": null
+    },
     {
       "path": "tests/test_memory_init.py",
       "score": 40,
@@ -28,64 +48,44 @@
       "dims": null
     },
     {
-      "path": "utah/operator.py",
-      "score": 45,
+      "path": "tests/test_recall_eval.py",
+      "score": 40,
       "letter": "D",
-      "cap": "dishonest-signal/45",
-      "failure": "line 227: `ok=True` when mail is gated (dead integration passes health check). Dishonest-signal cap 45.",
-      "source": "v2-core",
+      "cap": "eval_exec",
+      "failure": "eval_exec",
+      "source": "heuristic",
       "tag": "#grade/D",
-      "dims": "55/50/52/55/58/40"
+      "dims": null
     },
     {
-      "path": "utah/courier.py",
-      "score": 55,
+      "path": "utah/proof.py",
+      "score": 40,
       "letter": "D",
-      "cap": "orphan/55",
-      "failure": "Only imported in tests; not wired to any live handler. Orphan cap 55.",
-      "source": "v2-core",
+      "cap": "shell_true",
+      "failure": "shell_true; no_timeout",
+      "source": "heuristic",
       "tag": "#grade/D",
-      "dims": "60/58/65/62/65/40"
+      "dims": null
     },
     {
-      "path": "utah/introspect.py",
-      "score": 55,
+      "path": "tests/test_supervisor.py",
+      "score": 58,
       "letter": "D",
-      "cap": "orphan/55",
-      "failure": "Only imported in tests; capability list not consumed live. Orphan cap 55.",
-      "source": "v2-core",
+      "cap": "swallowed_exception",
+      "failure": "swallowed_exception",
+      "source": "heuristic",
       "tag": "#grade/D",
-      "dims": "60/58/65/62/65/40"
+      "dims": null
     },
     {
-      "path": "utah/operator_app.py",
-      "score": 55,
-      "letter": "D",
-      "cap": "orphan+hardcoded-path/55",
-      "failure": "Orphan (no live caller); hardcoded `/Users/michaelbarber/Desktop/ProjectUtah` lines 9 and 131. Cap 55 (orphan) wins over cap 62 (hardcoded path).",
-      "source": "v2-core",
-      "tag": "#grade/D",
-      "dims": "58/55/58/55/58/40"
-    },
-    {
-      "path": "utah/permissions.py",
-      "score": 55,
-      "letter": "D",
-      "cap": "orphan/55",
-      "failure": "Called only from `operator_app.py` (itself orphan); no live import chain. Orphan cap 55.",
-      "source": "v2-core",
-      "tag": "#grade/D",
-      "dims": "58/55/58/55/58/40"
-    },
-    {
-      "path": "utah/product/news.py",
-      "score": 55,
-      "letter": "D",
-      "cap": "orphan/55",
-      "failure": "Only imported in tests; thin wrapper not wired live. Orphan cap 55.",
-      "source": "v2-core",
-      "tag": "#grade/D",
-      "dims": "60/58/65/62/65/40"
+      "path": "tests/test_canary.py",
+      "score": 62,
+      "letter": "C",
+      "cap": "hardcoded_path",
+      "failure": "hardcoded_path",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
     },
     {
       "path": "tests/test_operator_app.py",
@@ -98,324 +98,224 @@
       "dims": null
     },
     {
-      "path": "utah/product/tasks.py",
-      "score": 62,
-      "letter": "C",
-      "cap": "timeout/62",
-      "failure": "`_conn()` calls `psycopg.connect()` without `connect_timeout`; no pool. Cap 68 \u2192 62 (hardcoded-path cap doesn't apply; timeout cap 68 applies but score was 62; min wins = 62).",
-      "source": "v2-core",
-      "tag": "#grade/C",
-      "dims": "65/58/68/62/68/52"
-    },
-    {
-      "path": "utah/store/olap.py",
-      "score": 62,
-      "letter": "C",
-      "cap": "timeout/62",
-      "failure": "DuckDB `connect()` and `query()` have no timeout; `con.execute(sql)` on user-supplied SQL could block. No connect_timeout parameter available on DuckDB in-memory. Cap 68 applies \u2192 score 62.",
-      "source": "v2-core",
-      "tag": "#grade/C",
-      "dims": "65/58/68/62/68/50"
-    },
-    {
-      "path": "ops/export_leads.sh",
-      "score": 65,
-      "letter": "C",
-      "cap": null,
-      "failure": "No timeout on psql; minimal error handling",
-      "source": "v2-core",
-      "tag": "#grade/C",
-      "dims": "68/62/70/65/65/50"
-    },
-    {
-      "path": "ops/google_oauth_setup.py",
-      "score": 65,
-      "letter": "C",
-      "cap": null,
-      "failure": "Setup script; poor error isolation; no tests",
-      "source": "v2-core",
-      "tag": "#grade/C",
-      "dims": "68/60/72/65/68/48"
-    },
-    {
-      "path": "ops/export_leads_xlsx.py",
-      "score": 66,
-      "letter": "C",
-      "cap": null,
-      "failure": "No DB connect timeout; no tests",
-      "source": "v2-core",
-      "tag": "#grade/C",
-      "dims": "70/62/72/65/68/52"
-    },
-    {
-      "path": "migrations/ace_knowledge.py",
+      "path": "ops/render_30s_reel.py",
       "score": 68,
       "letter": "C",
       "cap": null,
-      "failure": "Migration logic; no timeout on DB calls in migration runner",
-      "source": "v2-core",
+      "failure": "no_timeout",
+      "source": "heuristic",
       "tag": "#grade/C",
-      "dims": "72/65/75/68/72/55"
+      "dims": null
     },
     {
-      "path": "ops/cleanup-boundaries.sh",
+      "path": "ops/verify.py",
       "score": 68,
       "letter": "C",
       "cap": null,
-      "failure": "Ops cleanup; no assertions",
-      "source": "v2-core",
+      "failure": "no_timeout",
+      "source": "heuristic",
       "tag": "#grade/C",
-      "dims": "70/65/70/70/68/50"
+      "dims": null
     },
     {
-      "path": "ops/verify_stack.sh",
+      "path": "utah/auth_repair.py",
       "score": 68,
       "letter": "C",
       "cap": null,
-      "failure": "Useful but no assertions; grep without quoting",
-      "source": "v2-core",
+      "failure": "no_timeout",
+      "source": "heuristic",
       "tag": "#grade/C",
-      "dims": "72/65/70/68/70/50"
+      "dims": null
     },
     {
-      "path": "utah/codebase.py",
+      "path": "utah/core.py",
       "score": 68,
       "letter": "C",
       "cap": null,
-      "failure": "Light; no tests visible",
-      "source": "v2-core",
+      "failure": "oversize_650",
+      "source": "heuristic",
       "tag": "#grade/C",
-      "dims": "70/65/72/68/70/55"
+      "dims": null
     },
     {
-      "path": "utah/connectivity.py",
+      "path": "utah/daemon/cli.py",
       "score": 68,
       "letter": "C",
       "cap": null,
-      "failure": "Probe; acceptable",
-      "source": "v2-core",
+      "failure": "no_timeout",
+      "source": "heuristic",
       "tag": "#grade/C",
-      "dims": "70/65/72/68/70/55"
+      "dims": null
     },
     {
-      "path": "utah/integrations/calendar.py",
+      "path": "utah/daemon/supervisor.py",
       "score": 68,
       "letter": "C",
       "cap": null,
-      "failure": "AppleScript calendar; light",
-      "source": "v2-core",
+      "failure": "no_timeout",
+      "source": "heuristic",
       "tag": "#grade/C",
-      "dims": "70/65/72/68/70/55"
+      "dims": null
     },
     {
-      "path": "utah/integrations/contacts.py",
+      "path": "utah/fm_local.py",
       "score": 68,
       "letter": "C",
       "cap": null,
-      "failure": "AppleScript contacts; light",
-      "source": "v2-core",
+      "failure": "no_timeout",
+      "source": "heuristic",
       "tag": "#grade/C",
-      "dims": "70/65/72/68/70/55"
+      "dims": null
     },
     {
-      "path": "utah/integrations/external.py",
+      "path": "utah/integrations/browser.py",
       "score": 68,
       "letter": "C",
       "cap": null,
-      "failure": "External ops; light",
-      "source": "v2-core",
+      "failure": "no_timeout",
+      "source": "heuristic",
       "tag": "#grade/C",
-      "dims": "70/65/72/68/70/55"
-    },
-    {
-      "path": "utah/integrations/imessage.py",
-      "score": 68,
-      "letter": "C",
-      "cap": null,
-      "failure": "iMessage AppleScript; rate-limited",
-      "source": "v2-core",
-      "tag": "#grade/C",
-      "dims": "70/65/72/68/70/55"
-    },
-    {
-      "path": "utah/integrations/maps.py",
-      "score": 68,
-      "letter": "C",
-      "cap": null,
-      "failure": "Maps geocoding; no timeout concern",
-      "source": "v2-core",
-      "tag": "#grade/C",
-      "dims": "70/65/72/68/70/55"
+      "dims": null
     },
     {
       "path": "utah/integrations/notes.py",
       "score": 68,
       "letter": "C",
       "cap": null,
-      "failure": "AppleScript notes; light",
-      "source": "v2-core",
+      "failure": "no_timeout",
+      "source": "heuristic",
       "tag": "#grade/C",
-      "dims": "70/65/72/68/70/55"
+      "dims": null
     },
     {
-      "path": "utah/mail_replies.py",
+      "path": "utah/integrations/notify.py",
       "score": 68,
       "letter": "C",
       "cap": null,
-      "failure": "Reply parsing; light",
-      "source": "v2-core",
+      "failure": "no_timeout",
+      "source": "heuristic",
       "tag": "#grade/C",
-      "dims": "70/65/72/68/70/55"
+      "dims": null
+    },
+    {
+      "path": "utah/integrations/wc_feed.py",
+      "score": 68,
+      "letter": "C",
+      "cap": null,
+      "failure": "oversize_650; no_timeout",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/interface/static/live.html",
+      "score": 68,
+      "letter": "C",
+      "cap": null,
+      "failure": "oversize_650",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/interface/web.py",
+      "score": 68,
+      "letter": "C",
+      "cap": null,
+      "failure": "oversize_650",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/operator_app.py",
+      "score": 68,
+      "letter": "C",
+      "cap": null,
+      "failure": "no_timeout",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
     },
     {
       "path": "utah/product/console.py",
       "score": 68,
       "letter": "C",
       "cap": null,
-      "failure": "Console; light",
-      "source": "v2-core",
+      "failure": "no_timeout",
+      "source": "heuristic",
       "tag": "#grade/C",
-      "dims": "70/65/72/68/70/55"
+      "dims": null
+    },
+    {
+      "path": "utah/product/leads.py",
+      "score": 68,
+      "letter": "C",
+      "cap": null,
+      "failure": "oversize_650",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/product/ledger.py",
+      "score": 68,
+      "letter": "C",
+      "cap": null,
+      "failure": "oversize_650",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
     },
     {
       "path": "utah/product/selfcode_web.py",
       "score": 68,
       "letter": "C",
       "cap": null,
-      "failure": "Self-code web UI; light",
-      "source": "v2-core",
+      "failure": "no_timeout",
+      "source": "heuristic",
       "tag": "#grade/C",
-      "dims": "70/65/72/68/70/55"
+      "dims": null
     },
     {
-      "path": "utah/product/timers.py",
+      "path": "utah/sica_overseer.py",
       "score": 68,
       "letter": "C",
       "cap": null,
-      "failure": "Timer capability; light",
-      "source": "v2-core",
+      "failure": "no_timeout",
+      "source": "heuristic",
       "tag": "#grade/C",
-      "dims": "70/65/72/68/70/55"
+      "dims": null
     },
     {
-      "path": "utah/product/trackers.py",
+      "path": "utah/voice/loop.py",
       "score": 68,
       "letter": "C",
       "cap": null,
-      "failure": "Tracker; light",
-      "source": "v2-core",
+      "failure": "oversize_650; no_timeout",
+      "source": "heuristic",
       "tag": "#grade/C",
-      "dims": "70/65/72/68/70/55"
+      "dims": null
     },
     {
-      "path": "utah/product/trade_lore.py",
+      "path": "utah/voice/macapp.py",
       "score": 68,
       "letter": "C",
       "cap": null,
-      "failure": "Trade lore; static data",
-      "source": "v2-core",
+      "failure": "no_timeout",
+      "source": "heuristic",
       "tag": "#grade/C",
-      "dims": "70/65/72/68/70/55"
+      "dims": null
     },
     {
-      "path": "utah/win.py",
+      "path": "utah/voice/stt.py",
       "score": 68,
       "letter": "C",
       "cap": null,
-      "failure": "WIN data; light",
-      "source": "v2-core",
+      "failure": "no_timeout",
+      "source": "heuristic",
       "tag": "#grade/C",
-      "dims": "70/65/72/68/70/55"
-    },
-    {
-      "path": "ops/verify.py",
-      "score": 70,
-      "letter": "C",
-      "cap": null,
-      "failure": "Verification probe; acceptable",
-      "source": "v2-core",
-      "tag": "#grade/C",
-      "dims": "72/68/75/70/72/58"
-    },
-    {
-      "path": "tests/__init__.py",
-      "score": 70,
-      "letter": "C",
-      "cap": null,
-      "failure": "Empty file; boilerplate. Score reflects minimal content.",
-      "source": "v2-tests",
-      "tag": "#grade/C",
-      "dims": "70/70/70/80/80/70"
-    },
-    {
-      "path": "utah/advisory.py",
-      "score": 70,
-      "letter": "C",
-      "cap": null,
-      "failure": "Light wrapper; no tests found",
-      "source": "v2-core",
-      "tag": "#grade/C",
-      "dims": "72/68/75/70/72/58"
-    },
-    {
-      "path": "utah/integrations/browser.py",
-      "score": 70,
-      "letter": "C",
-      "cap": null,
-      "failure": "Headless Chrome; acceptable",
-      "source": "v2-core",
-      "tag": "#grade/C",
-      "dims": "72/68/72/70/72/60"
-    },
-    {
-      "path": "utah/integrations/discord_feed.py",
-      "score": 70,
-      "letter": "C",
-      "cap": null,
-      "failure": "Feed bridge; acceptable",
-      "source": "v2-core",
-      "tag": "#grade/C",
-      "dims": "72/68/74/70/72/60"
-    },
-    {
-      "path": "utah/knowledge/douglas.py",
-      "score": 70,
-      "letter": "C",
-      "cap": null,
-      "failure": "Knowledge corpus; acceptable",
-      "source": "v2-core",
-      "tag": "#grade/C",
-      "dims": "72/68/74/70/72/60"
-    },
-    {
-      "path": "utah/profile.py",
-      "score": 70,
-      "letter": "C",
-      "cap": null,
-      "failure": "Profile store; light",
-      "source": "v2-core",
-      "tag": "#grade/C",
-      "dims": "72/68/74/70/72/60"
-    },
-    {
-      "path": "utah/secrets_sync.py",
-      "score": 70,
-      "letter": "C",
-      "cap": null,
-      "failure": "Secrets sync; acceptable",
-      "source": "v2-core",
-      "tag": "#grade/C",
-      "dims": "72/68/74/70/72/60"
-    },
-    {
-      "path": "utah/attribution.py",
-      "score": 71,
-      "letter": "C",
-      "cap": null,
-      "failure": "Audit trail; acceptable",
-      "source": "v2-core",
-      "tag": "#grade/C",
-      "dims": "74/68/75/70/72/60"
+      "dims": null
     },
     {
       "path": "app/bin/proof.dart",
@@ -459,6 +359,16 @@
     },
     {
       "path": "app/ios/Runner.xcodeproj/project.xcworkspace/xcshareddata/IDEWorkspaceChecks.plist",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "app/ios/Runner.xcodeproj/xcuserdata/michaelbarber.xcuserdatad/xcschemes/xcschememanagement.plist",
       "score": 72,
       "letter": "C",
       "cap": null,
@@ -568,34 +478,114 @@
       "dims": null
     },
     {
+      "path": "app/web/index.html",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
       "path": "migrations/__init__.py",
       "score": 72,
       "letter": "C",
       "cap": null,
-      "failure": "Trivial init; no real content",
-      "source": "v2-core",
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
       "tag": "#grade/C",
-      "dims": "75/70/75/75/70/60"
+      "dims": null
+    },
+    {
+      "path": "migrations/ace_knowledge.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
     },
     {
       "path": "ops/bin/utah_pg.sh",
       "score": 72,
       "letter": "C",
       "cap": null,
-      "failure": "Shell wrapper; basic, no tests",
-      "source": "v2-core",
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
       "tag": "#grade/C",
-      "dims": "75/70/75/72/70/60"
+      "dims": null
     },
     {
       "path": "ops/bin/utah_tailserve.sh",
       "score": 72,
       "letter": "C",
       "cap": null,
-      "failure": "Shell wrapper",
-      "source": "v2-core",
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
       "tag": "#grade/C",
-      "dims": "75/70/75/72/70/60"
+      "dims": null
+    },
+    {
+      "path": "ops/cleanup-boundaries.sh",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "ops/drill.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "ops/export_leads.sh",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "ops/export_leads_xlsx.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "ops/foundation_check.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "ops/google_oauth_setup.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
     },
     {
       "path": "ops/launchd/com.utah.brief.plist",
@@ -778,6 +768,16 @@
       "dims": null
     },
     {
+      "path": "ops/launchd/com.utah.proof.plist",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
       "path": "ops/launchd/com.utah.replies.plist",
       "score": 72,
       "letter": "C",
@@ -858,14 +858,24 @@
       "dims": null
     },
     {
-      "path": "tests/test_introspect.py",
+      "path": "ops/verify_stack.sh",
       "score": 72,
       "letter": "C",
       "cap": null,
-      "failure": "2 tests; self_model from injected state, daemon_down. Genuinely narrow \u2014 only 2 scenarios, no edge cases beyond down.",
-      "source": "v2-tests",
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
       "tag": "#grade/C",
-      "dims": "74/70/72/72/74/72"
+      "dims": null
+    },
+    {
+      "path": "utah/__init__.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
     },
     {
       "path": "utah/_probe_marker.py",
@@ -888,84 +898,414 @@
       "dims": null
     },
     {
-      "path": "utah/auth_repair.py",
+      "path": "utah/advisory.py",
       "score": 72,
       "letter": "C",
       "cap": null,
-      "failure": "Chrome repair correct; cooldown guard good; bare `except: BLE001` on several paths",
-      "source": "v2-core",
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
       "tag": "#grade/C",
-      "dims": "74/70/75/70/74/62"
+      "dims": null
     },
     {
-      "path": "utah/daemon/cli.py",
+      "path": "utah/agents.py",
       "score": 72,
       "letter": "C",
       "cap": null,
-      "failure": "CLI; acceptable",
-      "source": "v2-core",
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
       "tag": "#grade/C",
-      "dims": "75/70/75/72/74/62"
+      "dims": null
+    },
+    {
+      "path": "utah/alerts.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/attribution.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/canary.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/codebase.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/connectivity.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/consolidate.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/courier.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/daemon/bus.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/daemon/client.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/daemon/codec.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/daemon/daemon.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
     },
     {
       "path": "utah/daemon/data_client.py",
       "score": 72,
       "letter": "C",
       "cap": null,
-      "failure": "Binary data plane; acceptable",
-      "source": "v2-core",
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
       "tag": "#grade/C",
-      "dims": "74/70/74/72/74/62"
+      "dims": null
+    },
+    {
+      "path": "utah/daemon/data_server.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/daemon/dispatch.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/daemon/frame.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
     },
     {
       "path": "utah/daemon/handlers/__init__.py",
       "score": 72,
       "letter": "C",
       "cap": null,
-      "failure": "Registry wiring",
-      "source": "v2-core",
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
       "tag": "#grade/C",
-      "dims": "75/70/74/72/74/62"
+      "dims": null
+    },
+    {
+      "path": "utah/daemon/handlers/core_handlers.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
     },
     {
       "path": "utah/daemon/handlers/panels.py",
       "score": 72,
       "letter": "C",
       "cap": null,
-      "failure": "Panel reads; acceptable",
-      "source": "v2-core",
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
       "tag": "#grade/C",
-      "dims": "74/70/74/72/74/62"
+      "dims": null
+    },
+    {
+      "path": "utah/daemon/pool.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/daemon/rpc.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/daemon/runtime.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/daemon/server.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/db_pool.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/drift.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/embed.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
     },
     {
       "path": "utah/entities.py",
       "score": 72,
       "letter": "C",
       "cap": null,
-      "failure": "Entity normalization; pure",
-      "source": "v2-core",
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
       "tag": "#grade/C",
-      "dims": "74/70/74/72/74/62"
+      "dims": null
+    },
+    {
+      "path": "utah/failures.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/foundation.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
     },
     {
       "path": "utah/integrations/__init__.py",
       "score": 72,
       "letter": "C",
       "cap": null,
-      "failure": "Trivial",
-      "source": "v2-core",
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
       "tag": "#grade/C",
-      "dims": "75/70/74/72/74/62"
+      "dims": null
+    },
+    {
+      "path": "utah/integrations/calendar.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/integrations/contacts.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
     },
     {
       "path": "utah/integrations/discord.py",
       "score": 72,
       "letter": "C",
       "cap": null,
-      "failure": "Discord webhook; acceptable",
-      "source": "v2-core",
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
       "tag": "#grade/C",
-      "dims": "74/70/75/72/74/62"
+      "dims": null
+    },
+    {
+      "path": "utah/integrations/discord_feed.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/integrations/external.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/integrations/imessage.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/integrations/macos.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/integrations/maps.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/integrations/oauth.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/integrations/pushover.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
     },
     {
       "path": "utah/integrations/social_post.py",
@@ -982,20 +1322,10 @@
       "score": 72,
       "letter": "C",
       "cap": null,
-      "failure": "Trivial",
-      "source": "v2-core",
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
       "tag": "#grade/C",
-      "dims": "75/70/74/72/74/62"
-    },
-    {
-      "path": "utah/interface/static/live.html",
-      "score": 72,
-      "letter": "C",
-      "cap": null,
-      "failure": "Deck HTML; no test coverage",
-      "source": "v2-core",
-      "tag": "#grade/C",
-      "dims": "72/70/72/72/70/60"
+      "dims": null
     },
     {
       "path": "utah/interface/static/route.html",
@@ -1018,47 +1348,297 @@
       "dims": null
     },
     {
+      "path": "utah/interface/static/truth.html",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/introspect.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
       "path": "utah/knowledge/__init__.py",
       "score": 72,
       "letter": "C",
       "cap": null,
-      "failure": "Trivial",
-      "source": "v2-core",
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
       "tag": "#grade/C",
-      "dims": "75/70/74/72/74/62"
+      "dims": null
+    },
+    {
+      "path": "utah/knowledge/douglas.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/local.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/local_brain.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/mail.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/mail_capacity.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/mail_replies.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/maintenance.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/memory/__init__.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
     },
     {
       "path": "utah/memory/eval.py",
       "score": 72,
       "letter": "C",
       "cap": null,
-      "failure": "Eval helpers; acceptable",
-      "source": "v2-core",
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
       "tag": "#grade/C",
-      "dims": "74/70/74/72/74/62"
+      "dims": null
+    },
+    {
+      "path": "utah/memory/exceptions.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/memory/logic.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/memory/pipeline.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/memory/store.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/memory/types.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/objects.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/operator.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/permissions.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
     },
     {
       "path": "utah/product/__init__.py",
       "score": 72,
       "letter": "C",
       "cap": null,
-      "failure": "Trivial",
-      "source": "v2-core",
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
       "tag": "#grade/C",
-      "dims": "75/70/74/72/74/62"
+      "dims": null
+    },
+    {
+      "path": "utah/product/backtest.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/product/brief.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
     },
     {
       "path": "utah/product/clock.py",
       "score": 72,
       "letter": "C",
       "cap": null,
-      "failure": "Time/date capability; simple",
-      "source": "v2-core",
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
       "tag": "#grade/C",
-      "dims": "74/70/74/72/74/62"
+      "dims": null
     },
     {
       "path": "utah/product/engine_audit.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/product/engine_status.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/product/enrich.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/product/fire_grader.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/product/jobs_status.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/product/leads_eval.py",
       "score": 72,
       "letter": "C",
       "cap": null,
@@ -1092,13 +1672,43 @@
       "score": 72,
       "letter": "C",
       "cap": null,
-      "failure": "Gated; IG Graph API real; other channels raise honestly",
-      "source": "v2-core",
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
       "tag": "#grade/C",
-      "dims": "74/70/74/72/74/62"
+      "dims": null
+    },
+    {
+      "path": "utah/product/news.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/product/outreach.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
     },
     {
       "path": "utah/product/pipeline.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/product/probate.py",
       "score": 72,
       "letter": "C",
       "cap": null,
@@ -1122,13 +1732,43 @@
       "score": 72,
       "letter": "C",
       "cap": null,
-      "failure": "Direct mail last-mile; honest gate; never fakes",
-      "source": "v2-core",
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
       "tag": "#grade/C",
-      "dims": "74/70/74/72/74/62"
+      "dims": null
+    },
+    {
+      "path": "utah/product/property.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/product/reel_queue.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
     },
     {
       "path": "utah/product/research_signal.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/product/researcher.py",
       "score": 72,
       "letter": "C",
       "cap": null,
@@ -1158,7 +1798,157 @@
       "dims": null
     },
     {
+      "path": "utah/product/sitegen.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/product/tasks.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/product/timers.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/product/trackers.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
       "path": "utah/product/trade_alert.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/product/trade_lore.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/product/trading.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/product/weather.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/profile.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/proof_skeleton.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/rerank.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/revenue_heal.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/router.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/secrets_sync.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/sica.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/sica_autonomy.py",
       "score": 72,
       "letter": "C",
       "cap": null,
@@ -1172,13 +1962,53 @@
       "score": 72,
       "letter": "C",
       "cap": null,
-      "failure": "Task discovery; acceptable",
-      "source": "v2-core",
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
       "tag": "#grade/C",
-      "dims": "74/70/74/72/74/62"
+      "dims": null
+    },
+    {
+      "path": "utah/sica_goals.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/sica_loop.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
     },
     {
       "path": "utah/sica_selfaudit.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/sms.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/social.py",
       "score": 72,
       "letter": "C",
       "cap": null,
@@ -1192,30 +2022,40 @@
       "score": 72,
       "letter": "C",
       "cap": null,
-      "failure": "Store init; trivial",
-      "source": "v2-core",
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
       "tag": "#grade/C",
-      "dims": "75/70/74/72/74/62"
+      "dims": null
+    },
+    {
+      "path": "utah/store/olap.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
     },
     {
       "path": "utah/voice/__init__.py",
       "score": 72,
       "letter": "C",
       "cap": null,
-      "failure": "Trivial",
-      "source": "v2-core",
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
       "tag": "#grade/C",
-      "dims": "75/70/74/72/74/62"
+      "dims": null
     },
     {
       "path": "utah/voice/agent.py",
       "score": 72,
       "letter": "C",
       "cap": null,
-      "failure": "Voice agent; acceptable",
-      "source": "v2-core",
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
       "tag": "#grade/C",
-      "dims": "74/70/74/72/74/62"
+      "dims": null
     },
     {
       "path": "utah/voice/barge.py",
@@ -1238,757 +2078,137 @@
       "dims": null
     },
     {
+      "path": "utah/voice/liveness.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
       "path": "utah/voice/oww.py",
       "score": 72,
       "letter": "C",
       "cap": null,
-      "failure": "openWakeWord wrapper; acceptable",
-      "source": "v2-core",
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
       "tag": "#grade/C",
-      "dims": "74/70/74/72/74/62"
+      "dims": null
     },
     {
       "path": "utah/voice/state.py",
       "score": 72,
       "letter": "C",
       "cap": null,
-      "failure": "Voice state; simple",
-      "source": "v2-core",
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
       "tag": "#grade/C",
-      "dims": "74/70/74/72/74/62"
+      "dims": null
+    },
+    {
+      "path": "utah/voice/stt_worker.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
     },
     {
       "path": "utah/voice/tts.py",
       "score": 72,
       "letter": "C",
       "cap": null,
-      "failure": "Piper TTS; acceptable",
-      "source": "v2-core",
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
       "tag": "#grade/C",
-      "dims": "74/70/74/72/74/62"
+      "dims": null
     },
     {
       "path": "utah/voice/vad.py",
       "score": 72,
       "letter": "C",
       "cap": null,
-      "failure": "Silero VAD; acceptable",
-      "source": "v2-core",
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
       "tag": "#grade/C",
-      "dims": "74/70/74/72/74/62"
-    },
-    {
-      "path": "tests/test_marketer_publish.py",
-      "score": 74,
-      "letter": "C",
-      "cap": null,
-      "failure": "3 tests; unimplemented channel raises, gates without creds, publishes with injected publisher. Very narrow.",
-      "source": "v2-tests",
-      "tag": "#grade/C",
-      "dims": "75/73/74/74/75/74"
-    },
-    {
-      "path": "utah/alerts.py",
-      "score": 74,
-      "letter": "C",
-      "cap": null,
-      "failure": "File-backed dedup solid; thread-safe; quiet hours logic correct",
-      "source": "v2-core",
-      "tag": "#grade/C",
-      "dims": "78/72/75/72/76/68"
-    },
-    {
-      "path": "utah/consolidate.py",
-      "score": 74,
-      "letter": "C",
-      "cap": null,
-      "failure": "Consolidation logic; solid",
-      "source": "v2-core",
-      "tag": "#grade/C",
-      "dims": "76/72/75/72/75/68"
-    },
-    {
-      "path": "utah/daemon/data_server.py",
-      "score": 74,
-      "letter": "C",
-      "cap": null,
-      "failure": "Binary server; clean",
-      "source": "v2-core",
-      "tag": "#grade/C",
-      "dims": "76/72/75/72/76/66"
-    },
-    {
-      "path": "utah/daemon/frame.py",
-      "score": 74,
-      "letter": "C",
-      "cap": null,
-      "failure": "Frame encode/decode; solid",
-      "source": "v2-core",
-      "tag": "#grade/C",
-      "dims": "78/72/76/72/76/64"
-    },
-    {
-      "path": "utah/daemon/supervisor.py",
-      "score": 74,
-      "letter": "C",
-      "cap": null,
-      "failure": "Supervisor logic; acceptable",
-      "source": "v2-core",
-      "tag": "#grade/C",
-      "dims": "76/72/75/72/76/66"
-    },
-    {
-      "path": "utah/embed.py",
-      "score": 74,
-      "letter": "C",
-      "cap": null,
-      "failure": "Embedding wrapper; acceptable",
-      "source": "v2-core",
-      "tag": "#grade/C",
-      "dims": "76/72/75/72/76/66"
-    },
-    {
-      "path": "utah/integrations/macos.py",
-      "score": 74,
-      "letter": "C",
-      "cap": null,
-      "failure": "Gated correctly; injectable; perms check",
-      "source": "v2-core",
-      "tag": "#grade/C",
-      "dims": "76/72/76/74/76/66"
-    },
-    {
-      "path": "utah/integrations/notify.py",
-      "score": 74,
-      "letter": "C",
-      "cap": null,
-      "failure": "Gated; injectable; AppleScript string escaping fix documented",
-      "source": "v2-core",
-      "tag": "#grade/C",
-      "dims": "76/72/76/74/76/66"
-    },
-    {
-      "path": "utah/integrations/oauth.py",
-      "score": 74,
-      "letter": "C",
-      "cap": null,
-      "failure": "Keychain read/write; refresh logic; stdlib only",
-      "source": "v2-core",
-      "tag": "#grade/C",
-      "dims": "76/72/76/74/76/66"
-    },
-    {
-      "path": "utah/integrations/wc_feed.py",
-      "score": 74,
-      "letter": "C",
-      "cap": null,
-      "failure": "CDP bridge; bar aggregation; rate concern on no-timeout CDP JSON calls minor",
-      "source": "v2-core",
-      "tag": "#grade/C",
-      "dims": "76/72/76/74/76/66"
-    },
-    {
-      "path": "utah/maintenance.py",
-      "score": 74,
-      "letter": "C",
-      "cap": null,
-      "failure": "Consolidation wrapper; documents failures; never raises",
-      "source": "v2-core",
-      "tag": "#grade/C",
-      "dims": "76/72/76/74/76/66"
-    },
-    {
-      "path": "utah/memory/exceptions.py",
-      "score": 74,
-      "letter": "C",
-      "cap": null,
-      "failure": "Custom exceptions; clean",
-      "source": "v2-core",
-      "tag": "#grade/C",
-      "dims": "76/72/76/74/76/66"
-    },
-    {
-      "path": "utah/product/brief.py",
-      "score": 74,
-      "letter": "C",
-      "cap": null,
-      "failure": "Grounded from live state; compose is pure; gated send; injectable",
-      "source": "v2-core",
-      "tag": "#grade/C",
-      "dims": "76/72/76/74/76/66"
-    },
-    {
-      "path": "utah/product/enrich.py",
-      "score": 74,
-      "letter": "C",
-      "cap": null,
-      "failure": "Email enrichment; junk filters solid; domain resolve check",
-      "source": "v2-core",
-      "tag": "#grade/C",
-      "dims": "76/72/76/74/76/66"
-    },
-    {
-      "path": "utah/product/leads_eval.py",
-      "score": 74,
-      "letter": "C",
-      "cap": null,
-      "failure": "Self-measuring precision; injectable; honest false-positive handling",
-      "source": "v2-core",
-      "tag": "#grade/C",
-      "dims": "76/72/76/74/76/66"
-    },
-    {
-      "path": "utah/product/property.py",
-      "score": 74,
-      "letter": "C",
-      "cap": null,
-      "failure": "Tiered/gated resolver; honest coverage gap; ArcGIS; no timeout on urlopen \u2014 minor",
-      "source": "v2-core",
-      "tag": "#grade/C",
-      "dims": "76/72/76/74/76/66"
-    },
-    {
-      "path": "utah/product/trading.py",
-      "score": 74,
-      "letter": "C",
-      "cap": null,
-      "failure": "Engine interface; gated on feed; cooldown; no synthetic fires enforced",
-      "source": "v2-core",
-      "tag": "#grade/C",
-      "dims": "76/72/76/74/76/66"
-    },
-    {
-      "path": "utah/product/weather.py",
-      "score": 74,
-      "letter": "C",
-      "cap": null,
-      "failure": "Free API + cache; stale-serve on error; TTL configurable",
-      "source": "v2-core",
-      "tag": "#grade/C",
-      "dims": "76/72/76/74/76/66"
-    },
-    {
-      "path": "utah/rerank.py",
-      "score": 74,
-      "letter": "C",
-      "cap": null,
-      "failure": "Cross-encoder rerank; injectable; fallback",
-      "source": "v2-core",
-      "tag": "#grade/C",
-      "dims": "76/72/76/74/76/66"
-    },
-    {
-      "path": "utah/sica_goals.py",
-      "score": 74,
-      "letter": "C",
-      "cap": null,
-      "failure": "Revenue-weighted domain rotation; defensive signal readers",
-      "source": "v2-core",
-      "tag": "#grade/C",
-      "dims": "76/72/76/74/76/66"
-    },
-    {
-      "path": "utah/sms.py",
-      "score": 74,
-      "letter": "C",
-      "cap": null,
-      "failure": "Twilio+iMessage fallback; daily cap; creds validation fixed post-incident",
-      "source": "v2-core",
-      "tag": "#grade/C",
-      "dims": "76/72/76/74/76/66"
-    },
-    {
-      "path": "utah/voice/liveness.py",
-      "score": 74,
-      "letter": "C",
-      "cap": null,
-      "failure": "MicLiveness; deaf-restart",
-      "source": "v2-core",
-      "tag": "#grade/C",
-      "dims": "76/72/76/74/76/66"
-    },
-    {
-      "path": "utah/voice/macapp.py",
-      "score": 74,
-      "letter": "C",
-      "cap": null,
-      "failure": "UtahVoice.app build; sha256 marker",
-      "source": "v2-core",
-      "tag": "#grade/C",
-      "dims": "76/72/76/74/76/66"
-    },
-    {
-      "path": "utah/voice/stt.py",
-      "score": 74,
-      "letter": "C",
-      "cap": null,
-      "failure": "STT engine abstraction; Whisper+Moonshine; no_speech guard",
-      "source": "v2-core",
-      "tag": "#grade/C",
-      "dims": "76/72/76/74/76/66"
-    },
-    {
-      "path": "utah/voice/stt_worker.py",
-      "score": 74,
-      "letter": "C",
-      "cap": null,
-      "failure": "Worker protocol; killable; per-line stdin protocol",
-      "source": "v2-core",
-      "tag": "#grade/C",
-      "dims": "76/72/76/74/76/66"
+      "dims": null
     },
     {
       "path": "utah/voice/wake.py",
-      "score": 74,
+      "score": 72,
       "letter": "C",
       "cap": null,
-      "failure": "Wake-gate; two-stage resolve",
-      "source": "v2-core",
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
       "tag": "#grade/C",
-      "dims": "76/72/76/74/76/66"
-    },
-    {
-      "path": "app/web/index.html",
-      "score": 75,
-      "letter": "B",
-      "cap": null,
-      "failure": "Static HTML landing page; no logic to test",
-      "source": "v2-core",
-      "tag": "#grade/B",
-      "dims": "75/75/75/75/75/0"
-    },
-    {
-      "path": "utah/__init__.py",
-      "score": 75,
-      "letter": "B",
-      "cap": null,
-      "failure": "Minimal; UtahError base",
-      "source": "v2-core",
-      "tag": "#grade/B",
-      "dims": "75/75/75/75/75/70"
-    },
-    {
-      "path": "utah/daemon/client.py",
-      "score": 75,
-      "letter": "B",
-      "cap": null,
-      "failure": "Sync/async call wrappers; timeout present",
-      "source": "v2-core",
-      "tag": "#grade/B",
-      "dims": "78/73/76/74/76/68"
-    },
-    {
-      "path": "ops/foundation_check.py",
-      "score": 76,
-      "letter": "B",
-      "cap": null,
-      "failure": "Good atomic write; correct error handling; no timeout on foundation.check() call",
-      "source": "v2-core",
-      "tag": "#grade/B",
-      "dims": "80/74/78/75/76/68"
-    },
-    {
-      "path": "utah/daemon/bus.py",
-      "score": 76,
-      "letter": "B",
-      "cap": null,
-      "failure": "Good pub/sub; drop-on-slow-subscriber design correct",
-      "source": "v2-core",
-      "tag": "#grade/B",
-      "dims": "78/74/78/75/78/68"
-    },
-    {
-      "path": "utah/daemon/codec.py",
-      "score": 76,
-      "letter": "B",
-      "cap": null,
-      "failure": "Framing/encoding solid",
-      "source": "v2-core",
-      "tag": "#grade/B",
-      "dims": "80/74/78/74/78/68"
-    },
-    {
-      "path": "utah/daemon/dispatch.py",
-      "score": 76,
-      "letter": "B",
-      "cap": null,
-      "failure": "Dispatcher; clean routing",
-      "source": "v2-core",
-      "tag": "#grade/B",
-      "dims": "80/74/76/74/78/68"
-    },
-    {
-      "path": "utah/daemon/pool.py",
-      "score": 76,
-      "letter": "B",
-      "cap": null,
-      "failure": "Worker pool; bounded; correct",
-      "source": "v2-core",
-      "tag": "#grade/B",
-      "dims": "78/74/76/74/78/68"
-    },
-    {
-      "path": "utah/daemon/rpc.py",
-      "score": 76,
-      "letter": "B",
-      "cap": null,
-      "failure": "JSON-RPC error codes; clean",
-      "source": "v2-core",
-      "tag": "#grade/B",
-      "dims": "80/74/76/74/78/68"
-    },
-    {
-      "path": "utah/drift.py",
-      "score": 76,
-      "letter": "B",
-      "cap": null,
-      "failure": "Real outage-class drift checks; good variety",
-      "source": "v2-core",
-      "tag": "#grade/B",
-      "dims": "78/74/78/74/78/68"
-    },
-    {
-      "path": "utah/foundation.py",
-      "score": 76,
-      "letter": "B",
-      "cap": null,
-      "failure": "Substrate health; good",
-      "source": "v2-core",
-      "tag": "#grade/B",
-      "dims": "78/74/78/74/78/68"
-    },
-    {
-      "path": "utah/integrations/pushover.py",
-      "score": 76,
-      "letter": "B",
-      "cap": null,
-      "failure": "E2E encryption; injectable transport; clamps",
-      "source": "v2-core",
-      "tag": "#grade/B",
-      "dims": "78/74/78/74/78/68"
-    },
-    {
-      "path": "utah/interface/web.py",
-      "score": 76,
-      "letter": "B",
-      "cap": null,
-      "failure": "Starlette bridge; async; PWA injection; SSE streaming; no timeouts on some ctl.call paths minor",
-      "source": "v2-core",
-      "tag": "#grade/B",
-      "dims": "78/74/78/74/78/68"
-    },
-    {
-      "path": "utah/memory/__init__.py",
-      "score": 76,
-      "letter": "B",
-      "cap": null,
-      "failure": "Pipeline entry; schema init",
-      "source": "v2-core",
-      "tag": "#grade/B",
-      "dims": "78/74/76/74/78/68"
-    },
-    {
-      "path": "utah/memory/types.py",
-      "score": 76,
-      "letter": "B",
-      "cap": null,
-      "failure": "NamedTuples/Protocols; clean",
-      "source": "v2-core",
-      "tag": "#grade/B",
-      "dims": "78/74/76/74/78/68"
-    },
-    {
-      "path": "utah/objects.py",
-      "score": 76,
-      "letter": "B",
-      "cap": null,
-      "failure": "Domain objects; clean",
-      "source": "v2-core",
-      "tag": "#grade/B",
-      "dims": "78/74/76/74/78/68"
-    },
-    {
-      "path": "utah/product/leads.py",
-      "score": 76,
-      "letter": "B",
-      "cap": null,
-      "failure": "Moving-frontier design; Overpass failover; tile pagination; HTTP_TIMEOUT present",
-      "source": "v2-core",
-      "tag": "#grade/B",
-      "dims": "78/74/76/74/78/68"
-    },
-    {
-      "path": "utah/product/outreach.py",
-      "score": 76,
-      "letter": "B",
-      "cap": null,
-      "failure": "CAN-SPAM gate; spam-score lint; channel selection; suppression via ledger",
-      "source": "v2-core",
-      "tag": "#grade/B",
-      "dims": "80/74/76/74/78/68"
-    },
-    {
-      "path": "utah/product/probate.py",
-      "score": 76,
-      "letter": "B",
-      "cap": null,
-      "failure": "ASP.NET scrape with documented fragility; injectable fetch; every failure documented",
-      "source": "v2-core",
-      "tag": "#grade/B",
-      "dims": "78/74/76/74/78/68"
-    },
-    {
-      "path": "utah/product/researcher.py",
-      "score": 76,
-      "letter": "B",
-      "cap": null,
-      "failure": "DDG search; prompt-injection sanitization; injectable; BrainUnavailable handled",
-      "source": "v2-core",
-      "tag": "#grade/B",
-      "dims": "78/74/76/74/78/68"
-    },
-    {
-      "path": "utah/revenue_heal.py",
-      "score": 76,
-      "letter": "B",
-      "cap": null,
-      "failure": "Outcome gate B12; self-repair task filing; honest `assessable=False` on DB error",
-      "source": "v2-core",
-      "tag": "#grade/B",
-      "dims": "78/74/78/74/78/68"
-    },
-    {
-      "path": "utah/sica_autonomy.py",
-      "score": 76,
-      "letter": "B",
-      "cap": null,
-      "failure": "Git timeout; safe cwd; propagate to live repo gated",
-      "source": "v2-core",
-      "tag": "#grade/B",
-      "dims": "78/74/78/74/78/68"
-    },
-    {
-      "path": "utah/sica_loop.py",
-      "score": 76,
-      "letter": "B",
-      "cap": null,
-      "failure": "Budget-bounded loop; injectable; utility trajectory; LoopResult",
-      "source": "v2-core",
-      "tag": "#grade/B",
-      "dims": "78/74/76/74/78/68"
-    },
-    {
-      "path": "utah/social.py",
-      "score": 76,
-      "letter": "B",
-      "cap": null,
-      "failure": "Whole-message anchoring; hash-stable variation; excluded bare yes/no",
-      "source": "v2-core",
-      "tag": "#grade/B",
-      "dims": "78/74/78/74/78/68"
+      "dims": null
     },
     {
       "path": "utah/watchdog.py",
-      "score": 76,
-      "letter": "B",
+      "score": 72,
+      "letter": "C",
       "cap": null,
-      "failure": "Honest anomaly detection; records failures; never raises",
-      "source": "v2-core",
-      "tag": "#grade/B",
-      "dims": "78/74/78/74/78/68"
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
     },
     {
-      "path": "ops/drill.py",
-      "score": 78,
-      "letter": "B",
+      "path": "utah/win.py",
+      "score": 72,
+      "letter": "C",
       "cap": null,
-      "failure": "Excellent restart-drill design; real SLOs; `_kick` uses `check=True` without except on TimeoutExpired is minor concern",
-      "source": "v2-core",
-      "tag": "#grade/B",
-      "dims": "82/75/78/75/80/70"
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
     },
     {
-      "path": "tests/test_clock.py",
-      "score": 78,
+      "path": "tests/__init__.py",
+      "score": 80,
       "letter": "B",
       "cap": null,
-      "failure": "4 tests; now_text with fixed time injection. Narrow but correct.",
-      "source": "v2-tests",
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
       "tag": "#grade/B",
-      "dims": "80/76/78/78/80/78"
+      "dims": null
     },
     {
-      "path": "tests/test_maintenance.py",
-      "score": 78,
+      "path": "tests/fakes.py",
+      "score": 80,
       "letter": "B",
       "cap": null,
-      "failure": "3 tests; run_reports_counts, brain_failures documented, consolidate_crash documented. Narrow but real.",
-      "source": "v2-tests",
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
       "tag": "#grade/B",
-      "dims": "79/77/78/78/79/78"
-    },
-    {
-      "path": "utah/daemon/handlers/core_handlers.py",
-      "score": 78,
-      "letter": "B",
-      "cap": null,
-      "failure": "Ping/status clean; tell off-loop; good",
-      "source": "v2-core",
-      "tag": "#grade/B",
-      "dims": "82/76/78/76/80/70"
-    },
-    {
-      "path": "utah/daemon/server.py",
-      "score": 78,
-      "letter": "B",
-      "cap": null,
-      "failure": "Peer-cred verified; per-connection task; shed logging added",
-      "source": "v2-core",
-      "tag": "#grade/B",
-      "dims": "82/76/78/76/80/70"
-    },
-    {
-      "path": "utah/failures.py",
-      "score": 78,
-      "letter": "B",
-      "cap": null,
-      "failure": "Never-raises contract; pooled connections; critical page async; Discord hook",
-      "source": "v2-core",
-      "tag": "#grade/B",
-      "dims": "82/76/78/76/80/70"
-    },
-    {
-      "path": "utah/local.py",
-      "score": 78,
-      "letter": "B",
-      "cap": null,
-      "failure": "Local Ollama lane; mirrors brain injection; load guard; keep_alive",
-      "source": "v2-core",
-      "tag": "#grade/B",
-      "dims": "82/76/78/76/80/70"
-    },
-    {
-      "path": "utah/mail.py",
-      "score": 78,
-      "letter": "B",
-      "cap": null,
-      "failure": "Rotation logic; pool cap; honest gate; SMTP has no explicit timeout in `_send_via` \u2014 minor concern but SSL default applies",
-      "source": "v2-core",
-      "tag": "#grade/B",
-      "dims": "82/76/78/76/80/70"
-    },
-    {
-      "path": "utah/memory/store.py",
-      "score": 78,
-      "letter": "B",
-      "cap": null,
-      "failure": "Postgres+pgvector; pooled; parameterized SQL; autocommit+transaction",
-      "source": "v2-core",
-      "tag": "#grade/B",
-      "dims": "80/76/78/76/80/72"
-    },
-    {
-      "path": "utah/product/fire_grader.py",
-      "score": 78,
-      "letter": "B",
-      "cap": null,
-      "failure": "Honest ungradable; reuses backtest._simulate_trade; R-grading correct",
-      "source": "v2-core",
-      "tag": "#grade/B",
-      "dims": "82/76/78/76/80/70"
-    },
-    {
-      "path": "utah/product/ledger.py",
-      "score": 78,
-      "letter": "B",
-      "cap": null,
-      "failure": "UNIQUE constraints; push publish; DDL correct; clean schema",
-      "source": "v2-core",
-      "tag": "#grade/B",
-      "dims": "82/76/78/76/80/70"
-    },
-    {
-      "path": "utah/router.py",
-      "score": 78,
-      "letter": "B",
-      "cap": null,
-      "failure": "Table-driven; escalation guaranteed; each mapping tested",
-      "source": "v2-core",
-      "tag": "#grade/B",
-      "dims": "82/76/78/76/80/70"
-    },
-    {
-      "path": "utah/selfcode.py",
-      "score": 78,
-      "letter": "B",
-      "cap": null,
-      "failure": "Kill switch; safety paths byte-checked; isolated branch; auto-merge opt-in; CODE_TIMEOUT",
-      "source": "v2-core",
-      "tag": "#grade/B",
-      "dims": "82/76/78/76/80/70"
-    },
-    {
-      "path": "utah/sica.py",
-      "score": 78,
-      "letter": "B",
-      "cap": null,
-      "failure": "Pure utility function; graded score; Postgres archive; smoke-route separation",
-      "source": "v2-core",
-      "tag": "#grade/B",
-      "dims": "82/76/78/76/80/72"
-    },
-    {
-      "path": "utah/sica_overseer.py",
-      "score": 78,
-      "letter": "B",
-      "cap": null,
-      "failure": "Stall detection; time/cost limits; pure assess(); Popen-based real runner",
-      "source": "v2-core",
-      "tag": "#grade/B",
-      "dims": "82/76/78/76/80/70"
-    },
-    {
-      "path": "utah/voice/loop.py",
-      "score": 78,
-      "letter": "B",
-      "cap": null,
-      "failure": "Two-stage wake; AGC; HPF; force-capture; wake-storm guard; MicLiveness",
-      "source": "v2-core",
-      "tag": "#grade/B",
-      "dims": "80/76/78/76/80/70"
-    },
-    {
-      "path": "tests/test_operator.py",
-      "score": 79,
-      "letter": "B",
-      "cap": null,
-      "failure": "3 tests; repair_substrate kickstarts, run writes status, mail auth failure escalates. Narrow coverage.",
-      "source": "v2-tests",
-      "tag": "#grade/B",
-      "dims": "80/78/79/79/80/78"
-    },
-    {
-      "path": "tests/test_outreach_work_leads.py",
-      "score": 79,
-      "letter": "B",
-      "cap": null,
-      "failure": "3 tests; work_leads registered in REGISTRY, drives real send on auto channel, passes limit through. Very narrow.",
-      "source": "v2-tests",
-      "tag": "#grade/B",
-      "dims": "80/78/79/79/80/78"
-    },
-    {
-      "path": "utah/canary.py",
-      "score": 79,
-      "letter": "B",
-      "cap": null,
-      "failure": "Real end-to-end probes; session-aware tick check; hog detection; `check_hogs` subprocess no timeout \u2014 minor",
-      "source": "v2-core",
-      "tag": "#grade/B",
-      "dims": "82/76/80/78/80/72"
+      "dims": null
     },
     {
       "path": "tests/test___init__.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_ace_isolation.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_ace_knowledge_migration.py",
       "score": 80,
       "letter": "B",
       "cap": null,
@@ -2028,6 +2248,46 @@
       "dims": null
     },
     {
+      "path": "tests/test_agents_loader.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_alert_wiring.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_alerts.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_attribution.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
       "path": "tests/test_attribution_edges.py",
       "score": 80,
       "letter": "B",
@@ -2048,7 +2308,27 @@
       "dims": null
     },
     {
+      "path": "tests/test_auth_repair.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
       "path": "tests/test_auth_repair_boundary.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_backtest.py",
       "score": 80,
       "letter": "B",
       "cap": null,
@@ -2078,6 +2358,16 @@
       "dims": null
     },
     {
+      "path": "tests/test_brain.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
       "path": "tests/test_brain_rate_limit.py",
       "score": 80,
       "letter": "B",
@@ -2089,6 +2379,36 @@
     },
     {
       "path": "tests/test_brain_runner_timeout.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_brain_stream.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_brief.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_browser_courier.py",
       "score": 80,
       "letter": "B",
       "cap": null,
@@ -2138,6 +2458,26 @@
       "dims": null
     },
     {
+      "path": "tests/test_canspam_completeness.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_clock.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
       "path": "tests/test_clock_zone.py",
       "score": 80,
       "letter": "B",
@@ -2168,6 +2508,26 @@
       "dims": null
     },
     {
+      "path": "tests/test_console.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_consolidate.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
       "path": "tests/test_consolidate_limits.py",
       "score": 80,
       "letter": "B",
@@ -2188,7 +2548,37 @@
       "dims": null
     },
     {
+      "path": "tests/test_core.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
       "path": "tests/test_core_handlers.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_cron_governor.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_daemon_bus.py",
       "score": 80,
       "letter": "B",
       "cap": null,
@@ -2288,6 +2678,36 @@
       "dims": null
     },
     {
+      "path": "tests/test_daemon_server.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_daemon_stream.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_daemon_wire.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
       "path": "tests/test_data_client.py",
       "score": 80,
       "letter": "B",
@@ -2328,6 +2748,16 @@
       "dims": null
     },
     {
+      "path": "tests/test_discord.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
       "path": "tests/test_discord_client.py",
       "score": 80,
       "letter": "B",
@@ -2349,6 +2779,16 @@
     },
     {
       "path": "tests/test_dispatch.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_douglas.py",
       "score": 80,
       "letter": "B",
       "cap": null,
@@ -2388,7 +2828,27 @@
       "dims": null
     },
     {
+      "path": "tests/test_drill.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
       "path": "tests/test_drill_probes.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_embed.py",
       "score": 80,
       "letter": "B",
       "cap": null,
@@ -2418,6 +2878,16 @@
       "dims": null
     },
     {
+      "path": "tests/test_enrich.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
       "path": "tests/test_enrich_boundaries.py",
       "score": 80,
       "letter": "B",
@@ -2429,6 +2899,26 @@
     },
     {
       "path": "tests/test_enrich_dns_bounds.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_enrich_sitegen_wire.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_entities.py",
       "score": 80,
       "letter": "B",
       "cap": null,
@@ -2468,6 +2958,16 @@
       "dims": null
     },
     {
+      "path": "tests/test_failures.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
       "path": "tests/test_failures_limits.py",
       "score": 80,
       "letter": "B",
@@ -2488,6 +2988,16 @@
       "dims": null
     },
     {
+      "path": "tests/test_fire_grader.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
       "path": "tests/test_fire_grader_edges.py",
       "score": 80,
       "letter": "B",
@@ -2499,6 +3009,26 @@
     },
     {
       "path": "tests/test_fire_grader_levels.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_fm_local.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_foundation.py",
       "score": 80,
       "letter": "B",
       "cap": null,
@@ -2548,7 +3078,27 @@
       "dims": null
     },
     {
+      "path": "tests/test_git_state_agent.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
       "path": "tests/test_google_oauth_setup.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_governor.py",
       "score": 80,
       "letter": "B",
       "cap": null,
@@ -2578,7 +3128,37 @@
       "dims": null
     },
     {
+      "path": "tests/test_imessage_quoting.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
       "path": "tests/test_imessage_send.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_integration_pg.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_integrations.py",
       "score": 80,
       "letter": "B",
       "cap": null,
@@ -2608,7 +3188,27 @@
       "dims": null
     },
     {
+      "path": "tests/test_interface_web.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
       "path": "tests/test_interface_web_hardening.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_introspect.py",
       "score": 80,
       "letter": "B",
       "cap": null,
@@ -2628,7 +3228,27 @@
       "dims": null
     },
     {
+      "path": "tests/test_leads.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
       "path": "tests/test_leads_edges.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_leads_eval.py",
       "score": 80,
       "letter": "B",
       "cap": null,
@@ -2648,7 +3268,27 @@
       "dims": null
     },
     {
+      "path": "tests/test_leads_maps.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
       "path": "tests/test_leads_status.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_ledger.py",
       "score": 80,
       "letter": "B",
       "cap": null,
@@ -2678,7 +3318,37 @@
       "dims": null
     },
     {
+      "path": "tests/test_local.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_local_brain.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
       "path": "tests/test_local_hardening.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_macos_external_profile.py",
       "score": 80,
       "letter": "B",
       "cap": null,
@@ -2698,7 +3368,37 @@
       "dims": null
     },
     {
+      "path": "tests/test_mail.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_mail_capacity.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
       "path": "tests/test_mail_hardening.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_mail_replies.py",
       "score": 80,
       "letter": "B",
       "cap": null,
@@ -2738,6 +3438,16 @@
       "dims": null
     },
     {
+      "path": "tests/test_mail_rotation.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
       "path": "tests/test_mail_security.py",
       "score": 80,
       "letter": "B",
@@ -2749,6 +3459,16 @@
     },
     {
       "path": "tests/test_mail_status.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_maintenance.py",
       "score": 80,
       "letter": "B",
       "cap": null,
@@ -2798,7 +3518,67 @@
       "dims": null
     },
     {
+      "path": "tests/test_marketer.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_marketer_publish.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
       "path": "tests/test_marketer_run.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_marketer_wire.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_marketing_stress.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_memory_confab.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_memory_drilldown.py",
       "score": 80,
       "letter": "B",
       "cap": null,
@@ -2848,7 +3628,27 @@
       "dims": null
     },
     {
+      "path": "tests/test_memory_logic.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
       "path": "tests/test_memory_logic_rules.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_memory_pipeline.py",
       "score": 80,
       "letter": "B",
       "cap": null,
@@ -2938,6 +3738,26 @@
       "dims": null
     },
     {
+      "path": "tests/test_news_connectivity.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_no_asterisks.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
       "path": "tests/test_notes.py",
       "score": 80,
       "letter": "B",
@@ -2978,6 +3798,16 @@
       "dims": null
     },
     {
+      "path": "tests/test_objects.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
       "path": "tests/test_objects_contracts.py",
       "score": 80,
       "letter": "B",
@@ -2998,7 +3828,77 @@
       "dims": null
     },
     {
+      "path": "tests/test_operator.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_outcome_gate.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_outreach.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_outreach_cadence.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
       "path": "tests/test_outreach_edges.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_outreach_followups.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_outreach_template.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_outreach_work_leads.py",
       "score": 80,
       "letter": "B",
       "cap": null,
@@ -3068,7 +3968,27 @@
       "dims": null
     },
     {
+      "path": "tests/test_probate.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
       "path": "tests/test_probate_edges.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_probate_outreach.py",
       "score": 80,
       "letter": "B",
       "cap": null,
@@ -3118,6 +4038,16 @@
       "dims": null
     },
     {
+      "path": "tests/test_product_row_contracts.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
       "path": "tests/test_profile.py",
       "score": 80,
       "letter": "B",
@@ -3138,7 +4068,107 @@
       "dims": null
     },
     {
+      "path": "tests/test_proof_cron.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_proof_gate.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_proof_human.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_proof_meta.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_proof_register.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_proof_run.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_proof_skeleton.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_proof_tier.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_property.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
       "path": "tests/test_property_hardening.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_pushover.py",
       "score": 80,
       "letter": "B",
       "cap": null,
@@ -3159,6 +4189,26 @@
     },
     {
       "path": "tests/test_pushover_hardening.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_reel_queue.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_rerank.py",
       "score": 80,
       "letter": "B",
       "cap": null,
@@ -3198,7 +4248,27 @@
       "dims": null
     },
     {
+      "path": "tests/test_researcher.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
       "path": "tests/test_researcher_hardening.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_revenue_heal.py",
       "score": 80,
       "letter": "B",
       "cap": null,
@@ -3229,6 +4299,16 @@
     },
     {
       "path": "tests/test_route.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_router.py",
       "score": 80,
       "letter": "B",
       "cap": null,
@@ -3278,7 +4358,47 @@
       "dims": null
     },
     {
+      "path": "tests/test_selfcode.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_selfcode_guard.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_selfcode_offlimits.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
       "path": "tests/test_selfcode_setup_guard.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_selfcode_tiers.py",
       "score": 80,
       "letter": "B",
       "cap": null,
@@ -3298,7 +4418,47 @@
       "dims": null
     },
     {
+      "path": "tests/test_selfcode_web.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_selfheal_bridge.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
       "path": "tests/test_server_edges.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_sica.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_sica_autonomy.py",
       "score": 80,
       "letter": "B",
       "cap": null,
@@ -3318,6 +4478,16 @@
       "dims": null
     },
     {
+      "path": "tests/test_sica_discover.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
       "path": "tests/test_sica_discover_hardening.py",
       "score": 80,
       "letter": "B",
@@ -3328,7 +4498,27 @@
       "dims": null
     },
     {
+      "path": "tests/test_sica_goals.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
       "path": "tests/test_sica_goals_bounds.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_sica_loop.py",
       "score": 80,
       "letter": "B",
       "cap": null,
@@ -3359,6 +4549,16 @@
     },
     {
       "path": "tests/test_sica_novelty.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_sica_overseer.py",
       "score": 80,
       "letter": "B",
       "cap": null,
@@ -3408,6 +4608,26 @@
       "dims": null
     },
     {
+      "path": "tests/test_sms_creds_gate.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_sms_daily_cap.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
       "path": "tests/test_sms_send.py",
       "score": 80,
       "letter": "B",
@@ -3419,6 +4639,16 @@
     },
     {
       "path": "tests/test_sms_twilio_api.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_social.py",
       "score": 80,
       "letter": "B",
       "cap": null,
@@ -3458,6 +4688,16 @@
       "dims": null
     },
     {
+      "path": "tests/test_status_capabilities.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
       "path": "tests/test_store_init.py",
       "score": 80,
       "letter": "B",
@@ -3488,6 +4728,16 @@
       "dims": null
     },
     {
+      "path": "tests/test_stt_respawn_cooldown.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
       "path": "tests/test_stt_worker.py",
       "score": 80,
       "letter": "B",
@@ -3508,6 +4758,26 @@
       "dims": null
     },
     {
+      "path": "tests/test_tasks.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_tell_stream.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
       "path": "tests/test_timers_bounded.py",
       "score": 80,
       "letter": "B",
@@ -3518,7 +4788,27 @@
       "dims": null
     },
     {
+      "path": "tests/test_timers_notify.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
       "path": "tests/test_timers_validation.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_trackers_advisory.py",
       "score": 80,
       "letter": "B",
       "cap": null,
@@ -3558,6 +4848,16 @@
       "dims": null
     },
     {
+      "path": "tests/test_trade_lore.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
       "path": "tests/test_trade_lore_hardening.py",
       "score": 80,
       "letter": "B",
@@ -3569,6 +4869,16 @@
     },
     {
       "path": "tests/test_trade_lore_prompt_guard.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_trading.py",
       "score": 80,
       "letter": "B",
       "cap": null,
@@ -3598,6 +4908,16 @@
       "dims": null
     },
     {
+      "path": "tests/test_trading_stress.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
       "path": "tests/test_trading_unfed_edge.py",
       "score": 80,
       "letter": "B",
@@ -3608,7 +4928,27 @@
       "dims": null
     },
     {
+      "path": "tests/test_truth_route.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
       "path": "tests/test_tts_hardening.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_tts_speech_clean.py",
       "score": 80,
       "letter": "B",
       "cap": null,
@@ -3668,6 +5008,16 @@
       "dims": null
     },
     {
+      "path": "tests/test_voice_agent.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
       "path": "tests/test_voice_agent_hardening.py",
       "score": 80,
       "letter": "B",
@@ -3708,7 +5058,27 @@
       "dims": null
     },
     {
+      "path": "tests/test_voice_echo_gate.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
       "path": "tests/test_voice_init.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_voice_liveness.py",
       "score": 80,
       "letter": "B",
       "cap": null,
@@ -3738,6 +5108,16 @@
       "dims": null
     },
     {
+      "path": "tests/test_voice_loop.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
       "path": "tests/test_voice_loop_dsp.py",
       "score": 80,
       "letter": "B",
@@ -3748,7 +5128,37 @@
       "dims": null
     },
     {
+      "path": "tests/test_voice_loop_gate.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_voice_macapp.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
       "path": "tests/test_voice_macapp_hardening.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_voice_oww.py",
       "score": 80,
       "letter": "B",
       "cap": null,
@@ -3778,6 +5188,16 @@
       "dims": null
     },
     {
+      "path": "tests/test_voice_state.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
       "path": "tests/test_voice_state_contract.py",
       "score": 80,
       "letter": "B",
@@ -3789,6 +5209,46 @@
     },
     {
       "path": "tests/test_voice_state_hardening.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_voice_stt.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_voice_tts.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_voice_vad.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_voice_wake.py",
       "score": 80,
       "letter": "B",
       "cap": null,
@@ -3818,7 +5278,27 @@
       "dims": null
     },
     {
+      "path": "tests/test_watchdog.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
       "path": "tests/test_watchdog_edges.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_wc_feed.py",
       "score": 80,
       "letter": "B",
       "cap": null,
@@ -3848,7 +5328,47 @@
       "dims": null
     },
     {
+      "path": "tests/test_weather.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_weather_forecast.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
       "path": "tests/test_weather_hardening.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_whispercpp_stt.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_win.py",
       "score": 80,
       "letter": "B",
       "cap": null,
@@ -3868,1224 +5388,74 @@
       "dims": null
     },
     {
-      "path": "utah/config.py",
-      "score": 80,
+      "path": "tests/conftest.py",
+      "score": 85,
       "letter": "B",
       "cap": null,
-      "failure": "Excellent env-overridable doctrine; well-documented constants; tailnet URL is a non-secret config value",
-      "source": "v2-core",
-      "tag": "#grade/B",
-      "dims": "82/78/82/78/82/75"
-    },
-    {
-      "path": "utah/daemon/governor.py",
-      "score": 80,
-      "letter": "B",
-      "cap": null,
-      "failure": "Load + inflight gate correct; read_admission tier correct; snapshot clean",
-      "source": "v2-core",
-      "tag": "#grade/B",
-      "dims": "84/78/80/78/82/72"
-    },
-    {
-      "path": "utah/daemon/lifecycle.py",
-      "score": 80,
-      "letter": "B",
-      "cap": null,
-      "failure": "flock singleton; verified hard exit; never-unlinks design correct",
-      "source": "v2-core",
-      "tag": "#grade/B",
-      "dims": "84/78/82/78/80/74"
-    },
-    {
-      "path": "utah/daemon/runtime.py",
-      "score": 80,
-      "letter": "B",
-      "cap": null,
-      "failure": "Isolation assertion; clean path derivation; env-overridable",
-      "source": "v2-core",
-      "tag": "#grade/B",
-      "dims": "82/78/82/78/82/74"
-    },
-    {
-      "path": "utah/db_pool.py",
-      "score": 80,
-      "letter": "B",
-      "cap": null,
-      "failure": "Per-DSN pool; configure callback; atexit cleanup; connect_timeout from config",
-      "source": "v2-core",
-      "tag": "#grade/B",
-      "dims": "82/78/82/78/82/74"
-    },
-    {
-      "path": "utah/memory/pipeline.py",
-      "score": 80,
-      "letter": "B",
-      "cap": null,
-      "failure": "Admission gate; vectorized dedup; source-gated write; concurrent pool",
-      "source": "v2-core",
-      "tag": "#grade/B",
-      "dims": "82/78/80/78/82/76"
-    },
-    {
-      "path": "utah/product/backtest.py",
-      "score": 80,
-      "letter": "B",
-      "cap": null,
-      "failure": "Pure simulation; R-multiple math correct; msgspec structs; edge_proven gate; no I/O",
-      "source": "v2-core",
-      "tag": "#grade/B",
-      "dims": "84/78/80/78/82/76"
-    },
-    {
-      "path": "tests/test_memory_drilldown.py",
-      "score": 82,
-      "letter": "B",
-      "cap": null,
-      "failure": "4 tests; list_memories newest-first/shaped, paginates, excludes archived, list_entities.",
-      "source": "v2-tests",
-      "tag": "#grade/B",
-      "dims": "83/81/82/82/83/82"
-    },
-    {
-      "path": "tests/test_news_connectivity.py",
-      "score": 82,
-      "letter": "B",
-      "cap": null,
-      "failure": "4 tests; news routes to research, connectivity online/offline/partial outage.",
-      "source": "v2-tests",
-      "tag": "#grade/B",
-      "dims": "83/81/82/82/83/82"
-    },
-    {
-      "path": "utah/brain.py",
-      "score": 82,
-      "letter": "B",
-      "cap": null,
-      "failure": "Excellent injection boundary; streaming runner with deadline; shared NO_FAB/PERSONA contract",
-      "source": "v2-core",
-      "tag": "#grade/B",
-      "dims": "85/80/82/80/84/78"
-    },
-    {
-      "path": "utah/core.py",
-      "score": 82,
-      "letter": "B",
-      "cap": null,
-      "failure": "Well-structured recall/ground/reason loop; honest degradation on every path; `_CONVO` global state is a minor thread concern in multi-threaded scenarios",
-      "source": "v2-core",
-      "tag": "#grade/B",
-      "dims": "85/80/82/80/84/76"
-    },
-    {
-      "path": "utah/daemon/daemon.py",
-      "score": 82,
-      "letter": "B",
-      "cap": null,
-      "failure": "Boot DAG correct; verified hard-exit; task group; signal handling clean",
-      "source": "v2-core",
-      "tag": "#grade/B",
-      "dims": "85/80/82/80/84/76"
-    },
-    {
-      "path": "utah/daemon/peercred.py",
-      "score": 82,
-      "letter": "B",
-      "cap": null,
-      "failure": "Fail-closed peer auth; macOS+Linux dual path; exemplary security",
-      "source": "v2-core",
-      "tag": "#grade/B",
-      "dims": "85/80/84/80/82/76"
-    },
-    {
-      "path": "utah/memory/logic.py",
-      "score": 82,
-      "letter": "B",
-      "cap": null,
-      "failure": "Pure logic; no I/O; each rule testable; decay mirrors SQL; rrf_fuse correct",
-      "source": "v2-core",
-      "tag": "#grade/B",
-      "dims": "85/80/82/80/84/80"
-    },
-    {
-      "path": "utah/product/sitegen.py",
-      "score": 82,
-      "letter": "B",
-      "cap": null,
-      "failure": "ORPHAN \u2014 HTML renderer, no fabricated data, no cron",
-      "source": "v1",
+      "failure": "Tier-D safety path \u2014 human review required before edits",
+      "source": "heuristic",
       "tag": "#grade/B",
       "dims": null
     },
     {
-      "path": "tests/test_ace_knowledge_migration.py",
-      "score": 83,
-      "letter": "B",
-      "cap": null,
-      "failure": "2 tests; real stat assertions (junk/inserted/deduped counts); injected fake_store callable; mutation coverage could be wider.",
-      "source": "v2-tests",
-      "tag": "#grade/B",
-      "dims": "84/82/82/84/84/82"
-    },
-    {
-      "path": "tests/test_auth_repair.py",
-      "score": 83,
-      "letter": "B",
-      "cap": null,
-      "failure": "4 tests; normalize_gmail_json, url_with_login_hint, repair_gmail_oauth (noop + start); monkeypatched oauth module.",
-      "source": "v2-tests",
-      "tag": "#grade/B",
-      "dims": "84/82/83/82/84/82"
-    },
-    {
-      "path": "tests/test_browser_courier.py",
-      "score": 83,
-      "letter": "B",
-      "cap": null,
-      "failure": "5 tests; browser gate, injected renderer, courier routing. Adequate but narrow.",
-      "source": "v2-tests",
-      "tag": "#grade/B",
-      "dims": "84/82/83/82/84/82"
-    },
-    {
-      "path": "tests/test_integrations.py",
-      "score": 83,
-      "letter": "B",
-      "cap": null,
-      "failure": "6 tests; calendar/notes/contacts create with injected client, gated without auth. Short but real.",
-      "source": "v2-tests",
-      "tag": "#grade/B",
-      "dims": "84/82/83/82/84/82"
-    },
-    {
-      "path": "tests/test_macos_external_profile.py",
-      "score": 83,
-      "letter": "B",
-      "cap": null,
-      "failure": "5 tests; clipboard injected, gated without perms, external gated/injected, profile remember/browse.",
-      "source": "v2-tests",
-      "tag": "#grade/B",
-      "dims": "84/82/83/82/84/82"
-    },
-    {
-      "path": "tests/test_tasks.py",
-      "score": 83,
-      "letter": "B",
-      "cap": null,
-      "failure": "2 tests; real Postgres integration (auto-skipped if down); add/list/done roundtrip, done unknown id is false. Narrow but real.",
-      "source": "v2-tests",
-      "tag": "#grade/B",
-      "dims": "84/82/83/82/84/82"
-    },
-    {
-      "path": "tests/test_trackers_advisory.py",
-      "score": 83,
-      "letter": "B",
-      "cap": null,
-      "failure": "4 tests; tracker log+recent (Postgres, auto-skipped), advise uses persona+injected brain, brain down is honest, lawyer persona is non-binding.",
-      "source": "v2-tests",
-      "tag": "#grade/B",
-      "dims": "84/82/83/82/84/82"
-    },
-    {
-      "path": "tests/test_voice_loop.py",
-      "score": 83,
-      "letter": "B",
-      "cap": null,
-      "failure": "3 tests; write_wav roundtrips PCM at 16k mono, rms zero for silence, frame size is Silero native.",
-      "source": "v2-tests",
-      "tag": "#grade/B",
-      "dims": "84/82/83/82/84/82"
-    },
-    {
-      "path": "tests/test_ace_isolation.py",
-      "score": 84,
-      "letter": "B",
-      "cap": null,
-      "failure": "3 tests; real behavior (secrets_sync reads ~/.utah not ~/.ace); tmp_path+monkeypatch isolation; would fail on path regression.",
-      "source": "v2-tests",
-      "tag": "#grade/B",
-      "dims": "86/82/84/82/86/84"
-    },
-    {
-      "path": "tests/test_attribution.py",
-      "score": 84,
-      "letter": "B",
-      "cap": null,
-      "failure": "7 tests; pure number-attribution logic; real numeric assertions; all happy and edge paths.",
-      "source": "v2-tests",
-      "tag": "#grade/B",
-      "dims": "86/82/82/84/86/84"
-    },
-    {
-      "path": "tests/test_mail.py",
-      "score": 84,
-      "letter": "B",
-      "cap": null,
-      "failure": "7 tests; send injected, gated without creds, failure documented, verify ok/auth failure/gated.",
-      "source": "v2-tests",
-      "tag": "#grade/B",
-      "dims": "85/83/84/83/85/84"
-    },
-    {
-      "path": "tests/test_objects.py",
-      "score": 84,
-      "letter": "B",
-      "cap": null,
-      "failure": "8 tests; Hit/Reply frozen, no shared mutable default, unknown field error, enums, JSON serialization, WriteDecision defaults, WriteResult/ConsolidationReport shape.",
-      "source": "v2-tests",
-      "tag": "#grade/B",
-      "dims": "85/83/84/84/85/84"
-    },
-    {
-      "path": "tests/test_outreach_template.py",
-      "score": 84,
-      "letter": "B",
-      "cap": null,
-      "failure": "4 tests; compose uses Michael's pitch, personalizes greeting/subject, CAN-SPAM footer, passes spam lint.",
-      "source": "v2-tests",
-      "tag": "#grade/B",
-      "dims": "85/83/84/83/85/84"
-    },
-    {
-      "path": "tests/test_voice_oww.py",
-      "score": 84,
-      "letter": "B",
-      "cap": null,
-      "failure": "2 tests; feed emits detection above threshold, refractory suppresses repeat hits.",
-      "source": "v2-tests",
-      "tag": "#grade/B",
-      "dims": "85/83/84/83/85/84"
-    },
-    {
-      "path": "tests/test_watchdog.py",
-      "score": 84,
-      "letter": "B",
-      "cap": null,
-      "failure": "4 tests; healthy records nothing, daemon down detected+documented, status raises treated as down, load critical documented.",
-      "source": "v2-tests",
-      "tag": "#grade/B",
-      "dims": "85/83/84/83/85/84"
-    },
-    {
-      "path": "tests/test_brief.py",
+      "path": "utah/brain.py",
       "score": 85,
       "letter": "B",
       "cap": null,
-      "failure": "7 tests; compose_brief content, real-estate intel section, run() spoke/emailed/email_gate.",
-      "source": "v2-tests",
+      "failure": "Tier-D safety path \u2014 human review required before edits",
+      "source": "heuristic",
       "tag": "#grade/B",
-      "dims": "87/83/84/84/87/85"
+      "dims": null
     },
     {
-      "path": "tests/test_leads_maps.py",
+      "path": "utah/config.py",
       "score": 85,
       "letter": "B",
       "cap": null,
-      "failure": "5 tests; normalize_phone, parse_maps_place, find_maps search, scout_maps_trades writes.",
-      "source": "v2-tests",
+      "failure": "Tier-D safety path \u2014 human review required before edits",
+      "source": "heuristic",
       "tag": "#grade/B",
-      "dims": "86/84/85/84/86/85"
+      "dims": null
     },
     {
-      "path": "tests/test_marketer.py",
+      "path": "utah/daemon/governor.py",
       "score": 85,
       "letter": "B",
       "cap": null,
-      "failure": "5 tests; compose_caption, post injected publisher, gated, failure documented, spotlight_emails_and_records.",
-      "source": "v2-tests",
+      "failure": "Tier-D safety path \u2014 human review required before edits",
+      "source": "heuristic",
       "tag": "#grade/B",
-      "dims": "86/84/85/84/86/85"
+      "dims": null
     },
     {
-      "path": "tests/test_timers_notify.py",
+      "path": "utah/daemon/lifecycle.py",
       "score": 85,
       "letter": "B",
       "cap": null,
-      "failure": "4+3 tests; due/not-due/fires-once/cancel (Postgres), pomodoro, notify injected runner, notify gated, AppleScript string escaping for quotes (named live incident).",
-      "source": "v2-tests",
+      "failure": "Tier-D safety path \u2014 human review required before edits",
+      "source": "heuristic",
       "tag": "#grade/B",
-      "dims": "86/84/85/84/86/85"
+      "dims": null
     },
     {
-      "path": "tests/test_voice_loop_gate.py",
+      "path": "utah/daemon/peercred.py",
       "score": 85,
       "letter": "B",
       "cap": null,
-      "failure": "3 tests; should_capture text-only fallback, requires arm when audio wake on, segmenter arm starts capture, end-to-end gate chain audio wake path.",
-      "source": "v2-tests",
+      "failure": "Tier-D safety path \u2014 human review required before edits",
+      "source": "heuristic",
       "tag": "#grade/B",
-      "dims": "86/84/85/84/86/85"
+      "dims": null
     },
     {
-      "path": "tests/test_voice_macapp.py",
+      "path": "utah/selfcode.py",
       "score": 85,
       "letter": "B",
       "cap": null,
-      "failure": "7 tests (most require framework stub, conditionally skipped); signed bundle with mic string, idempotent, rebuilds when marker missing, bundle exec keeps identity, env has PYTHONHOME/PYTHONPATH, non-darwin returns None.",
-      "source": "v2-tests",
+      "failure": "Tier-D safety path \u2014 human review required before edits",
+      "source": "heuristic",
       "tag": "#grade/B",
-      "dims": "86/84/87/84/86/85"
-    },
-    {
-      "path": "tests/test_voice_state.py",
-      "score": 85,
-      "letter": "B",
-      "cap": null,
-      "failure": "4 tests; write/read roundtrips, status reflects fresh state, down when no file, down when stale.",
-      "source": "v2-tests",
-      "tag": "#grade/B",
-      "dims": "86/84/85/84/86/85"
-    },
-    {
-      "path": "tests/test_drill.py",
-      "score": 86,
-      "letter": "B",
-      "cap": null,
-      "failure": "5 tests; _await (fast probe/timeout/exception), run() SLO, unkickable service. Uses importlib for ops/drill.py.",
-      "source": "v2-tests",
-      "tag": "#grade/B",
-      "dims": "87/85/86/85/87/86"
-    },
-    {
-      "path": "tests/test_leads_eval.py",
-      "score": 86,
-      "letter": "B",
-      "cap": null,
-      "failure": "5 tests; own-site detection, has_real_website, measure_precision, empty sample, search failure not a false positive.",
-      "source": "v2-tests",
-      "tag": "#grade/B",
-      "dims": "87/85/86/85/87/86"
-    },
-    {
-      "path": "tests/test_outcome_gate.py",
-      "score": 86,
-      "letter": "B",
-      "cap": null,
-      "failure": "5 tests; outcome_gate red when no sends/sales, green for send/sale, unassessable when db unreachable, sent_producer files repair.",
-      "source": "v2-tests",
-      "tag": "#grade/B",
-      "dims": "87/85/86/85/87/86"
-    },
-    {
-      "path": "tests/test_voice_echo_gate.py",
-      "score": 86,
-      "letter": "B",
-      "cap": null,
-      "failure": "2 tests; drops in-TTL duplicate (case/space-insensitive), never blocks empty or first utterance. Named 2026-06-10 incident.",
-      "source": "v2-tests",
-      "tag": "#grade/B",
-      "dims": "87/85/86/85/87/86"
-    },
-    {
-      "path": "tests/test_weather_forecast.py",
-      "score": 86,
-      "letter": "B",
-      "cap": null,
-      "failure": "5 tests; tomorrow reports next day, multiday outlook, caches like current, failure is honest, answer dispatches current vs forecast.",
-      "source": "v2-tests",
-      "tag": "#grade/B",
-      "dims": "87/85/86/85/87/86"
-    },
-    {
-      "path": "tests/test_canspam_completeness.py",
-      "score": 87,
-      "letter": "B",
-      "cap": null,
-      "failure": "6 tests; _canspam_is_complete (bare street/full/placeholder), footer_is_real, queue refusal with incomplete address.",
-      "source": "v2-tests",
-      "tag": "#grade/B",
-      "dims": "88/86/88/86/88/88"
-    },
-    {
-      "path": "tests/test_discord.py",
-      "score": 87,
-      "letter": "B",
-      "cap": null,
-      "failure": "9 tests; dry-run blueprint, honest gate, idempotent provisioning, guild creation, ambiguous guilds error, permission overwrites, webhook post, feed bridge gate, embed.",
-      "source": "v2-tests",
-      "tag": "#grade/B",
-      "dims": "88/86/87/86/88/87"
-    },
-    {
-      "path": "tests/test_douglas.py",
-      "score": 87,
-      "letter": "B",
-      "cap": null,
-      "failure": "7 tests; FIVE_TRUTHS/SEVEN_PRINCIPLES counts, seed stores as durable facts, real content present, matches(), render(), answer(), seed survives failure.",
-      "source": "v2-tests",
-      "tag": "#grade/B",
-      "dims": "88/86/87/86/88/87"
-    },
-    {
-      "path": "tests/test_failures.py",
-      "score": 87,
-      "letter": "B",
-      "cap": null,
-      "failure": "6 tests; record/recent roundtrip, record_silent, never raises when store down/no store, most-recent-first/capped, empty.",
-      "source": "v2-tests",
-      "tag": "#grade/B",
-      "dims": "88/87/87/86/88/87"
-    },
-    {
-      "path": "tests/test_foundation.py",
-      "score": 87,
-      "letter": "B",
-      "cap": null,
-      "failure": "8 tests; all_green, postgres_down, supervisor_down, daemon_down, gate_cron green/red/missing, read_status missing/malformed.",
-      "source": "v2-tests",
-      "tag": "#grade/B",
-      "dims": "88/86/87/86/88/87"
-    },
-    {
-      "path": "tests/test_product_row_contracts.py",
-      "score": 87,
-      "letter": "B",
-      "cap": null,
-      "failure": "4 tests; structs are frozen+typed, from_mapping ignores extras+roundtrips, Lead contract producer\u2192consumer flows correctly, Fire+OutreachRow contracts.",
-      "source": "v2-tests",
-      "tag": "#grade/B",
-      "dims": "88/86/87/86/88/87"
-    },
-    {
-      "path": "tests/test_recall_eval.py",
-      "score": 87,
-      "letter": "B",
-      "cap": null,
-      "failure": "5+1 tests; perfect recall=1.0, miss=0.0, MRR reflects rank, empty labeled=0, failure does not abort, injectable NER upgrade path.",
-      "source": "v2-tests",
-      "tag": "#grade/B",
-      "dims": "88/86/87/86/88/87"
-    },
-    {
-      "path": "tests/test_selfheal_bridge.py",
-      "score": 87,
-      "letter": "B",
-      "cap": null,
-      "failure": "4 tests; recurring failures become pending findings (deduped), voice_code_command dispatches real job, fix_your carries whole utterance, normal questions never touch coder.",
-      "source": "v2-tests",
-      "tag": "#grade/B",
-      "dims": "88/86/87/86/88/87"
-    },
-    {
-      "path": "tests/test_sica_overseer.py",
-      "score": 87,
-      "letter": "B",
-      "cap": null,
-      "failure": "8 tests; assess ok, cancels on time/cost/stall, supervise completes, cancels on time limit/stall, changing output does not stall.",
-      "source": "v2-tests",
-      "tag": "#grade/B",
-      "dims": "88/86/87/86/88/87"
-    },
-    {
-      "path": "tests/test_social.py",
-      "score": 87,
-      "letter": "B",
-      "cap": null,
-      "failure": "18+ parametrized tests; social matches, non-social does not match, reply short+nonempty+deterministic, greeting time-of-day aware, greeting addresses Michael, reply None for non-social.",
-      "source": "v2-tests",
-      "tag": "#grade/B",
-      "dims": "88/86/87/86/88/87"
-    },
-    {
-      "path": "tests/test_trade_lore.py",
-      "score": 87,
-      "letter": "B",
-      "cap": null,
-      "failure": "4 tests; assess_fire grounds in ledger facts+keeps disclaimer, assess_fire never fabricates on refusal/failure, run_assessments is bounded+writes each once, migrate_legacy dedups+survives missing db.",
-      "source": "v2-tests",
-      "tag": "#grade/B",
-      "dims": "88/86/87/86/88/87"
-    },
-    {
-      "path": "tests/test_alert_wiring.py",
-      "score": 88,
-      "letter": "B",
-      "cap": null,
-      "failure": "5 tests; spy pattern on alerts module; record_fire paging contract; synthetic fires never page; each cron pushes daily summary.",
-      "source": "v2-tests",
-      "tag": "#grade/B",
-      "dims": "89/87/88/87/89/88"
-    },
-    {
-      "path": "tests/test_daemon_bus.py",
-      "score": 88,
-      "letter": "B",
-      "cap": null,
-      "failure": "2 tests; real pub/sub over real unix socket; channel filter. Integration test with real IPC.",
-      "source": "v2-tests",
-      "tag": "#grade/B",
-      "dims": "89/87/88/87/88/88"
-    },
-    {
-      "path": "tests/test_daemon_stream.py",
-      "score": 88,
-      "letter": "B",
-      "cap": null,
-      "failure": "4 tests; tell_stream relays brain events, _safe_write swallows BrokenPipe, mid-stream disconnect, passes text to core.",
-      "source": "v2-tests",
-      "tag": "#grade/B",
-      "dims": "89/88/88/87/89/88"
-    },
-    {
-      "path": "tests/test_entities.py",
-      "score": 88,
-      "letter": "B",
-      "cap": null,
-      "failure": "9 tests; extract, dedup, noise drop, strip noise from spans, question form, empty/degenerate, Q-A prefixes, normalize, never raises.",
-      "source": "v2-tests",
-      "tag": "#grade/B",
-      "dims": "89/87/88/87/89/88"
-    },
-    {
-      "path": "tests/test_mail_rotation.py",
-      "score": 88,
-      "letter": "B",
-      "cap": null,
-      "failure": "6 tests; fallback to single gmail.json, reads pool file, round-robins, per-inbox daily cap blocks, cap resets on new day, rotation cursor persists on disk.",
-      "source": "v2-tests",
-      "tag": "#grade/B",
-      "dims": "89/87/88/87/89/88"
-    },
-    {
-      "path": "tests/test_outreach_followups.py",
-      "score": 88,
-      "letter": "B",
-      "cap": null,
-      "failure": "7 tests; day-3 sends+suppresses, day-7 final copy differs, stage skipped, business hours gate, CAN-SPAM footer, limit caps, run_scheduled.",
-      "source": "v2-tests",
-      "tag": "#grade/B",
-      "dims": "89/87/88/87/89/88"
-    },
-    {
-      "path": "tests/test_rerank.py",
-      "score": 88,
-      "letter": "B",
-      "cap": null,
-      "failure": "7 tests; empty docs short-circuit, scores pass through, model failure\u2192zeros, malformed score count\u2192zeros, set_reranker None restores default, cache dir durable under ~/.utah, FastEmbedReranker passes durable cache dir.",
-      "source": "v2-tests",
-      "tag": "#grade/B",
-      "dims": "89/87/88/87/89/88"
-    },
-    {
-      "path": "tests/test_selfcode_web.py",
-      "score": 88,
-      "letter": "B",
-      "cap": null,
-      "failure": "12 tests; recent_cycles flattens log rows, picks best attempt utility, empty on db error, cycle_stats real counts, zero on error, goals pct trace to real counts, never exceed 100, merges count both repos, run_edit is propose-only, default auto_merge=False, empty request, kill switch, never raises on failure, shape_result caps.",
-      "source": "v2-tests",
-      "tag": "#grade/B",
-      "dims": "89/87/88/87/89/88"
-    },
-    {
-      "path": "tests/test_sica_discover.py",
-      "score": 88,
-      "letter": "B",
-      "cap": null,
-      "failure": "5 tests; write_finding parses task+writes page, next_pending_skips_used, run_discover writes both browser domains, file_task triggers selfcode sentinel, injected path does not touch sentinel.",
-      "source": "v2-tests",
-      "tag": "#grade/B",
-      "dims": "89/87/88/87/89/88"
-    },
-    {
-      "path": "tests/test_stt_respawn_cooldown.py",
-      "score": 88,
-      "letter": "B",
-      "cap": null,
-      "failure": "3 tests; hang sets cooldown + next call skips respawn, overload multiplies cooldown, cooldown expires then respawns. Named 2026-06-10 load-storm fix.",
-      "source": "v2-tests",
-      "tag": "#grade/B",
-      "dims": "89/87/88/87/89/88"
-    },
-    {
-      "path": "tests/test_voice_liveness.py",
-      "score": 88,
-      "letter": "B",
-      "cap": null,
-      "failure": "5 tests; zeros past threshold emit ONE deaf event with raw level, recovery carries episode duration, quiet room above threshold never alerts, muted does not accumulate quiet, cooldown separates episodes, max_raw resets per poll window.",
-      "source": "v2-tests",
-      "tag": "#grade/B",
-      "dims": "89/87/88/87/89/88"
-    },
-    {
-      "path": "tests/test_weather.py",
-      "score": 88,
-      "letter": "B",
-      "cap": null,
-      "failure": "6 tests; describes real values, cache hit skips fetch, stale cache refetches, failure with no cache is honest, failure serves marked stale cache, location default is Gulf Shores.",
-      "source": "v2-tests",
-      "tag": "#grade/B",
-      "dims": "89/87/88/87/89/88"
-    },
-    {
-      "path": "tests/test_console.py",
-      "score": 89,
-      "letter": "B",
-      "cap": null,
-      "failure": "18+ tests; parse, is_slow, help, status, findings, cycles, goals, diff, unknown_command, resolve_slow_task, stream formatter, effort mode, skills, history.",
-      "source": "v2-tests",
-      "tag": "#grade/B",
-      "dims": "90/88/88/88/90/89"
-    },
-    {
-      "path": "tests/test_embed.py",
-      "score": 89,
-      "letter": "B",
-      "cap": null,
-      "failure": "7 tests; injected embedder, empty text error, wrong dimension error, non-finite error, arbitrary exception, set_embedder(None) restores default.",
-      "source": "v2-tests",
-      "tag": "#grade/B",
-      "dims": "90/88/89/88/90/89"
-    },
-    {
-      "path": "tests/test_interface_web.py",
-      "score": 89,
-      "letter": "B",
-      "cap": null,
-      "failure": "8 tests; deck_state covers all panel domains, health live/down, honest-empty lists, memory/spine pass-through, daemon down no fabrication, API alias, degraded snapshot, memory endpoint degrades.",
-      "source": "v2-tests",
-      "tag": "#grade/B",
-      "dims": "90/88/89/88/90/89"
-    },
-    {
-      "path": "tests/test_memory_confab.py",
-      "score": 89,
-      "letter": "B",
-      "cap": null,
-      "failure": "7 tests; substantive turn remembered, mic noise not remembered (parametrized), refusal not remembered, store failure swallowed, is_substantive, source_boost tiebreaker.",
-      "source": "v2-tests",
-      "tag": "#grade/B",
-      "dims": "90/88/89/88/90/89"
-    },
-    {
-      "path": "tests/test_probate.py",
-      "score": 89,
-      "letter": "B",
-      "cap": null,
-      "failure": "9+ tests; extract_estate_name, debtors phrasing, court roles rejected, county extraction, find_probate parses/filters, scout records/dedups, fetch failure, zero findings, DAILY_MAX_PAGES, run_scheduled default category, sweep accumulates.",
-      "source": "v2-tests",
-      "tag": "#grade/B",
-      "dims": "90/88/89/88/90/89"
-    },
-    {
-      "path": "tests/test_researcher.py",
-      "score": 89,
-      "letter": "B",
-      "cap": null,
-      "failure": "11 tests; sanitize_redacts injection+strips invisible, decode_ddg_redirect, parse_results, extract_research_facts parses+filters, bad output empty, research extracts+stores, gather concatenates sources/caps budget/empty, no results documented, fetch failure documented.",
-      "source": "v2-tests",
-      "tag": "#grade/B",
-      "dims": "90/88/89/88/90/89"
-    },
-    {
-      "path": "tests/test_revenue_heal.py",
-      "score": 89,
-      "letter": "B",
-      "cap": null,
-      "failure": "7 tests; scan files repair for dark producer, no action when healthy, never false-triggers when unassessable, check_producer zero yield, healthy does not file, gated does not file, filed task is deduped + pickable by loop.",
-      "source": "v2-tests",
-      "tag": "#grade/B",
-      "dims": "90/88/89/88/90/89"
-    },
-    {
-      "path": "tests/test_sica_loop.py",
-      "score": 89,
-      "letter": "B",
-      "cap": null,
-      "failure": "8 tests; loop runs each task, max_steps, deadline, tracks best, next_task_from_archive uses brain with archive context, empty tasks is noop.",
-      "source": "v2-tests",
-      "tag": "#grade/B",
-      "dims": "90/88/89/88/90/89"
-    },
-    {
-      "path": "tests/test_voice_wake.py",
-      "score": 89,
-      "letter": "B",
-      "cap": null,
-      "failure": "17 tests; command after wake, hey ace prefix, midsentence, at end, no wake, near-miss words, bare wake, STT filler padding (bare and with command), plural/possessive mishearings, real save command preserved, case-insensitive, empty/blank is None, utah synonym, STT drops ace to \"Is\", leading \"is\" does not fire on random speech, resolve_command audio_wake, without audio_wake still strict.",
-      "source": "v2-tests",
-      "tag": "#grade/B",
-      "dims": "90/88/89/88/90/89"
-    },
-    {
-      "path": "tests/test_canary.py",
-      "score": 90,
-      "letter": "A",
-      "cap": null,
-      "failure": "9 tests; futures session clock open/closed, run_scheduled aggregate, probe crash, drift detector, hog detection (two-consecutive rule).",
-      "source": "v2-tests",
-      "tag": "#grade/A",
-      "dims": "91/89/90/89/91/90"
-    },
-    {
-      "path": "tests/test_cron_governor.py",
-      "score": 90,
-      "letter": "A",
-      "cap": null,
-      "failure": "7 tests; light senders never load-gated, heavy defers under high load, takes slot, blocked when slot held, in-daemon exempt, substrate red, real flock mutex.",
-      "source": "v2-tests",
-      "tag": "#grade/A",
-      "dims": "91/90/90/89/90/90"
-    },
-    {
-      "path": "tests/test_daemon_server.py",
-      "score": 90,
-      "letter": "A",
-      "cap": null,
-      "failure": "3 tests; ping/status (non-blocking <50ms), METHOD_NOT_FOUND, invalid params rejected. Real unix socket + real WorkerPool.",
-      "source": "v2-tests",
-      "tag": "#grade/A",
-      "dims": "91/90/90/89/91/90"
-    },
-    {
-      "path": "tests/test_enrich.py",
-      "score": 90,
-      "letter": "A",
-      "cap": null,
-      "failure": "16 tests; extract_emails (real/junk/placeholder), best_email, find_email (scrape/search/entity/own-site/wrong-entity/unresolvable), domain_accepts_mail (MX/A fallback), verify_email, default verify path.",
-      "source": "v2-tests",
-      "tag": "#grade/A",
-      "dims": "91/90/90/89/90/90"
-    },
-    {
-      "path": "tests/test_fire_grader.py",
-      "score": 90,
-      "letter": "A",
-      "cap": null,
-      "failure": "11 tests; grade (long target/stop/short/timeout/ungradable), run_scheduled (grades bars, ungradable historical, infers symbol, handles errors).",
-      "source": "v2-tests",
-      "tag": "#grade/A",
-      "dims": "91/90/90/89/91/90"
-    },
-    {
-      "path": "tests/test_mail_replies.py",
-      "score": 90,
-      "letter": "A",
-      "cap": null,
-      "failure": "10 tests; reply pages+records, vendor noise ignored, bounce marks ledger, message-id idempotent, state advances per account, owner self-mail never counts, no creds honest gate, imap failure never raises, classify pure, bounced_recipient extraction.",
-      "source": "v2-tests",
-      "tag": "#grade/A",
-      "dims": "91/90/90/89/91/90"
-    },
-    {
-      "path": "tests/test_probate_outreach.py",
-      "score": 90,
-      "letter": "A",
-      "cap": null,
-      "failure": "10 tests; owner mailing address, compose_letter content, queue gated (writes letter), queue with provider, skips no-addr, run_scheduled skips red substrate, situs_mail fallback, queue accepts situs_mail, 3-mile average, silent when gated.",
-      "source": "v2-tests",
-      "tag": "#grade/A",
-      "dims": "91/90/90/89/91/90"
-    },
-    {
-      "path": "tests/test_router.py",
-      "score": 90,
-      "letter": "A",
-      "cap": null,
-      "failure": "40+ parametrized tests; social/weather/brief/time/brain/local intents; social only matches whole message; ambiguous answers not hijacked; curated knowledge pack; unrelated does not hijack; empty is quick; weather beats reasoning keyword; leads route to grounded leads capability.",
-      "source": "v2-tests",
-      "tag": "#grade/A",
-      "dims": "91/89/90/89/91/90"
-    },
-    {
-      "path": "tests/test_sica.py",
-      "score": 90,
-      "letter": "A",
-      "cap": null,
-      "failure": "14 tests; utility formula (all cases including env-overridable limits), graded pytest scoring, make_attempt, archive record/count/best, archive survives corrupt line, propose_governed green+red+disabled.",
-      "source": "v2-tests",
-      "tag": "#grade/A",
-      "dims": "91/89/90/89/91/90"
-    },
-    {
-      "path": "tests/test_sms_daily_cap.py",
-      "score": 90,
-      "letter": "A",
-      "cap": null,
-      "failure": "6 tests; sends count toward cap, counter persists across processes, resets next day, failed relay does not consume cap, injected send_fn bypasses cap.",
-      "source": "v2-tests",
-      "tag": "#grade/A",
-      "dims": "91/90/90/89/91/90"
-    },
-    {
-      "path": "tests/test_voice_stt.py",
-      "score": 90,
-      "letter": "A",
-      "cap": null,
-      "failure": "5 tests; importing stt forces HF offline, offline default yields to explicit override, default STT prefers whisper, subprocess STT recovers from hung worker, Whisper drops silence hallucination keeps speech.",
-      "source": "v2-tests",
-      "tag": "#grade/A",
-      "dims": "91/90/90/89/91/90"
-    },
-    {
-      "path": "tests/test_whispercpp_stt.py",
-      "score": 90,
-      "letter": "A",
-      "cap": null,
-      "failure": "10 tests; transcribe posts WAV+returns text, failure arms cooldown, junk response empty, default engine prefers whispercpp when provisioned, falls back when unprovisioned, clean_transcript kills non-speech annotations (named live incident), best_model prefers small.en, stranger_pids excludes own child+self (named 6-servers incident).",
-      "source": "v2-tests",
-      "tag": "#grade/A",
-      "dims": "91/89/90/89/91/90"
-    },
-    {
-      "path": "tests/test_backtest.py",
-      "score": 91,
-      "letter": "A",
-      "cap": null,
-      "failure": "12 tests; simulate_trade outcomes (long/short/eod), aggregate, mean-reversion OHLC, max_hold cap, OOS split. Real numeric assertions throughout.",
-      "source": "v2-tests",
-      "tag": "#grade/A",
-      "dims": "93/90/91/90/91/92"
-    },
-    {
-      "path": "tests/test_daemon_wire.py",
-      "score": 91,
-      "letter": "A",
-      "cap": null,
-      "failure": "8 tests; frame encode/decode roundtrip, oversize rejection, JSON-RPC parse/envelopes, binary ticks/PCM roundtrip. Pure serialization.",
-      "source": "v2-tests",
-      "tag": "#grade/A",
-      "dims": "92/90/91/90/92/91"
-    },
-    {
-      "path": "tests/test_governor.py",
-      "score": 91,
-      "letter": "A",
-      "cap": null,
-      "failure": "8 tests; production threshold, oversubscribed shedding, admits at full, inflight cap, snapshot, contextmanager releases, read_admission scenarios, respects inflight cap.",
-      "source": "v2-tests",
-      "tag": "#grade/A",
-      "dims": "92/91/91/90/91/91"
-    },
-    {
-      "path": "tests/test_leads.py",
-      "score": 91,
-      "letter": "A",
-      "cap": null,
-      "failure": "14+ tests; chain filter, build_query niche-broadening, find_parses_filters_shapes, extract_contact, scout records/dedups, frontier_tiles, scout_frontier, run_scheduled (cursor/caps/failed tile/substrate red), Overpass 429 failover.",
-      "source": "v2-tests",
-      "tag": "#grade/A",
-      "dims": "92/90/91/90/92/91"
-    },
-    {
-      "path": "tests/test_local.py",
-      "score": 91,
-      "letter": "A",
-      "cap": null,
-      "failure": "18 tests; think returns local/empty/NO_FAB, quick vs heavy, native thinking, num_ctx cap, truncation, unavailable raises, think_stream, http_runner unreachable, _parse_message, load_guard (above/below/disabled/real/injected).",
-      "source": "v2-tests",
-      "tag": "#grade/A",
-      "dims": "92/91/91/90/92/91"
-    },
-    {
-      "path": "tests/test_outreach.py",
-      "score": 91,
-      "letter": "A",
-      "cap": null,
-      "failure": "18+ tests; compose (CAN-SPAM footer), content_lint, pick_channel, queue (counts/suppresses/gates), dedup, send refused placeholder, run_scheduled, SMS leads, skips chains, substrate red, queue refuses probate campaign, non-SMB skipped, real address proceeds, business site, delivered send flips status, deliverability gate.",
-      "source": "v2-tests",
-      "tag": "#grade/A",
-      "dims": "92/90/91/90/92/91"
-    },
-    {
-      "path": "tests/test_outreach_cadence.py",
-      "score": 91,
-      "letter": "A",
-      "cap": null,
-      "failure": "7 tests; business hours window, refuses 5am, 500/day arithmetic, auto channel emails+texts+cap, cap at limit, iMessage fallback without Twilio, personalization + spam gate. Named after real production incident.",
-      "source": "v2-tests",
-      "tag": "#grade/A",
-      "dims": "92/90/91/90/92/91"
-    },
-    {
-      "path": "tests/test_pushover.py",
-      "score": 91,
-      "letter": "A",
-      "cap": null,
-      "failure": "12 tests; gated without creds, disabled master switch, injected transport, group key, emergency priority, url+url_title, non-ok response documented, transport exception never raises, legacy key normalization, available() reflects creds, e2ee encrypts fields, e2ee matches openssl reference.",
-      "source": "v2-tests",
-      "tag": "#grade/A",
-      "dims": "92/90/92/90/91/91"
-    },
-    {
-      "path": "tests/test_sms_creds_gate.py",
-      "score": 91,
-      "letter": "A",
-      "cap": null,
-      "failure": "7 tests; no file=unavailable, complete creds, empty sid+from stranded phone leads (named live incident), whitespace/missing keys, malformed json, incomplete falls back to imessage.",
-      "source": "v2-tests",
-      "tag": "#grade/A",
-      "dims": "92/90/91/90/92/91"
-    },
-    {
-      "path": "tests/test_win.py",
-      "score": 91,
-      "letter": "A",
-      "cap": null,
-      "failure": "9 tests; roundtrip float64, preserves NaN/Inf, 2D ticks shape, int16/float32, zero-copy view of buffer, bad magic fail-loud, truncated payload fail-loud, never returns JSON on bad input, data_server roundtrips stats over real socket, data_server fail-loud on garbage.",
-      "source": "v2-tests",
-      "tag": "#grade/A",
-      "dims": "92/90/91/90/92/91"
-    },
-    {
-      "path": "tests/test_alerts.py",
-      "score": 92,
-      "letter": "A",
-      "cap": null,
-      "failure": "14 tests; stream gating, priorities, quiet hours (midnight-wrap), storm dedup (persisted cross-restart), trade TTL, hourly budget. Capturing sender. Excellent breadth.",
-      "source": "v2-tests",
-      "tag": "#grade/A",
-      "dims": "93/92/91/91/93/93"
-    },
-    {
-      "path": "tests/test_consolidate.py",
-      "score": 92,
-      "letter": "A",
-      "cap": null,
-      "failure": "8 tests; provenance, Newman regression through consolidation, promoted marks, brain failures leave turn for retry, bad fact skipped, duplicate reinforcement, decay, store down abort.",
-      "source": "v2-tests",
-      "tag": "#grade/A",
-      "dims": "93/91/92/91/93/93"
-    },
-    {
-      "path": "tests/test_selfcode.py",
-      "score": 92,
-      "letter": "A",
-      "cap": null,
-      "failure": "9 tests; kill-switch blocks+documented, green suite keeps change on branch, red suite discards+documents, claude crash documented, auto-merge on green merges+pushes, red never merges, auto-merge flag gates, refuses dirty tree.",
-      "source": "v2-tests",
-      "tag": "#grade/A",
-      "dims": "93/91/92/91/93/92"
-    },
-    {
-      "path": "tests/test_sica_goals.py",
-      "score": 92,
-      "letter": "A",
-      "cap": null,
-      "failure": "25+ tests; revenue-weighted rotation, probate/outreach/leads/baseline/frontend/research signals all grounded, observe_deck, research signal sanitizes adversarial page text, domain rotation cold-streak skip, single recent pass keeps warm, does not stall when all cold, defensive when telemetry raises.",
-      "source": "v2-tests",
-      "tag": "#grade/A",
-      "dims": "93/91/92/91/93/92"
-    },
-    {
-      "path": "tests/test_supervisor.py",
-      "score": 92,
-      "letter": "A",
-      "cap": null,
-      "failure": "15 tests; spawns all children, drain terminates, restarts dead child, restarts wedged child (probe false), N consecutive failures required, probe success resets streak, circuit breaks after max_restarts, reset_circuit rearms, children_down alert best effort, http_probe false on closed port, voice_audio_probe deaf-window restart, child spec env merged.",
-      "source": "v2-tests",
-      "tag": "#grade/A",
-      "dims": "93/91/92/91/93/92"
-    },
-    {
-      "path": "tests/test_trading.py",
-      "score": 92,
-      "letter": "A",
-      "cap": null,
-      "failure": "20+ tests; evaluate (breakout/breakdown/range), run gated without feed, run with feed fires real signal, feed failure documented, lab_state gated+dormant, never shows unimplemented engine live, per-engine fire counts, evaluate_meanrev, open position suppresses refire, cooldown suppresses+rearms, first fire not suppressed, fleet_backtest per engine, no fabrication when no bars, lab_state carries backtest, fleet_backtest writes config, dash_config reads written config, lab_state auto-populates.",
-      "source": "v2-tests",
-      "tag": "#grade/A",
-      "dims": "93/91/92/91/93/92"
-    },
-    {
-      "path": "tests/test_voice_tts.py",
-      "score": 92,
-      "letter": "A",
-      "cap": null,
-      "failure": "14 tests; afplay time-bounded so hung player cannot deafen mic, speak synthesizes real WAV+plays, empty text does not play, drain_sentences splits/holds remainder/number boundary/terminator at end/newlines, speak_stream pipelines sentences in order, fires on_start once, whitespace plays nothing, survives bad synth clip, stop_speaking writes fence, stop mid-stream drops queued sentences, stale fence does not mute.",
-      "source": "v2-tests",
-      "tag": "#grade/A",
-      "dims": "93/91/92/91/93/92"
-    },
-    {
-      "path": "tests/test_voice_vad.py",
-      "score": 92,
-      "letter": "A",
-      "cap": null,
-      "failure": "11+ tests; silence never starts segment, lone spike rejected, speech+silence emits one segment, capped at max_frames, two segments in sequence, armed capture survives post-wake gap, armed long gap then command (two named regressions), armed bare wake emits nothing, Silero scores speech far above noise (conditionally skipped real model test).",
-      "source": "v2-tests",
-      "tag": "#grade/A",
-      "dims": "93/91/92/91/93/92"
-    },
-    {
-      "path": "tests/test_brain.py",
-      "score": 93,
-      "letter": "A",
-      "cap": null,
-      "failure": "25+ tests; think(), extract_facts(), is_refusal(), subprocess boundary (missing binary/nonzero/timeout/happy); NO_FAB contract; PERSONA content. ScriptedRunner.",
-      "source": "v2-tests",
-      "tag": "#grade/A",
-      "dims": "95/92/92/92/94/93"
-    },
-    {
-      "path": "tests/test_brain_stream.py",
-      "score": 93,
-      "letter": "A",
-      "cap": null,
-      "failure": "20+ tests; decode_stream, split_thinking, think_stream; --tools flag, --strict-mcp-config, --setting-sources project, native thinking blocks. ScriptedStreamRunner.",
-      "source": "v2-tests",
-      "tag": "#grade/A",
-      "dims": "94/93/91/91/94/93"
-    },
-    {
-      "path": "tests/test_core.py",
-      "score": 93,
-      "letter": "A",
-      "cap": null,
-      "failure": "35+ tests; all four tell() branches, persist=False, capability routing, conversation thread, learn-on-miss, voice refuses learn, streaming, learn_first, CLI entrypoints.",
-      "source": "v2-tests",
-      "tag": "#grade/A",
-      "dims": "94/92/93/92/94/94"
-    },
-    {
-      "path": "tests/test_integration_pg.py",
-      "score": 93,
-      "letter": "A",
-      "cap": null,
-      "failure": "12 tests; auto-skipped without Postgres; schema idempotency, store/recall roundtrip, Newman regression live, dedup reinforces, FTS, entity graph, decay SQL parity, consolidation provenance, pool concurrent.",
-      "source": "v2-tests",
-      "tag": "#grade/A",
-      "dims": "94/93/93/92/93/93"
-    },
-    {
-      "path": "tests/test_ledger.py",
-      "score": 93,
-      "letter": "A",
-      "cap": null,
-      "failure": "14 tests; real Postgres integration; record_lead never-twice, outreach suppression, record_mail/post/sync, write_emits_to_dashboard, recent_returns_shaped, counts, bars, fire grading, uncontacted_smb_leads.",
-      "source": "v2-tests",
-      "tag": "#grade/A",
-      "dims": "94/93/93/92/93/93"
-    },
-    {
-      "path": "tests/test_memory_logic.py",
-      "score": 93,
-      "letter": "A",
-      "cap": null,
-      "failure": "22 tests; RRF fusion, content words, lexical overlap, answer gate thresholds, write decisions (dedup/exact/paraphrase/entity-path), core/knowledge never superseded, entity path threshold, whole window scan, decay formula, should_archive, recall_pool.",
-      "source": "v2-tests",
-      "tag": "#grade/A",
-      "dims": "94/92/93/92/94/93"
-    },
-    {
-      "path": "tests/test_property.py",
-      "score": 93,
-      "letter": "A",
-      "cap": null,
-      "failure": "20+ tests; ArcGIS hit/owner-not-found/ARV extraction/_to_money/no-source gate/radius_check/enrich pipeline/owner_mail/situs_mail/area_value_avg (stats/no-value-layer/server-garbage/bbox-fallback)/ownership_status/debt_signals (numerous paths). Named live bugs.",
-      "source": "v2-tests",
-      "tag": "#grade/A",
-      "dims": "94/92/93/92/94/93"
-    },
-    {
-      "path": "tests/test_selfcode_guard.py",
-      "score": 93,
-      "letter": "A",
-      "cap": null,
-      "failure": "8 tests (6 parametrized); safety core set is the six documented paths, every safety file refused off-limits, sandbox path allowed. Exercises REAL byte-check (not stubbed).",
-      "source": "v2-tests",
-      "tag": "#grade/A",
-      "dims": "94/92/93/92/94/93"
-    },
-    {
-      "path": "tests/test_selfcode_tiers.py",
-      "score": 93,
-      "letter": "A",
-      "cap": null,
-      "failure": "14+ tests; classify safety/spine/product/leaf, strictest across files, Tier-A min_supervised, B/C/D never automerge, byte-check off-limits test, kill_switch_smoke refuses+not polluting failure feed, real off_limits still records, Tier-A auto-merges with enough supervised, B stays proposal, insufficient supervised stays proposal, propose threads repo.",
-      "source": "v2-tests",
-      "tag": "#grade/A",
-      "dims": "94/92/93/92/93/93"
-    },
-    {
-      "path": "tests/test_sica_autonomy.py",
-      "score": 93,
-      "letter": "A",
-      "cap": null,
-      "failure": "19 tests; kill-switch, foundation gate, repo not ready, high load defers, calm proceeds past load gate, meta-task through governed, fallback to default task, propagate (fast-forward/dirty-nonoverlap/overlap/non-ff), run_cycle propagates on merge, no propagate when not merged, frontend verify after merge, filed revenue preempts rotation, browser finding does not preempt revenue, no frontend verify on nonfrontend, autonomy slot from archive best.",
-      "source": "v2-tests",
-      "tag": "#grade/A",
-      "dims": "94/92/93/92/94/93"
-    },
-    {
-      "path": "tests/test_tell_stream.py",
-      "score": 93,
-      "letter": "A",
-      "cap": null,
-      "failure": "26+ tests; tell_stream streams thinking then answer, always reasons with memory as context, grounding event, no grounding when cold, capability has no grounding, remembers turn after brain, does not remember refusal, degrades when brain unavailable, carries recent conversation, social is instant, threads want_thinking, reset_conversation, empty input, weather capability, local_quick without brain, reasoning to brain, local refusal escalates, local unavailable escalates.",
-      "source": "v2-tests",
-      "tag": "#grade/A",
-      "dims": "94/92/93/92/94/93"
-    },
-    {
-      "path": "tests/test_voice_agent.py",
-      "score": 93,
-      "letter": "A",
-      "cap": null,
-      "failure": "27+ tests; no wake is ignored, wake runs+speaks+publishes, nonempty brain answer spoken without second call, empty falls back to stream, instant capability skips tell_stream, voice skips thinking for latency, only answer spoken not thinking, on_speaking fires when audio begins, wake publishes immediate wake before brain, bare wake pulses orb, bare wake no brain call (with cooldown), audio wake empty is silent, empty answer not spoken, audio wake accepts STT when text wake missing, never raises if speak/publish fail, speakable shortens long list. Named multiple live incidents.",
-      "source": "v2-tests",
-      "tag": "#grade/A",
-      "dims": "94/92/93/92/94/93"
-    },
-    {
-      "path": "tests/test_wc_feed.py",
-      "score": 93,
-      "letter": "A",
-      "cap": null,
-      "failure": "40+ tests; parse_candle, closed_bars, ingest, run gates, run fires on real closed bar, ohlc_bars, run persists closed bars, run survives ledger without record_bars, no fire before enough bars, CDP port, wc_page falls back to ipv6, ensure lifecycle cases (5 scenarios), barstream hooks once+flushes incrementally, no reevaluation, trims buffer, fires on signal EDGE not level, silent_watch pages once, spawn disables tab pausing, normalize_epoch, barstream feed reports bar_close, barstream writes ticks to live surface, tick failure never stalls, warm_boot does not refire, warm_boot still fires on flip, sig caller-owned, cold store is cold start, provenance+cooldown suppresses rearm, refires after cooldown ages out, suppressed while open, pgrep pattern option-safe. Named 6+ live incidents.",
-      "source": "v2-tests",
-      "tag": "#grade/A",
-      "dims": "94/92/93/92/94/93"
-    },
-    {
-      "path": "tests/test_imessage_quoting.py",
-      "score": 94,
-      "letter": "A",
-      "cap": null,
-      "failure": "6+1 tests; parametrized injection attempts (apostrophes/double-quotes/em-dash/injection attempt/newline); body in argv not script source; live osascript syntax check. Security-focused.",
-      "source": "v2-tests",
-      "tag": "#grade/A",
-      "dims": "94/93/96/92/94/94"
-    },
-    {
-      "path": "tests/test_memory_pipeline.py",
-      "score": 94,
-      "letter": "A",
-      "cap": null,
-      "failure": "25+ tests; admission gate (all failure modes), write provenance, dedup reinforcement, supersede (paraphrase/Newman regression/non-top-1/multiple stale), recall (empty/archived/hybrid/embedder down/entity boost/store down), answer gate, decay, curated lane. Regression-named cases.",
-      "source": "v2-tests",
-      "tag": "#grade/A",
-      "dims": "95/94/94/93/95/94"
-    },
-    {
-      "path": "tests/test_selfcode_offlimits.py",
-      "score": 94,
-      "letter": "A",
-      "cap": null,
-      "failure": "~24 tests; per-file byte-check refuses each safety file, one canonical reason, no retry loop, off-limits rejected task not requeued (end-to-end queue invariant via real sica_autonomy.run_cycle), classify marks each safety file Tier-D, automerge refuses safety file.",
-      "source": "v2-tests",
-      "tag": "#grade/A",
-      "dims": "95/93/94/93/95/94"
-    },
-    {
-      "path": "tests/fakes.py",
-      "score": 95,
-      "letter": "A",
-      "cap": null,
-      "failure": "Production-quality fake implementations: full StoreBackend protocol, deterministic embedder, fail-injection patterns. This is what separates real testing from stub-based.",
-      "source": "v2-tests",
-      "tag": "#grade/A",
-      "dims": "96/95/95/94/96/96"
-    },
-    {
-      "path": "tests/conftest.py",
-      "score": 96,
-      "letter": "A",
-      "cap": null,
-      "failure": "Exemplary test infra: injectable fakes, autouse _restore_boundaries, FakeFailureStore, FakeEmbedder, ZeroReranker, ScriptedRunner. Clears all state after every test.",
-      "source": "v2-tests",
-      "tag": "#grade/A",
-      "dims": "97/96/96/96/97/97"
+      "dims": null
     }
   ]
 }

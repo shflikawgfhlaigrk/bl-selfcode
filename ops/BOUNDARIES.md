@@ -72,4 +72,18 @@ cd ~/Desktop/ProjectUtah
 ./ops/cleanup-boundaries.sh --apply  # archive Ace plists, stop Sovereign conflict, bootstrap Utah
 ```
 
+## launchd plist sync (drift fix)
+
+After editing `ops/launchd/*.plist`, sync installed copies without the full boundary cleanup:
+
+```bash
+cd ~/Desktop/ProjectUtah
+./ops/sync-launchd.sh                # dry-run: semantic drift + unified diffs
+./ops/sync-launchd.sh --apply        # copy + reload interval crons only
+./ops/sync-launchd.sh --apply --reload-critical  # also bootstrap supervisor/postgres/verify/tailserve
+```
+
+`utah.drift.plist_drift()` compares parsed plist payloads (not raw bytes), so
+`~/ProjectUtah` vs `~/Desktop/ProjectUtah` symlink spellings do not false-alarm.
+
 After cleanup, open the deck: **http://127.0.0.1:8766/**

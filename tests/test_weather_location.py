@@ -4,6 +4,8 @@ back to home; an unfindable place degrades to an honest "I don't know" (never a
 fabricated reading for the wrong city). Geocode + fetch are injected — zero network."""
 from __future__ import annotations
 
+import pytest
+
 from utah import config
 from utah.product import weather
 
@@ -107,6 +109,48 @@ def test_unknown_place_is_honest_not_fabricated(tmp_path):
     )
     assert "I don't know" in text and "Narnia" in text
     assert fetched["n"] == 0                       # never fetched a wrong-city reading
+
+
+@pytest.mark.parametrize("query", [
+    "what's the weather like in Atlanta",
+    "what is the weather like in Atlanta today",
+    "how's the weather like in Atlanta right now",
+    "weather today in Atlanta",
+    "what's the weather gonna be in Atlanta",
+    "what's the weather going to be in Atlanta tomorrow",
+])
+def test_filler_or_timeword_before_city_still_geocodes_city(query, tmp_path):
+    """A filler ('like', 'gonna be') or time word sitting BETWEEN the verb and the
+    city must not swallow the place — this was the Atlanta -> Gulf Shores home-default
+    bug ('what's the weather like in Atlanta' returned the config home town)."""
+    seen = {}
+
+    def geo(name):
+        seen["name"] = name
+        return _ATLANTA
+
+    text = weather.answer(
+        query, geocode=geo, fetch=lambda *a, **k: _CUR,
+        now=lambda: 1000.0, cache_path=str(tmp_path / "w.json"),
+    )
+    assert seen.get("name", "").strip().lower() == "atlanta", f"{query!r} did not geocode Atlanta"
+    assert "Gulf Shores" not in text
+
+
+def test_courtesy_pronoun_is_not_a_place(tmp_path):
+    """'what's the weather for me' must NOT treat 'me' as a city — home default."""
+    seen = {}
+
+    def geo(name):
+        seen["called"] = name
+        return None
+
+    text = weather.answer(
+        "what's the weather for me", geocode=geo, fetch=lambda *a, **k: _CUR,
+        now=lambda: 1000.0, cache_path=str(tmp_path / "w.json"),
+    )
+    assert "called" not in seen          # "me" is never geocoded as a place
+    assert "Gulf Shores" in text          # home default
 
 
 def test_named_city_forecast_routes_with_its_coords(tmp_path):

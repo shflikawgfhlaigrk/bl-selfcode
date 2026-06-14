@@ -854,7 +854,16 @@ async function poll(){
      snapshot. Real data, busy machine — say so instead of pretending DORMANT. */
   DEGRADED=(st&&st.degraded)||{}; if(m&&m.degraded)DEGRADED.memory=m.degraded;
   const busy=Object.keys(DEGRADED).length>0;
-  setStateBadge($("spine-state"),busy?"ONLINE — UNDER LOAD":"ONLINE",busy?"warn":"ok");
+  const op=(st&&st.operator)||{}, oc=op.outcome||{};
+  const revOk=op.present?!!op.revenue_ok:null;
+  const mailGated=op.present?!!op.mail_gated:null;
+  let spineLabel=busy?"ONLINE — UNDER LOAD":"ONLINE";
+  let spineTier=busy?"warn":"ok";
+  if(revOk===false){
+    spineLabel=busy?"ONLINE — NO REVENUE · LOAD":"ONLINE — NO REVENUE";
+    spineTier="warn";
+  }
+  setStateBadge($("spine-state"),spineLabel,spineTier);
   // header metrics
   $("h-load").textContent=g.load_per_core!=null?g.load_per_core:"—";
   $("h-bus").textContent=b.published!=null?b.published:"—";
@@ -865,6 +874,12 @@ async function poll(){
   /* lab/feed gate truth comes from the live snapshot — the GATED markers were
      hardcoded when the feed was still down and lied after it went live */
   const labLive=((st&&st.lab)||{}).feed==="live";
+  const outBig=revOk===null?"—":(revOk?"FLOWING":"$0");
+  const outSub=op.present
+    ?(oc.sends!=null?`${oc.sends} sends · ${oc.sales??0} sales / ${(oc.window_h??"?")}h`:(oc.reason||"no outcome data"))
+    :"operator sweep not on disk yet";
+  const mailBig=mailGated===null?"—":(mailGated?"GATED":"READY");
+  const mailSub=mailGated===null?"awaiting operator sweep":(mailGated?"integration off · not configured":"SMTP verified · sending enabled");
   const sys=[
     {nm:"Local Core Daemon", drill:"daemon", big:fmtUp(s.uptime_s), sub:"unix · ~/.utah/run · v"+s.version, st:"UPTIME", led:"ok"},
     {nm:"Event Bus", drill:"bus", big:b.published, sub:b.subscribers+" subs · "+b.dropped+" dropped", st:"PUBLISHED", led:"ok"},
@@ -872,6 +887,8 @@ async function poll(){
     {nm:"Governor", drill:"governor", big:g.load_per_core, sub:"load1 "+g.load1+" · "+g.ncpu+" cores", st:"LOAD/CORE", led:g.load_per_core>1.2?"warn":"ok"},
     {nm:"Memory Forge", drill:"memory", big:(m&&m.live!=null)?m.live:"—", sub:m?("total "+m.total+" · "+m.entities+" ents"+(m.degraded?" · under load":"")):"recall · consolidation", st:"LIVE FACTS", led:m?(m.degraded?"warn":"ok"):"off"},
     {nm:"Voice Loop", drill:"voice", big:(voice.status||"—").toUpperCase(), sub:voice.segments!=null?(voice.segments+" segs · wake-armed"):"vad · stt · brain · tts", st:"PIPELINE", led:vlive?"ok":(voice.status?"warn":"off")},
+    {nm:"Outcome Gate", drill:null, big:outBig, sub:outSub, st:"REVENUE", led:revOk===null?"off":(revOk?"ok":"warn"), gated:revOk===null},
+    {nm:"Mail Integration", drill:null, big:mailBig, sub:mailSub, st:"MAIL", led:mailGated===null?"off":(mailGated?"off":"ok"), gated:mailGated===true},
     {nm:"Risk Firewall", drill:"risk", big:"GATED", sub:"trade kernel · pre-exec", st:"NO PRODUCER", led:"off", gated:true},
     {nm:"Sync & Ingest", drill:"sync", big:labLive?"LIVE":"GATED", sub:"wealthcharts rx · cdp", st:labLive?"TICKING":"NO PRODUCER", led:labLive?"ok":"off", gated:!labLive},
   ];
@@ -879,7 +896,8 @@ async function poll(){
      HTML entities decode before handler JS parses, so esc() can't protect that context */
   $("spine").innerHTML=sys.map(r=>{
     const state=r.gated?'gated':r.led;
-    return `<div class="sysrow drillable${r.gated?' gated':''}" data-drill="${esc(r.drill)}"><span class="led ${esc(r.led)}"></span>`+
+    const drillAttr=r.drill?` data-drill="${esc(r.drill)}"`:"";
+    return `<div class="sysrow drillable${r.gated?' gated':''}${r.drill?'':' no-drill'}"${drillAttr}><span class="led ${esc(r.led)}"></span>`+
     `<div><div class="nm">${esc(r.nm)}<span class="hint">TAP</span></div><div class="sub">${esc(r.sub)}</div></div>`+
     `<div><div class="big">${esc(r.big)}</div><div class="st">${stateBadge(r.st, state, r.nm+": "+r.big+" ("+r.st+")")}</div></div></div>`;
   }).join("");

@@ -166,6 +166,9 @@ def test_prompts_scope_no_tools_to_step_not_aces_identity():
         "I do not know who won.",
         "Not in the context. As a rough estimate, ~11 m/s.",
         "  not supported by the context  ",
+        "I can't provide personal or sensitive information.",
+        "I cannot provide personal or sensitive information about Michael.",
+        "I can't share personal information like that.",
     ],
 )
 def test_is_refusal_catches_soft_refusals(text):

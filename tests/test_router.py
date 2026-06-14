@@ -13,6 +13,7 @@ from utah.router import Route, route
 @pytest.mark.parametrize("text", [
     "hi", "hello", "hey", "yo", "good morning", "hey ace",
     "thanks", "thank you", "thx", "cheers",
+    "thanks ace", "Thanks ace, you're the best",
     "bye", "good night", "see ya",
     "how are you", "what's up", "cool", "nice", "got it", "sounds good",
 ])
@@ -266,3 +267,72 @@ def test_is_self_or_project_exposes_the_self_question_predicate():
     assert is_self_or_project("what is project utah")
     assert not is_self_or_project("what's 2+2")
     assert not is_self_or_project("")
+
+
+# --- sensitive PII — SSN / social security never LOCAL_QUICK (J-048) ---
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "What is Michael Barber's social security number?",
+        "what's michael's ssn",
+        "social security number for michael barber",
+        "do you know his social-security #",
+    ],
+)
+def test_sensitive_pii_routes_to_brain(text):
+    assert route(text) is Route.BRAIN
+    assert route(text) is not Route.LOCAL_QUICK
+
+
+def test_is_sensitive_pii_exposes_the_predicate():
+    from utah.router import is_sensitive_pii
+
+    assert is_sensitive_pii("What is Michael Barber's social security number?")
+    assert not is_sensitive_pii("what's the weather like")
+    assert not is_sensitive_pii("")
+
+
+# --- live mail/outreach send status → grounded MAIL capability (BLA-440) ---
+# Regression: "did we send mail" missed _MAIL (word order) and fell through to
+# LOCAL_QUICK ("I don't know") while count phrasing already hit MAIL.
+
+@pytest.mark.parametrize("text", [
+    "how many emails sent today",
+    "did we send mail",
+    "did we send any mail today",
+    "have we sent outreach",
+    "any mail sent",
+    "any outreach sent today",
+    "outreach status",
+    "what's outreach status",
+])
+def test_mail_send_status_routes_to_grounded_mail_capability(text):
+    assert route(text) is Route.MAIL
+
+
+def test_mail_capability_does_not_steal_agentic_or_leads():
+    assert route("write an email about outreach") is Route.BRAIN
+    assert route("how many leads today") is Route.LEADS
+
+
+# --- live trading engine / edge → grounded ENGINE capability (BLA-441) ---
+# Regression: "trading edge" missed _ENGINE and hit LOCAL_QUICK (Douglas quote from
+# parametric 3B) instead of engine_audit-backed product edge.
+
+@pytest.mark.parametrize("text", [
+    "trading edge",
+    "what's our trading edge",
+    "trading lab status",
+    "engine status",
+    "what engines are live",
+    "trading audit",
+])
+def test_engine_and_trading_edge_routes_to_grounded_engine_capability(text):
+    assert route(text) is Route.ENGINE
+
+
+def test_engine_capability_does_not_steal_reasoning_or_agentic():
+    assert route("why does the engine lose money on ranges") is Route.BRAIN
+    assert route("write a trading engine in python") is Route.BRAIN

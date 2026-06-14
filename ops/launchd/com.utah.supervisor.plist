@@ -53,6 +53,19 @@
     <string>0.5</string>
     <key>UTAH_VOICE_FORCE_CAPTURE_S</key>
     <string>5.5</string>
+    <key>UTAH_STT_ENGINE</key>
+    <string>mlx</string>
+  </dict>
+
+  <key>HardResourceLimits</key>
+  <dict>
+    <key>NumberOfFiles</key>
+    <integer>65536</integer>
+  </dict>
+  <key>SoftResourceLimits</key>
+  <dict>
+    <key>NumberOfFiles</key>
+    <integer>65536</integer>
   </dict>
 
   <key>RunAtLoad</key>

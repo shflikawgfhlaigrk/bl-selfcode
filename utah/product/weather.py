@@ -261,14 +261,23 @@ def forecast(
 GeoCoder = Callable[[str], "tuple[float, float, str] | None"]
 
 #: Trailing time / courtesy words that follow a place name but aren't part of it.
-_TAIL = re.compile(
-    r"\s*\b(?:right now|now|currently|today|tonight|tomorrow|this (?:week|weekend|"
+#: Shared by :data:`_TAIL` (strips them off the lead form) and :data:`_LOC_PREP`
+#: (uses them as the right boundary of a place), so the two never disagree.
+_TAIL_WORDS = (
+    r"right now|now|currently|today|tonight|tomorrow|this (?:week|weekend|"
     r"morning|afternoon|evening)|the weekend|next (?:week|few days|days)|coming days|"
-    r"outlook|please|for me|outside|like|gonna be|going to be)\b.*$",
+    r"outlook|please|for me|outside|like|gonna be|going to be"
+)
+_TAIL = re.compile(rf"\s*\b(?:{_TAIL_WORDS})\b.*$", re.I)
+#: "... in/at/for/near/around <place>" — read from the FULL query (before the tail
+#: is cut) so a filler or time word sitting BETWEEN the verb and the place
+#: ("weather LIKE in Atlanta", "weather TODAY in Atlanta") can't swallow the city.
+#: The place runs lazily until the next tail word, punctuation, or end of string.
+_LOC_PREP = re.compile(
+    rf"\b(?:in|at|for|near|around|over)\s+(?P<loc>[A-Za-z][\w.'\- ]*?)"
+    rf"(?=\s+(?:{_TAIL_WORDS})\b|[?.!,]|$)",
     re.I,
 )
-#: "... in/at/for/near/around <place>" — the place runs to the end once the tail is cut.
-_LOC_PREP = re.compile(r"\b(?:in|at|for|near|around|over)\s+(?P<loc>[A-Za-z][\w.'\- ]*?)\s*$", re.I)
 #: "<place> weather|forecast|temperature|temp" — the place leads the query.
 _LOC_LEAD = re.compile(
     r"^(?:what(?:'s|s| is)?\s+|hows?\s+|the\s+)*"
@@ -276,10 +285,13 @@ _LOC_LEAD = re.compile(
     re.I,
 )
 #: A captured "place" that is really one of these is no place at all → home default.
+#: Includes the pronouns/adverbs that legitimately follow "for"/"near" ("for me",
+#: "for now") so they degrade to home instead of geocoding as a bogus city.
 _NOT_PLACE = {
     "the", "my", "your", "our", "this", "that", "a", "an", "current", "local",
     "today", "tomorrow", "tonight", "it", "here", "there", "what", "whats",
     "weather", "forecast", "temperature", "temp", "rain", "snow", "humidity",
+    "me", "us", "you", "now",
 }
 
 #: Resolved geocodes, cached for the process — place names are stable, so this
@@ -288,19 +300,31 @@ _NOT_PLACE = {
 _GEO_CACHE: dict[str, tuple[float, float, str]] = {}
 
 
+def _clean_loc(raw: str | None) -> str | None:
+    """Normalise a captured place; reject non-places (pronouns, bare nouns)."""
+    loc = " ".join((raw or "").split()).strip(" ,.-'")
+    return loc if loc and loc.lower() not in _NOT_PLACE else None
+
+
 def _extract_location(query: str) -> str | None:
     """The place named in *query*, or ``None`` to mean "home". Cheap, regex-only,
-    deliberately permissive: a wrong guess fails to geocode and is reported honestly."""
+    deliberately permissive: a wrong guess fails to geocode and is reported honestly.
+    An explicit "in/at/for/near <place>" is read from the FULL query first, so a time
+    word or filler between the verb and the place can't swallow the city; only then
+    does the lead form ("Atlanta weather") run, against the tail-stripped query."""
     q = (query or "").strip().rstrip("?.!")
     if not q:
         return None
+    m = _LOC_PREP.search(q)
+    if m:
+        loc = _clean_loc(m.group("loc"))
+        if loc:
+            return loc
     core = _TAIL.sub("", q).strip().rstrip(" ,.-")
-    for rx in (_LOC_PREP, _LOC_LEAD):
-        m = rx.search(core)
-        if not m:
-            continue
-        loc = " ".join(m.group("loc").split()).strip(" ,.-'")
-        if loc and loc.lower() not in _NOT_PLACE:
+    m = _LOC_LEAD.search(core)
+    if m:
+        loc = _clean_loc(m.group("loc"))
+        if loc:
             return loc
     return None
 

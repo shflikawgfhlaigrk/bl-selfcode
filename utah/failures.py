@@ -135,9 +135,13 @@ def record(source: str, kind: str, detail: str = "") -> None:
     except Exception:  # noqa: BLE001 — paging must never break recording
         log.debug("failure-page swallowed (source=%s kind=%s)", source, kind, exc_info=True)
     try:
-        from utah.integrations import discord_feed
+        src, knd = str(source), str(kind)
+        # J-016: never mirror discord/webhook failures back into the audit feed — that
+        # re-posts via discord.post → failures.record and blew up to 100k+ rows.
+        if src != "discord" and not knd.startswith("webhook_post"):
+            from utah.integrations import discord_feed
 
-        discord_feed.feed_audit(str(source), str(kind), str(detail))
+            discord_feed.feed_audit(src, knd, str(detail))
     except Exception:  # noqa: BLE001 — Discord must never break recording
         log.debug("failure-discord swallowed (source=%s kind=%s)", source, kind, exc_info=True)
 

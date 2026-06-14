@@ -68,6 +68,35 @@ def test_discord_hook_blowing_up_is_swallowed(monkeypatch, _fresh_store):
     assert len(_fresh_store.rows) == 1
 
 
+def test_record_skips_discord_audit_for_discord_source(monkeypatch, _fresh_store):
+    fed: list = []
+    monkeypatch.setattr(
+        "utah.integrations.discord_feed.feed_audit", lambda *a, **k: fed.append(a) or True
+    )
+    failures.record("discord", "webhook_post_failed", "405")
+    assert len(_fresh_store.rows) == 1
+    assert fed == []
+
+
+def test_record_skips_discord_audit_for_webhook_post_kinds(monkeypatch, _fresh_store):
+    fed: list = []
+    monkeypatch.setattr(
+        "utah.integrations.discord_feed.feed_audit", lambda *a, **k: fed.append(a) or True
+    )
+    failures.record("canary", "webhook_post_error", "timeout")
+    assert len(_fresh_store.rows) == 1
+    assert fed == []
+
+
+def test_record_still_audits_non_discord_failures(monkeypatch, _fresh_store):
+    fed: list = []
+    monkeypatch.setattr(
+        "utah.integrations.discord_feed.feed_audit", lambda *a, **k: fed.append(a) or True
+    )
+    failures.record("daemon", "brain_unavailable", "cli gone")
+    assert fed == [("daemon", "brain_unavailable", "cli gone")]
+
+
 def test_count_returns_real_count():
     failures.record("a", "b", "c")
     failures.record("a", "b", "d")
