@@ -25,6 +25,7 @@ import fcntl
 import logging
 import os
 import queue
+import re
 import subprocess
 import tempfile
 import threading
@@ -36,6 +37,28 @@ from utah import config
 from utah.daemon import runtime
 
 log = logging.getLogger("utah.voice.tts")
+
+#: Markdown headers at the START of a line (``## Title``) — dropped whole so the voice
+#: doesn't read the hashes. Anchored to line-start so a mid-token ``C#`` survives.
+_MD_HEADER_RE = re.compile(r"(?m)^[ \t]*#{1,6}[ \t]+")
+
+
+def clean_for_speech(text: str) -> str:
+    """Strip markdown formatting characters that a TTS engine reads ALOUD as words.
+
+    The brain answers in markdown (``**bold**``, ``* bullet``, ``` `code` ```), and Piper
+    pronounces ``*`` as the literal word "asterisk" — so an answer with any emphasis or
+    bullet became "asterisk asterisk ... asterisk". This is the single chokepoint every
+    spoken path funnels through (``synth_wav``), so cleaning here fixes voice AND chat
+    re-speak permanently. Conservative on purpose: removes ``*`` (bold/italic/bullets),
+    backticks (code), and line-leading header ``#`` — but LEAVES identifiers like ``C#``
+    and ``file_name`` intact so it never mangles a spoken term. Never raises."""
+    if not text:
+        return text
+    t = _MD_HEADER_RE.sub("", text)        # drop "## " header markers (line-start only)
+    t = t.replace("*", "").replace("`", "")  # bold / italic / bullets / code ticks
+    t = t.replace("~~", "")                  # strikethrough
+    return re.sub(r"[ \t]{2,}", " ", t)      # tidy the gaps the removals leave behind
 
 # Serialize ALL playback. A threading.Lock alone only covers ONE process — but the
 # voice loop and the web server are SEPARATE processes, each with its own lock, so two
@@ -236,7 +259,7 @@ class PiperTTS:
     def synth_wav(self, text: str, path: str) -> None:
         voice = self._load()
         with wave.open(path, "wb") as wf:
-            voice.synthesize_wav(text, wf)
+            voice.synthesize_wav(clean_for_speech(text), wf)
 
     def speak_stream(self, chunks: Iterable[str], on_start: Callable[[], None] | None = None) -> str:
         """Speak an INCREMENTAL text stream with sentence-level pipelining.
@@ -371,4 +394,4 @@ def speak_stream(chunks: Iterable[str], on_start: Callable[[], None] | None = No
 
 
 __all__ = ["TTS", "PiperTTS", "get_tts", "set_tts", "speak", "speak_stream",
-           "stop_speaking", "is_anything_playing"]
+           "stop_speaking", "is_anything_playing", "clean_for_speech"]
