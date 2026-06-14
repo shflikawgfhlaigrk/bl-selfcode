@@ -53,7 +53,7 @@ class ProofSpec:
     id: str
     claim: str
     system: str
-    artifact: str
+    artifact: str = ""                # "" for human/external claims with no code file:symbol
     proof_kind: str = "sql"
     proof_cmd: str | None = None      # None = dormant skeleton row (RED, no proof written yet)
     stress_cmd: str | None = None
