@@ -171,6 +171,14 @@ def _capability_reply(text: str, route: Route, hits: list) -> Reply | None:
         from utah.product import mail_status
 
         return Reply(text=mail_status.answer(text), source=ReplySource.CAPABILITY, hits=hits)
+    if route is Route.JOBS:
+        from utah.product import jobs_status
+
+        return Reply(text=jobs_status.answer(text), source=ReplySource.CAPABILITY, hits=hits)
+    if route is Route.ENGINE:
+        from utah.product import engine_status
+
+        return Reply(text=engine_status.answer(text), source=ReplySource.CAPABILITY, hits=hits)
     if route is Route.NEWS:
         # A news/headlines question → the researcher-backed news capability (real DDG
         # search + fetch + grounded extraction; the facts land in memory through the
