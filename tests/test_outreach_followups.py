@@ -13,7 +13,7 @@ class FakeLedger:
     def __init__(self, candidates_by_campaign=None):
         self._cands = candidates_by_campaign or {}
         self.logged: list[tuple[str, str]] = []
-        self.mailed: list[tuple[str, str]] = []
+        self.mailed: list[tuple[str, str, str | None]] = []
 
     def followup_candidates(self, base, fu_campaign, age_days, limit=10):
         return list(self._cands.get(fu_campaign, []))[:limit]
@@ -25,8 +25,8 @@ class FakeLedger:
         self.logged.append(key)
         return True
 
-    def record_mail(self, recipient, subject, status="sent", channel="email"):
-        self.mailed.append((recipient, subject))
+    def record_mail(self, recipient, subject, status="sent", channel="email", sender=None):
+        self.mailed.append((recipient, subject, sender))
         return True
 
 

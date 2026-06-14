@@ -115,6 +115,7 @@ ALTER TABLE fires ADD COLUMN IF NOT EXISTS stop numeric;
 ALTER TABLE fires ADD COLUMN IF NOT EXISTS target numeric;
 ALTER TABLE fires ADD COLUMN IF NOT EXISTS rationale text;
 ALTER TABLE fires ADD COLUMN IF NOT EXISTS assessment text;  -- Ace's think-on-fire read
+ALTER TABLE mail_ledger ADD COLUMN IF NOT EXISTS sender text;  -- which inbox sent it (per-account deliverability/auto-pause)
 CREATE TABLE IF NOT EXISTS trade_lore (
   id bigserial PRIMARY KEY,
   ts timestamptz NOT NULL,
@@ -672,14 +673,17 @@ class Ledger:
                        "stop": r[7], "target": r[8], "assessment": r[9]} for r in rows],
         }
 
-    def record_mail(self, recipient, subject, status="sent", channel="email") -> bool:
+    def record_mail(self, recipient, subject, status="sent", channel="email",
+                    sender=None) -> bool:
         """Record an email attempt; True if new (False = this message already sent).
-        Never-twice — the merge's mail/outreach send writes here, real-or-nothing."""
+        Never-twice — the merge's mail/outreach send writes here, real-or-nothing.
+        ``sender`` is the inbox the rotation actually sent from, so per-account
+        deliverability (and bounce-rate auto-pause) can be measured."""
         with self._conn() as c:
             row = c.execute(
-                "INSERT INTO mail_ledger (recipient, subject, channel, status) "
-                "VALUES (%s,%s,%s,%s) ON CONFLICT (recipient, subject) DO NOTHING RETURNING id",
-                (recipient, subject, channel, status),
+                "INSERT INTO mail_ledger (recipient, subject, channel, status, sender) "
+                "VALUES (%s,%s,%s,%s,%s) ON CONFLICT (recipient, subject) DO NOTHING RETURNING id",
+                (recipient, subject, channel, status, sender),
             ).fetchone()
         if row:
             self._emit("mail", {"recipient": recipient, "subject": subject, "id": row[0]})
