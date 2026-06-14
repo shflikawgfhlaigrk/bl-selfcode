@@ -31,24 +31,38 @@ _UNSET = object()
 
 
 def postgres_ready(*, isready: str = PG_ISREADY, host: str = PG_HOST, port: str = PG_PORT,
-                   timeout_s: float = 5.0) -> bool:
+                   timeout_s: float = 5.0, attempts: int = 3, retry_sleep: float = 0.5) -> bool:
     """True when Utah Postgres accepts connections on the /tmp socket.
 
     Bounded by *timeout_s*: a wedged pg_isready (disk stall, socket black hole)
     reads as down instead of hanging the probe — the cron gate needs an answer.
+
+    CONFIRM BEFORE DECLARING DOWN: a single pg_isready can flap transiently — a
+    spawn-storm under high load starves the probe past *timeout_s*, or a momentary
+    connection refusal — while Postgres is actually fine. One such reading used to
+    flip the whole substrate RED, fire a CRITICAL "Postgres not accepting" alert,
+    and kick a needless repair on a healthy cluster. So we retry up to *attempts*
+    times (small *retry_sleep* between) and report UP on the first success. A real
+    outage refuses fast and fails every attempt — still caught, only ~1s slower;
+    a healthy cluster answers on the first try, so the common path adds no latency.
     """
     if not os.path.isfile(isready):
-        return False
-    try:
-        res = subprocess.run(
-            [isready, "-h", host, "-p", port, "-q"],
-            capture_output=True,
-            timeout=timeout_s,
-            check=False,
-        )
-        return res.returncode == 0
-    except (OSError, subprocess.TimeoutExpired):
-        return False
+        return False  # missing binary is a permanent, fast 'down' — retrying is pointless
+    for attempt in range(max(1, attempts)):
+        try:
+            res = subprocess.run(
+                [isready, "-h", host, "-p", port, "-q"],
+                capture_output=True,
+                timeout=timeout_s,
+                check=False,
+            )
+            if res.returncode == 0:
+                return True
+        except (OSError, subprocess.TimeoutExpired):
+            pass  # transient — fall through to a retry rather than declaring down
+        if attempt < attempts - 1 and retry_sleep > 0:
+            time.sleep(retry_sleep)
+    return False
 
 
 def supervisor_alive(*, pid_path=os.fspath(runtime.RUN_DIR / "utah-sup.pid")) -> bool:

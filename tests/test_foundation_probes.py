@@ -36,7 +36,28 @@ def test_postgres_ready_false_on_nonzero_exit(tmp_path):
 
 def test_postgres_ready_hang_is_bounded_and_false(tmp_path):
     slow = _script(tmp_path, "sleep 5")
-    assert foundation.postgres_ready(isready=slow, timeout_s=0.3) is False
+    assert foundation.postgres_ready(isready=slow, timeout_s=0.3, attempts=1) is False
+
+
+def test_postgres_ready_retries_past_a_transient_flap(tmp_path):
+    """A single flaky pg_isready (timeout/refusal under a load spike) must NOT be
+    declared 'postgres_down' — PG that answers on a later attempt reads as UP. This
+    is the false-alarm fix: confirm before flipping the substrate red."""
+    counter = tmp_path / "n"
+    flaky = _script(
+        tmp_path,
+        f'n=$(cat "{counter}" 2>/dev/null || echo 0); n=$((n+1)); echo "$n" > "{counter}"; '
+        '[ "$n" -ge 2 ] && exit 0 || exit 2',
+    )
+    # first attempt exits non-zero, second exits 0 → UP (retry_sleep=0 keeps it instant)
+    assert foundation.postgres_ready(isready=flaky, attempts=3, retry_sleep=0) is True
+
+
+def test_postgres_ready_all_attempts_fail_is_false(tmp_path):
+    """A real outage fails every retry — still caught, not masked by the retry."""
+    assert foundation.postgres_ready(
+        isready=_script(tmp_path, "exit 2"), attempts=3, retry_sleep=0
+    ) is False
 
 
 # ── supervisor_alive ──────────────────────────────────────────────────────────
