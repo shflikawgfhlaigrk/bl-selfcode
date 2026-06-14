@@ -369,6 +369,31 @@ def test_source_prior_lifts_curated_over_a_tied_fact(mem):
     assert {h.source for h in hits} == {"knowledge", "fact"}  # both still present
 
 
+def test_turn_source_has_negative_authority_prior():
+    """Conversational 'turn' rows must sit BELOW durable facts on ties (so emotional/meta
+    chat stops hijacking grounding for identity questions) — but bounded, never a trump card."""
+    assert config.SOURCE_BOOST.get("turn", 0.0) < 0.0
+    assert config.SOURCE_BOOST["turn"] < config.SOURCE_BOOST.get("fact", 0.0)
+    assert abs(config.SOURCE_BOOST["turn"]) <= config.ENTITY_BOOST   # tie-breaker, not a trump
+
+
+def test_turn_prior_demotes_a_tied_turn_below_a_fact(mem):
+    """Equal dense similarity + neutral reranker → the source-authority prior decides: a
+    durable 'fact' outranks the conversational 'turn' it would otherwise tie with, so
+    emotional chat history no longer hijacks identity/meta answers. The turn still surfaces —
+    the prior only breaks ties (mirror of test_source_prior_lifts_curated_over_a_tied_fact)."""
+    mem.embedder.register("how am I supposed to prove myself", basis(0))
+    mem.embedder.register("Q: how am I supposed to prove myself? A: you don't",
+                          blend(basis(0), basis(2), 0.6))
+    mem.embedder.register("Ace's rule: truth equals a re-runnable check",
+                          blend(basis(0), basis(3), 0.6))
+    memory.store("Q: how am I supposed to prove myself? A: you don't", source="turn")
+    memory.store("Ace's rule: truth equals a re-runnable check", source="fact")
+    hits = memory.recall("how am I supposed to prove myself", k=2)
+    assert hits[0].source == "fact"                      # the negative turn prior tipped the tie
+    assert {h.source for h in hits} == {"fact", "turn"}   # the turn still surfaces, just lower
+
+
 def test_curated_lane_rescues_a_row_the_general_pool_drops(mem):
     """The diagnosed root cause: a relevant curated row never reaching the reranker
     because the fact pile fills the candidate pool. The curated lane gives it a slot."""

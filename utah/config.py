@@ -459,7 +459,11 @@ CODE_LANE_K: int = 6
 #: unaffected. NOTE: the reranker emits logits whose relevant-vs-irrelevant spread is
 #: only ~1–2; the prior was 1.5 (same scale), which could lift an *irrelevant* curated
 #: row over a *relevant* fact. Kept ≤ENTITY_BOOST so it can only break genuine ties.
-SOURCE_BOOST: dict[str, float] = {"core": 0.5, "knowledge": 0.3, "code": 0.2}
+#: 'turn' carries a NEGATIVE prior: conversational history is demoted below durable
+#: knowledge (fact/core/code) on ties, so emotional/meta chat ("how do I prove myself")
+#: stops hijacking grounding for identity questions. Still a tie-breaker (|prior|≤ENTITY_BOOST),
+#: so a genuinely best-match turn ("what did I just tell you") still surfaces.
+SOURCE_BOOST: dict[str, float] = {"core": 0.5, "knowledge": 0.3, "code": 0.2, "turn": -0.3}
 
 # --- no-fabrication answer gate ----------------------------------------------
 #: Answer straight from memory ONLY when BOTH hold; otherwise fall to the brain
