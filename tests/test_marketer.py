@@ -24,7 +24,7 @@ def test_post_uses_injected_publisher():
 
 def test_post_gated_without_creds(monkeypatch):
     store = FakeFailureStore(); failures.set_store(store)
-    monkeypatch.setattr(marketer, "creds_available", lambda ch: False)
+    monkeypatch.setattr(marketer.social_post, "creds_available", lambda ch: False)
     r = marketer.post("cap", media_ref="reel.mp4", channel="tiktok")
     assert r["posted"] is False and r["gated"] is True
     assert any("gated" in row[2] for row in store.rows)

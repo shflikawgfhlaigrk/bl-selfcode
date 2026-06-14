@@ -39,10 +39,16 @@ GMAIL_CREDS = runtime.UTAH_HOME / "secrets" / "gmail.json"
 ACCOUNTS_FILE = runtime.UTAH_HOME / "secrets" / "email_accounts.json"
 #: Persistent round-robin cursor + per-day per-account counts, shared across cron processes.
 ROTATION_STATE = runtime.UTAH_HOME / "run" / "mail_rotation.json"
-#: Safe COLD daily cap PER inbox. Past ~20-30/day cold, a Gmail's spam-complaint rate blows
-#: past Google's 0.3% threshold and the inbox/domain reputation dies (then suspension). The
-#: rotation refuses to exceed this per account so volume can never burn a sender. 0 = no cap.
-PER_ACCOUNT_DAILY = int(os.environ.get("UTAH_MAIL_PER_ACCOUNT_DAILY", "30"))
+#: Per-inbox daily cap MODE. The send path never lets one inbox exceed its cap, so volume
+#: can't burn a sender. Three modes:
+#:   -1  (default) → WARMUP-AWARE, provider-aware cap from :mod:`utah.mail_capacity`: a new
+#:                   inbox ramps from a low day-0 cap up to a provider steady cap (own-domain
+#:                   sustains far more than free Gmail). This is how the pool scales to high
+#:                   daily volume WITHOUT wrecking deliverability.
+#:    0           → no cap (effectively unlimited — testing/override only).
+#:   >0           → a flat cap of exactly N per inbox (testing/manual override).
+#: Set UTAH_MAIL_PER_ACCOUNT_DAILY to 0 or a positive int to override the warmup model.
+PER_ACCOUNT_DAILY = int(os.environ.get("UTAH_MAIL_PER_ACCOUNT_DAILY", "-1"))
 #: Hard bound on every SMTP connection (connect + each socket op). An unbounded
 #: SMTP_SSL hang inside the hourly outreach cron would silently stall the whole
 #: send window; 30s is generous for Gmail and still fails fast enough to retry.
@@ -61,8 +67,15 @@ def _header_unsafe(value: str) -> bool:
 
 
 def _norm(account: dict) -> dict:
+    # Preserve each pool account's REAL From: it's the SMTP login identity (it must match the
+    # mailbox the app-password belongs to) AND it's the sender diversity that protects
+    # deliverability at volume. Collapsing legacy aliases (delivery@→info@) here logged a
+    # second inbox in as info@ with delivery@'s password (auth fail) and erased a distinct
+    # sender. Reply-To is still canonicalized to BLB_FROM_EMAIL in _send_via, so replies
+    # always funnel to info@. The from is only canonicalized when it's blank.
+    frm = (account.get("from") or "").strip() or config.BLB_FROM_EMAIL
     return {
-        "from": config.normalize_blb_from_email(account.get("from")),
+        "from": frm,
         "app_password": account.get("app_password"),
         "smtp_host": account.get("smtp_host", "smtp.gmail.com"),
     }
@@ -95,6 +108,24 @@ def creds_available() -> bool:
 
 def _today() -> str:
     return datetime.date.today().isoformat()
+
+
+def _cap_for(account: dict) -> int:
+    """The effective daily cap for ONE inbox, honoring :data:`PER_ACCOUNT_DAILY` mode:
+    -1 → warmup/provider cap (scales safely); 0 → uncapped; >0 → that flat cap. The warmup
+    branch degrades to the conservative day-0 cap if mail_capacity can't be consulted, so a
+    capacity-module hiccup never silently uncaps an inbox."""
+    if PER_ACCOUNT_DAILY == 0:
+        return _UNCAPPED_SENDS
+    if PER_ACCOUNT_DAILY > 0:
+        return PER_ACCOUNT_DAILY
+    try:
+        from utah import mail_capacity
+        fs = mail_capacity.first_seen_map()
+        return mail_capacity.safe_daily_cap(account, mail_capacity.age_days_for(account, fs))
+    except Exception as exc:  # noqa: BLE001 — never uncap on a capacity-module failure
+        log.warning("mail: warmup cap unavailable (%s) — using conservative day-0 cap", exc)
+        return 20
 
 
 @contextlib.contextmanager
@@ -164,42 +195,47 @@ def _next_account() -> dict | None:
             state = {"cursor": int(state.get("cursor", 0)), "date": today, "counts": {}}
         cursor = int(state.get("cursor", 0))
         counts = dict(state.get("counts", {}))
-        cap = PER_ACCOUNT_DAILY
         chosen = None
         for i in range(len(pool)):
             idx = (cursor + i) % len(pool)
             acct = pool[idx]
-            if cap <= 0 or counts.get(acct["from"], 0) < cap:
+            if counts.get(acct["from"], 0) < _cap_for(acct):
                 chosen = acct
                 cursor = idx + 1
                 counts[acct["from"]] = counts.get(acct["from"], 0) + 1
                 break
         _save_state({"cursor": cursor, "date": today, "counts": counts})
+    if chosen is not None:
+        # Stamp first-send so the warmup clock starts (idempotent; no-op once recorded).
+        with contextlib.suppress(Exception):
+            from utah import mail_capacity
+            mail_capacity.record_seen([chosen])
     return chosen
 
 
 def inboxes_exhausted() -> bool:
-    """True when every sending account has hit :data:`PER_ACCOUNT_DAILY` for today."""
+    """True when every sending account has hit its daily cap for today."""
     pool = accounts()
     if not pool:
         return True
-    if PER_ACCOUNT_DAILY <= 0:
+    if PER_ACCOUNT_DAILY == 0:  # explicitly uncapped → never exhausted
         return False
     state = _load_state()
     counts = dict(state.get("counts", {})) if state.get("date") == _today() else {}
-    return all(counts.get(acct["from"], 0) >= PER_ACCOUNT_DAILY for acct in pool)
+    return all(counts.get(acct["from"], 0) >= _cap_for(acct) for acct in pool)
 
 
 def sends_remaining() -> int:
-    """How many cold emails can still go out today across the pool (read-only)."""
+    """How many cold emails can still go out today across the pool (read-only), summing each
+    inbox's remaining headroom under its (warmup-aware or override) cap."""
     pool = accounts()
     if not pool:
         return 0
-    if PER_ACCOUNT_DAILY <= 0:  # cap disabled — effectively unlimited, but a real int
+    if PER_ACCOUNT_DAILY == 0:  # cap disabled — effectively unlimited, but a real int
         return len(pool) * _UNCAPPED_SENDS
     state = _load_state()
     counts = dict(state.get("counts", {})) if state.get("date") == _today() else {}
-    return sum(max(0, PER_ACCOUNT_DAILY - counts.get(acct["from"], 0)) for acct in pool)
+    return sum(max(0, _cap_for(acct) - counts.get(acct["from"], 0)) for acct in pool)
 
 
 def _send_via(account: dict, to: str, subject: str, body: str) -> None:

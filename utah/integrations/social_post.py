@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import os
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
 from typing import Any
@@ -151,6 +152,13 @@ def post(caption: str, *, media_ref: str, channel: str = "instagram", publish_fn
     try:
         post_id = publisher(caption, media_ref)
         return {"posted": True, "gated": False, "channel": channel, "id": post_id}
+    except urllib.error.HTTPError as exc:
+        # A 401/403 means the creds file is present but the token is invalid/expired —
+        # a GLOBAL auth problem, not a fault of this particular post. Flag it so callers
+        # can stop and surface "refresh the token" instead of blaming the content.
+        auth = exc.code in (401, 403)
+        return {"posted": False, "gated": False, "channel": channel,
+                "auth_error": auth, "error": f"HTTP Error {exc.code}: {exc.reason}"}
     except Exception as exc:  # noqa: BLE001
         return {"posted": False, "gated": False, "channel": channel, "error": str(exc)}
 

@@ -213,7 +213,8 @@ def run_followups(*, ledger=None, send_fn=None, limit: int = FOLLOWUP_RUN_LIMIT,
             if res.get("sent"):
                 sent += 1
                 stages[suffix] = stages.get(suffix, 0) + 1
-                ledger.record_mail(recipient, msg["subject"], status="sent")
+                ledger.record_mail(recipient, msg["subject"], status="sent",
+                                   sender=res.get("from"))
     return {"sent": sent, "stages": stages}
 
 
@@ -386,7 +387,8 @@ def _queue_one(ledger, campaign: str, lead: dict, footer: dict | None, do_send: 
             # (caller-side: outreach already holds the ledger). Defensive getattr keeps
             # test fakes / minimal ledgers working — same pattern as is_contacted above.
             getattr(ledger, "record_mail", lambda *a, **k: None)(
-                recipient, msg["subject"], status="sent", channel="email")
+                recipient, msg["subject"], status="sent", channel="email",
+                sender=res.get("from"))
             # Funnel truth: the lead row flips new→contacted ONLY on a landed send
             # (same defensive getattr — minimal test fakes keep working).
             getattr(ledger, "mark_lead_contacted", lambda r: 0)(recipient)
