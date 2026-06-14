@@ -813,10 +813,10 @@ async def api_truth(request):
     from utah import proof
     with proof._pool().connection() as c:
         rows = c.execute(
-            "SELECT id,claim,system,artifact,proof_kind,last_result,last_run,owner "
+            "SELECT id,claim,system,artifact,proof_kind,last_result,last_run,owner,how,link "
             "FROM proof_ledger ORDER BY system,id").fetchall()
     by_system, score = {}, {"total": 0, "proven": 0, "promoted": 0, "red": 0}
-    for rid, claim, system, artifact, kind, lr, lrun, owner in rows:
+    for rid, claim, system, artifact, kind, lr, lrun, owner, how, link in rows:
         tier = proof.effective_tier(rid)
         score["total"] += 1
         score[tier] = score.get(tier, 0) + 1
@@ -824,7 +824,7 @@ async def api_truth(request):
             score["red"] += 1
         by_system.setdefault(system, []).append(
             {"id": rid, "claim": claim, "tier": tier, "artifact": artifact,
-             "kind": kind, "owner": owner, "last_result": lr,
+             "kind": kind, "owner": owner, "how": how, "link": link, "last_result": lr,
              "last_run": lrun.isoformat() if lrun else None})
     return JSONResponse({"scoreboard": score, "by_system": by_system})
 

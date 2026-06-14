@@ -452,8 +452,18 @@ def alert_unfed_edges(*, edges_fn=None, sender=None) -> dict:
 
 def evaluate(closes: list[float], *, lookback: int = 20, engine: str = "breakout") -> dict | None:
     """One engine's signal on the closed-bar series. Pure. Unknown/unported engine
-    names NEVER fabricate a signal — they return None until their rules land."""
+    names NEVER fabricate a signal — they return None until their rules land.
+
+    NON-FINITE GUARD: a NaN/±inf close (corrupt feed, garbage input) NEVER produces a
+    signal. NaN already short-circuits every comparison to no-signal, but +inf slipped
+    through breakout's ``last > max(prior)`` and emitted an ``inf`` price target — a
+    sellable engine must never write a non-finite level into the ledger or a phone alert.
+    Reject the whole series at the single fire-path chokepoint instead of firing garbage."""
+    import math
+
     if not closes or len(closes) < lookback + 1:
+        return None
+    if not all(isinstance(c, (int, float)) and math.isfinite(c) for c in closes):
         return None
     rule = ENGINE_RULES.get(engine)
     return rule(closes, lookback) if rule else None

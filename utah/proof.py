@@ -31,8 +31,12 @@ CREATE TABLE IF NOT EXISTS proof_ledger (
   tier text NOT NULL DEFAULT 'unproven',          -- raw marker; effective tier computed on read
   last_run timestamptz, last_result text, last_output text,
   last_proved_at timestamptz, stress_proved_at timestamptz,
-  owner text NOT NULL DEFAULT '', updated_at timestamptz NOT NULL DEFAULT now()
+  owner text NOT NULL DEFAULT '', updated_at timestamptz NOT NULL DEFAULT now(),
+  how text NOT NULL DEFAULT '', link text NOT NULL DEFAULT ''
 );
+-- additive migration for ledgers created before how/link landed (idempotent):
+ALTER TABLE proof_ledger ADD COLUMN IF NOT EXISTS how text NOT NULL DEFAULT '';
+ALTER TABLE proof_ledger ADD COLUMN IF NOT EXISTS link text NOT NULL DEFAULT '';
 CREATE TABLE IF NOT EXISTS proof_runs (
   id bigserial PRIMARY KEY,
   proof_id text NOT NULL REFERENCES proof_ledger(id) ON DELETE CASCADE,
@@ -63,6 +67,12 @@ class ProofSpec:
     depends_on: tuple[str, ...] = ()
     freshness_sla: str = "24 hours"
     owner: str = ""
+    #: Human-action claims carry remediation hints the /truth page shows: ``how`` = "do
+    #: this", ``link`` = "go here". Empty for machine-proven pipeline claims. (These were
+    #: added to the skeleton's human-accountability rows; ProofSpec + register + the DDL
+    #: must accept them or ``seed_all`` raises and the whole proof cron stops refreshing.)
+    how: str = ""
+    link: str = ""
 
 
 def register(spec: ProofSpec) -> None:
@@ -73,16 +83,18 @@ def register(spec: ProofSpec) -> None:
         c.execute(
             """
             INSERT INTO proof_ledger
-              (id,claim,system,artifact,proof_kind,proof_cmd,stress_cmd,depends_on,freshness_sla,owner)
-            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s::interval,%s)
+              (id,claim,system,artifact,proof_kind,proof_cmd,stress_cmd,depends_on,freshness_sla,owner,how,link)
+            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s::interval,%s,%s,%s)
             ON CONFLICT (id) DO UPDATE SET
               claim=EXCLUDED.claim, system=EXCLUDED.system, artifact=EXCLUDED.artifact,
               proof_kind=EXCLUDED.proof_kind, proof_cmd=EXCLUDED.proof_cmd,
               stress_cmd=EXCLUDED.stress_cmd, depends_on=EXCLUDED.depends_on,
-              freshness_sla=EXCLUDED.freshness_sla, owner=EXCLUDED.owner, updated_at=now()
+              freshness_sla=EXCLUDED.freshness_sla, owner=EXCLUDED.owner,
+              how=EXCLUDED.how, link=EXCLUDED.link, updated_at=now()
             """,
             (spec.id, spec.claim, spec.system, spec.artifact, spec.proof_kind,
-             spec.proof_cmd, spec.stress_cmd, list(spec.depends_on), spec.freshness_sla, spec.owner),
+             spec.proof_cmd, spec.stress_cmd, list(spec.depends_on), spec.freshness_sla,
+             spec.owner, spec.how, spec.link),
         )
 
 
