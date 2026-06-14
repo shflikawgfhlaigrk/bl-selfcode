@@ -55,7 +55,14 @@ def _clean_region(region: str) -> str:
 
 
 def render(lead: dict) -> str:
-    """Lead row → complete single-file HTML site. Pure; deterministic; no fabrication."""
+    """Lead row → complete single-file HTML site. Pure; deterministic; no fabrication.
+
+    Every lead-supplied value (name, region, address, phone) is HTML-escaped before it
+    reaches the markup. Real lead names routinely carry ``&`` ("Mom & Pop's"), quotes
+    ('Joe "Big Tony" Pizza'), and angle brackets — unescaped they would break the meta
+    tags, mangle the heading, or inject markup into a customer-facing preview. URLs use
+    the RAW value through ``quote_plus``/digit-stripping, which is their correct encoder.
+    """
     name = (lead.get("name") or "Your Business").strip()
     kind = (lead.get("kind") or "").strip().lower()
     contact = lead.get("contact") or {}
@@ -63,16 +70,33 @@ def render(lead: dict) -> str:
     address = (contact.get("address") or "").strip()
     region = _clean_region(lead.get("region") or "")
     head, sub = _KIND_COPY.get(kind, _DEFAULT_COPY)
-    tel = re.sub(r"[^+\d]", "", phone)
+    tel = re.sub(r"[^+\d]", "", phone)          # URL context — raw, digit-only
     place = address or (f"{name} {region}".strip())
-    maps_q = quote_plus(place)
+    maps_q = quote_plus(place)                   # URL context — percent-encoded
     kind_label = kind.replace("_", " ").title() if kind else "Local Business"
-    call_btn = (f'<a class="btn" href="tel:{tel}">Call {phone}</a>' if tel else
+
+    # HTML contexts — collapse scraper whitespace (stray \n/\t) to single spaces, then
+    # escape &, <, >, and " so values are safe in text AND double-quoted attributes (the
+    # only attribute style this template uses). The apostrophe is left intact on purpose:
+    # it is harmless in double-quoted attributes and "Joe's Diner" should read naturally.
+    def _h(s: str) -> str:
+        s = re.sub(r"\s+", " ", s).strip()
+        return (s.replace("&", "&amp;").replace("<", "&lt;")
+                 .replace(">", "&gt;").replace('"', "&quot;"))
+
+    e_name = _h(name)
+    e_region = _h(region)
+    e_address = _h(address)
+    e_phone = _h(phone)
+    e_kind_label = _h(kind_label)
+    name, region, address, kind_label = e_name, e_region, e_address, e_kind_label
+
+    call_btn = (f'<a class="btn" href="tel:{tel}">Call {e_phone}</a>' if tel else
                 '<a class="btn" href="#contact">Get in touch</a>')
     map_block = (f'<iframe title="map" loading="lazy" '
                  f'src="https://maps.google.com/maps?q={maps_q}&output=embed"></iframe>'
                  if place else "")
-    addr_line = f"<p>{address}</p>" if address else ""
+    addr_line = f"<p>{e_address}</p>" if address else ""
     return f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -125,9 +149,21 @@ built same-day, $700 flat, you approve the design before you pay.</footer>
 """
 
 
-def generate(lead: dict, *, out_dir: str | Path | None = None) -> dict:
-    """Render + write ``<slug>.html``. Returns path + size; honest-empty on a nameless
-    lead (nothing to build a site for)."""
+def generate(lead: dict, *, out_dir: str | Path | None = None, ledger=None) -> dict:
+    """Render + write ``<slug>.html``, and (when *ledger* is given) record the artifact
+    through the REAL ledger path so the deck's revenue panel lights up.
+
+    Returns path + size; honest-empty on a nameless lead (nothing to build a site for).
+
+    Recording is IDEMPOTENT: the preview is merged onto the lead's own row
+    (``ledger.update_lead`` → ``contact.site`` jsonb merge, keyed UNIQUE(name, region)),
+    so re-generating the same lead never creates a second artifact row — it merges the
+    same ``site`` payload and the lead carries exactly one live preview. The ledger's
+    own ``_emit`` fans the merge out to the bus/deck on the ``leads`` channel, so no
+    separate publish is needed here (that is the "optional bus publish", handled by the
+    real write path). A missing ``region`` means the lead was never persisted, so there
+    is nothing to merge onto — we still write the file and report ``recorded: False``
+    honestly rather than fabricating a row."""
     if not (lead.get("name") or "").strip():
         return {"written": False, "reason": "lead has no business name"}
     html = render(lead)
@@ -138,14 +174,35 @@ def generate(lead: dict, *, out_dir: str | Path | None = None) -> dict:
     lead_slug = slug(lead["name"])
     preview_url = f"{PREVIEW_BASE}/{lead_slug}"
     log.info("sitegen: %s -> %s (%d bytes) preview=%s", lead.get("name"), path, len(html), preview_url)
-    return {
+    out = {
         "written": True,
         "path": str(path),
         "bytes": len(html),
         "slug": lead_slug,
         "preview_url": preview_url,
         "preview_published": False,
+        "recorded": False,
     }
+    out["recorded"] = _record_site(ledger, lead, out) if ledger is not None else False
+    return out
+
+
+def _record_site(ledger, lead: dict, result: dict) -> bool:
+    """Merge the generated-site artifact onto the lead row via the ledger's idempotent
+    ``update_lead`` (UNIQUE(name, region)). Returns True iff a row was updated. A failed
+    record must NEVER lose the rendered file — the artifact is already on disk — so any
+    ledger/store error degrades to ``False`` (honest "not recorded"), never a raise."""
+    name = (lead.get("name") or "").strip()
+    region = (lead.get("region") or "").strip()
+    if not name or not region:
+        return False
+    site = {"slug": result["slug"], "preview_url": result["preview_url"],
+            "bytes": result["bytes"], "published": False}
+    try:
+        return bool(ledger.update_lead(name, region, contact={"site": site}))
+    except Exception as exc:  # noqa: BLE001 — recording is observability, not the artifact
+        log.warning("sitegen record failed for %r: %s", name, exc)
+        return False
 
 
 __all__ = ["render", "generate", "slug"]

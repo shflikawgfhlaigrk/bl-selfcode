@@ -29,6 +29,8 @@ class Route(enum.Enum):
     ACTION = "action"            # a COMMAND to RUN a capability (rerun leads/outreach/etc.)
     LEADS = "leads"              # live lead/pipeline/probate counts (grounded Postgres)
     MAIL = "mail"                # live email/text send counts (grounded mail_ledger)
+    JOBS = "jobs"                # live launchd roster + health — Ace's standing daily duties
+    ENGINE = "engine"            # live trading engine/lab state (grounded, honest if unread)
     NEWS = "news"                # recent headlines on a topic (researcher-backed, grounded)
     KNOWLEDGE = "knowledge"      # a curated knowledge pack, verbatim (no model)
     LOCAL_QUICK = "local_quick"  # llama3.2:3b — fast instruct, the trivially-fast lane
@@ -84,8 +86,33 @@ _MAIL = re.compile(
     r"\b(how many|number of|count of|total)\s+(e-?mails?|texts?|messages?|sms|sends?)\b|"
     r"\b(e-?mails?|texts?|messages?|sms|mail)\s+(sent|sends?|count|counts|today|so far|this morning|this week)\b|"
     r"\b(e-?mails?|texts?|messages?)\s+(did we|have we|were)\s+(sent|send)\b|"
+    r"\b(did we|have we|were we)\s+(send|sent)\s+(any\s+)?(mail|e-?mails?|texts?|messages?|outreach|anything)\b|"
+    r"\bany\s+(mail|e-?mails?|texts?|messages?|outreach)\s+sent\b|"
+    r"\boutreach\s+(status|sent|today|so far|this morning|this week|going out)\b|"
     r"\bhow many\b[^.?!]*\b(e-?mails?|texts?|messages?)\b[^.?!]*\bsent\b|"
     r"\bmail\s+(count|ledger|sent)\b",
+    re.I,
+)
+#: Ace's OWN standing duties — "what do you run/uphold every day", "list your jobs/crons",
+#: "your responsibilities". Answered from the live launchd roster + health, never invented.
+_JOBS = re.compile(
+    r"\buphold\b|"                                    # Michael's word for the daily duties
+    r"\b(responsibilit\w*|duties)\b|"                 # responsibilities / duties = the roster
+    r"\b(your|the|every|all)\s+(jobs?|crons?|tasks?)\b|"
+    r"\b(what|which)\s+(jobs?|crons?|services?|tasks?)\s+(do you|are you|you)\b|"
+    r"\bwhat (do|are) you\b[^.?!]*\b(every\s+(single\s+)?day|daily|each\s+day|all day|day in)\b|"
+    r"\blist\s+(your|every|all|them|the)\b[^.?!]*\b(jobs?|crons?|services?|duties|responsibilit)",
+    re.I,
+)
+#: Live trading-engine / lab state — "your engine state", "what engines are live",
+#: "lab state", "engine status". Grounded from live state; honest "I don't know" if unread.
+_ENGINE = re.compile(
+    r"\b(engine|lab)\s+(state|status|health)\b|"
+    r"\bengine\s+lab\b|"
+    r"\btrading\s+(edge|lab|engine|engines?|status|state|audit|panel)\b|"
+    r"\b(what|which|how many)\s+engines?\s+(are\s+)?(live|running|firing|active|up|going)\b|"
+    r"\bare\s+(your|the)\s+engines?\s+(live|running|firing|up|on)\b|"
+    r"\b(your|the)\s+engines?\s+(live|running|firing|state|status)\b",
     re.I,
 )
 
@@ -130,6 +157,15 @@ _FACTUAL_RECALL = re.compile(
     re.I,
 )
 
+#: Sensitive PII intent — SSN/social-security questions must never hit LOCAL_QUICK
+#: (the 3B improvises a policy refusal that :func:`utah.brain.is_refusal` once missed,
+#: so the exchange was storable). Route to the brain for a structural no-fab answer.
+_SENSITIVE_PII = re.compile(
+    r"\b(ssn|social[\s-]?security(\s+number)?)\b|"
+    r"\bsocial[\s-]?security\s+(number|#|no\.?)\b",
+    re.I,
+)
+
 
 #: Self / project / identity questions — about Utah, Ace/AceOS, "who/what are you",
 #: "what can you do", "what do you know/remember about …", "tell me about yourself".
@@ -145,6 +181,12 @@ _SELF_OR_PROJECT = re.compile(
     r"\bwhat\s+do\s+you\s+(know|remember)\s+about\b",
     re.I,
 )
+
+
+def is_sensitive_pii(text: str) -> bool:
+    """True for a sensitive-PII question (SSN / social security). These must route to
+    the brain — never LOCAL_QUICK — so policy refusals stay non-storable."""
+    return bool(_SENSITIVE_PII.search(text or ""))
 
 
 def is_factual_recall(text: str) -> bool:
@@ -189,6 +231,9 @@ def route(text: str) -> Route:
         return Route.ACTION
     if _AGENTIC.search(t):
         return Route.BRAIN
+    # Sensitive PII (SSN, social security) → brain, never the 3B local lane.
+    if _SENSITIVE_PII.search(t):
+        return Route.BRAIN
     if _WEATHER.search(t):
         return Route.WEATHER
     # Lead/pipeline counts → grounded ledger capability. BEFORE _TIME (so "today's lead
@@ -201,6 +246,10 @@ def route(text: str) -> Route:
     # number instead of describing the code that writes it.
     if _MAIL.search(t):
         return Route.MAIL
+    if _JOBS.search(t):
+        return Route.JOBS
+    if _ENGINE.search(t):
+        return Route.ENGINE
     if _TIME.search(t):
         return Route.TIME
     if _BRIEF.search(t):

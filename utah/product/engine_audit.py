@@ -129,6 +129,36 @@ def render(result: dict) -> str:
     return "\n".join(lines) + "\n"
 
 
+def best_edges(result: dict) -> dict:
+    """Per engine, the BEST proven (engine,symbol) pair by net points — or None if the
+    engine proves edge nowhere. This is what lets the deck/app show WHERE an engine wins
+    (research proves edge on QQQ/SPY/GLD, not on the busiest symbol the single-symbol
+    dash_config tests), instead of a misleading 'no edge'."""
+    out: dict[str, dict | None] = {e: None for e in result.get("engines", [])}
+    for r in result.get("fleet", []):
+        if not r.get("edge_proven"):
+            continue
+        cur = out.get(r["engine"])
+        net = r.get("net_pts") or 0.0
+        if cur is None or net > (cur.get("net_pts") or 0.0):
+            out[r["engine"]] = {"symbol": r["symbol"], "win_rate": r.get("win_rate"),
+                                "net_pts": r.get("net_pts"), "trades": r.get("trades")}
+    return out
+
+
+def latest() -> dict:
+    """The cheap read the deck/app uses: the last persisted audit (``latest.json``), or
+    ``{}`` if the audit has never run. Never a DB hit, never a 33-backtest recompute in a
+    deck poll — the nightly cron (or a manual kickstart) populates it."""
+    try:
+        p = AUDIT_DIR / "latest.json"
+        if not p.exists():
+            return {}
+        return json.loads(p.read_text())
+    except Exception:  # noqa: BLE001 — corrupt/partial file => honest empty
+        return {}
+
+
 def summary_line(result: dict) -> str:
     """One-line verdict for the nightly brief / push."""
     s = result["summary"]
@@ -146,6 +176,7 @@ def run_scheduled(*, audit_fn=None, sender=None, now=None) -> dict:
 
     ts = (now or (lambda: datetime.now(timezone.utc)))()
     result = (audit_fn or audit)(generated_at=ts.isoformat())
+    result["best_edges"] = best_edges(result)  # baked in so the deck read is one file
     stamp = ts.strftime("%Y-%m-%d")
     paths = {}
     try:
@@ -154,10 +185,18 @@ def run_scheduled(*, audit_fn=None, sender=None, now=None) -> dict:
         mpath = AUDIT_DIR / f"audit-{stamp}.md"
         jpath.write_text(json.dumps(result, indent=2, default=str))
         mpath.write_text(render(result))
+        (AUDIT_DIR / "latest.json").write_text(json.dumps(result, indent=2, default=str))
         (AUDIT_DIR / "latest.md").write_text(render(result))
         paths = {"json": str(jpath), "md": str(mpath)}
     except Exception as exc:  # noqa: BLE001 — a write failure must not break the cron
         failures.record("engine_audit", "write_failed", str(exc))
+    # De-stale the lab: nothing else refreshes the per-engine dash_config the deck's
+    # Engine Lab reads. Fold it into the nightly audit so the lab is never frozen.
+    try:
+        from utah.product import trading
+        trading.fleet_backtest()
+    except Exception as exc:  # noqa: BLE001 — a refresh failure must not break the cron
+        failures.record("engine_audit", "dash_refresh_failed", str(exc))
     line = summary_line(result)
     try:
         from utah import alerts

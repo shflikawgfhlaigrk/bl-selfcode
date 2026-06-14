@@ -99,6 +99,11 @@ def _count_since(table: str, hours: float) -> int | None:
         with psycopg.connect(config.DB_DSN, autocommit=True, connect_timeout=8,
                              options=f"-c statement_timeout={config.DB_STATEMENT_TIMEOUT_MS}",
                              ) as conn:
+            # Skip the count when the table isn't created yet (e.g. 'sales' before any
+            # Stripe sale). Otherwise the failing query throws "relation does not exist"
+            # into pg.log every pass (~28x/day) and pollutes Ace's own error report.
+            if conn.execute("select to_regclass(%s)", (table,)).fetchone()[0] is None:
+                return None
             row = conn.execute(
                 # NB: not make_interval(hours => %s) — that signature is integer-only and
                 # psycopg binds a Python float as double precision → "function does not
@@ -116,11 +121,11 @@ def _count_since(table: str, hours: float) -> int | None:
 def outcome_gate(window_h: float | None = None) -> dict:
     """THE OUTCOME GATE (B12 / post-mortem rule #1). Reports whether the BUSINESS is
     producing real outcomes — money flowing — not whether the machine is busy. ``ok`` is
-    True only when at least one real send (``mail_ledger``) OR sale (``sales``, once Stripe
-    is wired) landed in the window. While ``ok`` is False the system is NOT "done", no
-    matter how green the substrate or how many self-coding cycles ran. This is the gate the
-    post-mortem demanded that was never put in the machine — now it is, queryable by the
-    deck and the autonomy loop. Read-only; never fabricates."""
+    True only when at least one sale (``sales``) landed in the window. Sends
+    (``mail_ledger``) are surfaced as *activity* for honesty but do not flip ``ok`` —
+    269 sends / 0 sales is activity-only, not revenue. While ``ok`` is False the system
+    is NOT "done", no matter how green the substrate or how many self-coding cycles ran.
+    Read-only; never fabricates."""
     window_h = OUTCOME_WINDOW_H if window_h is None else window_h
     sends = _count_since("mail_ledger", window_h)
     sales = _count_since("sales", window_h)          # table may not exist yet → None
@@ -129,13 +134,22 @@ def outcome_gate(window_h: float | None = None) -> dict:
                 "window_h": window_h, "reason": "cannot read revenue ledgers (DB unreachable)"}
     s_send = sends or 0
     s_sale = sales or 0
-    ok = s_send > 0 or s_sale > 0
+    ok = s_sale > 0
+    if ok:
+        reason = "revenue flowing"
+    elif s_send > 0:
+        reason = (
+            f"activity only — {s_send} sends, {s_sale} sales in {window_h:.0f}h: "
+            f"outreach moving but $0 revenue confirmed"
+        )
+    else:
+        reason = (
+            f"NO outcome in {window_h:.0f}h — {s_send} sends, {s_sale} sales: "
+            f"the system is NOT done while $0 is moving"
+        )
     return {
         "ok": ok, "assessable": True, "sends": s_send, "sales": s_sale,
-        "window_h": window_h,
-        "reason": ("revenue flowing" if ok else
-                   f"NO outcome in {window_h:.0f}h — {s_send} sends, {s_sale} sales: "
-                   f"the system is NOT done while $0 is moving"),
+        "window_h": window_h, "reason": reason,
     }
 
 

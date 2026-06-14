@@ -112,3 +112,23 @@ def test_whisper_drops_silence_hallucination_keeps_speech(monkeypatch):
     faked({"text": " What's going on?",
            "segments": [{"text": " What's going on?", "no_speech_prob": 0.136}]})
     assert stt.MLXWhisperSTT("m").transcribe("/x.wav") == "What's going on?"  # speech kept
+
+
+def test_apple_stt_resolution(monkeypatch):
+    import utah.voice.stt as stt
+    from utah import config
+
+    monkeypatch.setattr(config, "STT_ENGINE", "apple")
+    assert isinstance(stt._build_default_stt(), stt.AppleSTT)
+
+
+def test_apple_stt_transcribes_via_cli(monkeypatch, tmp_path):
+    import utah.voice.stt as stt
+
+    bin_path = tmp_path / "apple_stt"
+    bin_path.write_text("#!/bin/sh\necho 'Hello world'\n")
+    bin_path.chmod(0o755)
+
+    eng = stt.AppleSTT(bin_path=str(bin_path))
+    assert eng.transcribe("/x.wav") == "Hello world"
+

@@ -66,6 +66,16 @@ def test_publish_without_webhook_is_a_gate_not_a_post(monkeypatch):
     assert calls == []
 
 
+def test_publish_skips_mock_webhook_without_posting_or_failure(monkeypatch):
+    store = FakeFailureStore()
+    failures.set_store(store)
+    _hooks(monkeypatch, {"📈leads": "https://mock.discord.example/webhooks/1/t"})
+    calls, post = _capture()
+    assert discord_feed.publish("leads", "hello", http_post=post) is False
+    assert calls == []
+    assert store.rows == []
+
+
 def test_publish_plain_content_has_no_embed(monkeypatch):
     _hooks(monkeypatch, {"📈leads": "https://h/leads"})
     calls, post = _capture()

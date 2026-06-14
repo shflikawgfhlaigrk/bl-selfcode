@@ -21,6 +21,28 @@ def test_plist_matching_copies_are_clean(tmp_path):
     assert drift.plist_drift(repo=repo, agents=agents) == []
 
 
+def test_plist_symlink_equivalent_paths_are_not_drift(tmp_path):
+    """~/Desktop/ProjectUtah and ~/ProjectUtah spellings must not false-alarm."""
+    canonical = tmp_path / "ProjectUtah"
+    canonical.mkdir()
+    repo = tmp_path / "Desktop" / "ProjectUtah"
+    repo.parent.mkdir(parents=True, exist_ok=True)
+    repo.symlink_to(canonical)
+    (repo / "ops" / "launchd").mkdir(parents=True)
+    agents = tmp_path / "agents"
+    agents.mkdir()
+    body = """<?xml version="1.0" encoding="UTF-8"?>
+<plist version="1.0"><dict>
+  <key>Label</key><string>com.utah.x</string>
+  <key>WorkingDirectory</key><string>{wd}</string>
+</dict></plist>"""
+    (repo / "ops" / "launchd" / "com.utah.x.plist").write_text(
+        body.format(wd=str(repo))
+    )
+    (agents / "com.utah.x.plist").write_text(body.format(wd=str(canonical)))
+    assert drift.plist_drift(repo=repo, agents=agents) == []
+
+
 def test_plist_unreadable_installed_copy_is_a_finding_not_a_crash(tmp_path):
     repo = tmp_path / "repo"
     (repo / "ops" / "launchd").mkdir(parents=True)

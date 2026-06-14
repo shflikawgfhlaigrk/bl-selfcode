@@ -342,6 +342,32 @@ class WhisperCppSTT:
                 return ""
 
 
+class AppleSTT:
+    """Apple native Speech Recognition CLI bridge (zero API cost, runs on ANE)."""
+
+    def __init__(self, bin_path: str | None = None) -> None:
+        from pathlib import Path
+        self._bin = bin_path or str(Path(os.environ.get("UTAH_HOME", str(Path.home() / ".utah"))) / "bin/apple_stt")
+
+    def transcribe(self, wav_path: str) -> str:
+        if not os.path.exists(self._bin):
+            log.warning("apple_stt binary not found: %s", self._bin)
+            return ""
+        try:
+            result = subprocess.run(
+                [self._bin, wav_path],
+                capture_output=True,
+                text=True,
+                timeout=15,
+            )
+            if result.returncode == 0:
+                return clean_transcript(result.stdout.strip())
+            log.warning("apple_stt exited %d: %s", result.returncode, result.stderr.strip())
+        except Exception as exc:
+            log.warning("apple_stt failed: %s", exc)
+        return ""
+
+
 _stt: STT | None = None
 
 
@@ -364,6 +390,8 @@ def _build_default_stt() -> STT:
     a Metal-GPU deadlock can't deafen the mic (:class:`SubprocessSTT`). The bare
     framework-CPU Moonshine (``STT_ENGINE=moonshine``) is the no-Metal fallback —
     it never hangs but mis-hears real speech ("What's going on?" -> "Blun.")."""
+    if config.STT_ENGINE == "apple":
+        return AppleSTT()
     if config.STT_ENGINE == "moonshine":
         return MoonshineSTT()
     if config.STT_ENGINE in ("whisper", "whispercpp") and os.path.exists(config.WHISPERCPP_BIN):

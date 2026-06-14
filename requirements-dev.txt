@@ -1,0 +1,8 @@
+# Dev/test deps — mirrors .github/workflows/utah-verify.yml fast gate.
+# Install: pip install -r requirements-dev.txt
+pytest>=8
+msgspec>=0.18
+psycopg[binary]>=3.1
+psycopg_pool>=3.2
+pgvector>=0.2.5
+fastembed>=0.3

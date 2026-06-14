@@ -15,8 +15,9 @@ def _patch_counts(monkeypatch, table_counts: dict):
 def test_gate_assessable_when_only_sends_readable(monkeypatch):
     _patch_counts(monkeypatch, {"mail_ledger": 3, "sales": None})   # sales table absent
     g = revenue_heal.outcome_gate()
-    assert g["assessable"] is True and g["ok"] is True
+    assert g["assessable"] is True and g["ok"] is False   # sends ≠ revenue (J-021)
     assert g["sends"] == 3 and g["sales"] == 0
+    assert "activity only" in g["reason"]
 
 
 def test_gate_assessable_when_only_sales_readable(monkeypatch):
@@ -37,9 +38,9 @@ def test_is_revenue_green_false_when_unassessable(monkeypatch):
     assert revenue_heal.is_revenue_green() is False   # never green on a blind read
 
 
-def test_is_revenue_green_true_on_real_send(monkeypatch):
+def test_is_revenue_green_false_on_sends_without_sales(monkeypatch):
     _patch_counts(monkeypatch, {"mail_ledger": 2, "sales": 0})
-    assert revenue_heal.is_revenue_green() is True
+    assert revenue_heal.is_revenue_green() is False
 
 
 def test_window_override_is_threaded_through(monkeypatch):

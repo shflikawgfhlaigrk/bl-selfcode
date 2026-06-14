@@ -54,6 +54,13 @@ def remember_profile(fact: str, *, store=None) -> dict:
     """
     if is_blank(fact):
         return {"stored": False, "error": "blank fact — nothing to remember"}
+    from utah.memory.logic import is_untrusted_canspam_content
+
+    if is_untrusted_canspam_content(fact):
+        return {
+            "stored": False,
+            "error": "untrusted CAN-SPAM/address profile fact — refused",
+        }
     if store is None:
         from utah import memory
         store = lambda f: memory.store(f, source="user", confidence=0.9)  # noqa: E731

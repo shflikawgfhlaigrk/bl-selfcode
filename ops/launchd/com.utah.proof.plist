@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>Label</key><string>com.utah.proof</string>
+  <key>EnvironmentVariables</key><dict>
+    <key>PYTHONPATH</key><string>/Users/michaelbarber/Desktop/ProjectUtah</string>
+    <key>PATH</key><string>/Users/michaelbarber/.utah/venv/bin:/opt/homebrew/bin:/usr/local/bin:/Users/michaelbarber/.local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+  </dict>
+  <key>WorkingDirectory</key><string>/Users/michaelbarber/Desktop/ProjectUtah</string>
+  <key>ProgramArguments</key><array>
+    <string>/Users/michaelbarber/.utah/venv/bin/python</string>
+    <string>-c</string>
+    <string>from utah import proof_skeleton, proof; proof_skeleton.seed_all(); print(proof.run_scheduled())</string>
+  </array>
+  <key>StartInterval</key><integer>900</integer>
+  <key>RunAtLoad</key><true/>
+  <key>StandardOutPath</key><string>/Users/michaelbarber/.utah/logs/proof.log</string>
+  <key>StandardErrorPath</key><string>/Users/michaelbarber/.utah/logs/proof.err</string>
+</dict></plist>

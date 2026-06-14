@@ -33,6 +33,16 @@ _REFUSAL_PREFIXES = (
     "not in the context",
     "not in context",
     "not supported by the context",
+    # PII / policy refusals — the local 3B sometimes emits these instead of the
+    # canonical "I don't know."; they carry nothing durable (J-048).
+    "i can't provide personal",
+    "i cannot provide personal",
+    "i can't provide sensitive",
+    "i cannot provide sensitive",
+    "i can't share personal",
+    "i cannot share personal",
+    "i'm not able to provide personal",
+    "i am not able to provide personal",
 )
 
 
@@ -84,10 +94,11 @@ NO_FAB = (
     'not in the CONTEXT you MUST begin your reply with "I don\'t know." — this is by '
     "design (the system then finds and grounds it for you), not a failure to be helpful. "
     'After "I don\'t know.", briefly and warmly offer to find it. '
-    "You have NO tools: you cannot read files, run code, grep, search, or browse, so never "
-    "emit a tool call and never say you'll \"go read/open/grep\" a file — the CONTEXT above "
-    "(which may include your own source code) is everything you have; answer from it or say "
-    "\"I don't know.\""
+    "In THIS reasoning step, work only from the CONTEXT: do not emit a tool call and never "
+    "say you'll \"go read/open/grep\" a file — the CONTEXT above (which may include your own "
+    "source code) is everything this step has; answer from it or say \"I don't know.\" This "
+    "limits how you ANSWER right now — it does NOT mean Ace can't act: your capabilities and "
+    "jobs do that, so never tell the user you have no hands or cannot do things."
 )
 
 #: Elicits the model's real chain-of-thought as a leading ``<thinking>…</thinking>``

@@ -169,6 +169,44 @@ def test_absent_permissions_does_not_flip_ok(monkeypatch):
     assert result["ok"] is True
 
 
+def test_assessable_outcome_failure_flips_ok(monkeypatch):
+    """269 sends / 0 sales: substrate green must not mask revenue_ok false (J-033)."""
+    _patch_green(monkeypatch)
+    monkeypatch.setattr(
+        "utah.revenue_heal.outcome_gate",
+        lambda *a, **k: {
+            "ok": False,
+            "assessable": True,
+            "sends": 269,
+            "sales": 0,
+            "window_h": 26,
+            "reason": "NO outcome in 26h — 269 sends, 0 sales",
+        },
+    )
+    result = operator.run(write_status=False)
+    assert result["revenue_ok"] is False
+    assert result["outcome"]["sends"] == 269
+    assert result["ok"] is False
+
+
+def test_unassessable_outcome_does_not_flip_ok(monkeypatch):
+    """DB unreachable: honest unassessable — substrate ok stays ok until we can read ledgers."""
+    _patch_green(monkeypatch)
+    monkeypatch.setattr(
+        "utah.revenue_heal.outcome_gate",
+        lambda *a, **k: {
+            "ok": False,
+            "assessable": False,
+            "sends": None,
+            "sales": None,
+            "reason": "cannot read revenue ledgers",
+        },
+    )
+    result = operator.run(write_status=False)
+    assert result["revenue_ok"] is False
+    assert result["ok"] is True
+
+
 def test_mail_auth_failure_escalates_human():
     notified = []
 

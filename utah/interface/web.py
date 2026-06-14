@@ -31,6 +31,7 @@ from sse_starlette.sse import EventSourceResponse
 
 from utah import config, failures
 from utah.daemon import client as ctl
+from utah.daemon import runtime
 from utah.integrations import discord as discord_mod
 from utah.voice import state as voice_state
 
@@ -695,6 +696,37 @@ def _audit_rows() -> list[str]:
     ]
 
 
+def _operator_snapshot() -> dict:
+    """Last Ace operator sweep — outcome gate + mail_gated for the deck.
+
+    Reads ``~/.utah/run/operator.json`` (written every ``com.utah.operator`` pass).
+    Honest ``present: False`` when absent/unreadable; never fabricates revenue truth.
+    """
+    path = runtime.RUN_DIR / "operator.json"
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, json.JSONDecodeError):
+        return {"present": False}
+    if not isinstance(data, dict):
+        return {"present": False}
+    outcome = data.get("outcome") if isinstance(data.get("outcome"), dict) else {}
+    return {
+        "present": True,
+        "ts": data.get("ts"),
+        "ok": bool(data.get("ok")),
+        "mail_gated": bool(data.get("mail_gated")),
+        "revenue_ok": bool(outcome.get("ok")),
+        "outcome": {
+            "ok": bool(outcome.get("ok")),
+            "assessable": outcome.get("assessable"),
+            "sends": outcome.get("sends"),
+            "sales": outcome.get("sales"),
+            "window_h": outcome.get("window_h"),
+            "reason": outcome.get("reason"),
+        },
+    }
+
+
 #: route → last good payload. When the daemon sheds under load, the deck serves
 #: this (labeled ``degraded``) instead of {} — stale-but-real beats blank panels
 #: that read as "no producer wired" while 4,666 real rows sit in Postgres.
@@ -751,6 +783,8 @@ async def deck_data(request):
             state.setdefault("degraded", {})["memory"] = str(exc)
     # AUDIT LEDGER panel — live from the durable failure log (off-loop; empty on error)
     state["audit"] = await run_in_threadpool(_audit_rows)
+    # Operator outcome gate — substrate can be green while $0 sales / mail gated.
+    state["operator"] = await run_in_threadpool(_operator_snapshot)
     # Revenue panels — live from the Postgres product ledger (real rows or empty).
     snap = await _ledger_snapshot()
     if snap:
@@ -808,6 +842,57 @@ class OriginGuard(BaseHTTPMiddleware):
         return await call_next(request)
 
 
+async def api_truth(request):
+    """The Proof Ledger scoreboard: every claim's live tier, grouped by department."""
+    from utah import proof
+    with proof._pool().connection() as c:
+        rows = c.execute(
+            "SELECT id,claim,system,artifact,proof_kind,last_result,last_run,owner,how,link "
+            "FROM proof_ledger ORDER BY system,id").fetchall()
+    by_system, score = {}, {"total": 0, "proven": 0, "promoted": 0, "red": 0}
+    for rid, claim, system, artifact, kind, lr, lrun, owner, how, link in rows:
+        tier = proof.effective_tier(rid)
+        score["total"] += 1
+        score[tier] = score.get(tier, 0) + 1
+        if tier not in proof.GREEN_TIERS:
+            score["red"] += 1
+        by_system.setdefault(system, []).append(
+            {"id": rid, "claim": claim, "tier": tier, "artifact": artifact,
+             "kind": kind, "owner": owner, "how": how, "link": link, "last_result": lr,
+             "last_run": lrun.isoformat() if lrun else None})
+    return JSONResponse({"scoreboard": score, "by_system": by_system})
+
+
+async def api_truth_detail(request):
+    """Drill-down: the proof command, the captured output, and the LIVE source file."""
+    from utah import proof
+    pid = request.path_params["pid"]
+    with proof._pool().connection() as c:
+        row = c.execute(
+            "SELECT claim,system,artifact,proof_kind,proof_cmd,stress_cmd,last_result,"
+            "last_output,owner FROM proof_ledger WHERE id=%s", (pid,)).fetchone()
+    if not row:
+        return JSONResponse({"error": "unknown proof id"}, status_code=404)
+    claim, system, artifact, kind, cmd, stress, lr, out, owner = row
+    fpath = (artifact or "").split(":", 1)[0]
+    src = ""
+    if fpath:
+        base = pathlib.Path(__file__).resolve().parents[2]
+        p = (pathlib.Path(fpath).expanduser() if fpath.startswith(("/", "~")) else base / fpath)
+        try:
+            src = p.read_text()[:20000] if p.exists() else f"(artifact not found on disk: {fpath})"
+        except Exception as exc:  # noqa: BLE001
+            src = f"(unreadable: {exc})"
+    return JSONResponse({"id": pid, "claim": claim, "system": system, "owner": owner,
+                         "tier": proof.effective_tier(pid), "artifact": artifact,
+                         "proof_kind": kind, "proof_cmd": cmd, "stress_cmd": stress,
+                         "last_result": lr, "last_output": out, "source": src})
+
+
+async def truth_page(request):
+    return FileResponse(STATIC / "truth.html")
+
+
 def build_app() -> Starlette:
     routes = [
         Route("/", index),                # THE REAL DECK: live.html — actively maintained, full live
@@ -844,6 +929,9 @@ def build_app() -> Starlette:
         Route("/sw.js", service_worker),
         Route("/icon-{size}.png", app_icon),
         Mount("/assets", StaticFiles(directory=str(DASH / "assets"))),
+        Route("/truth", truth_page),         # Proof Ledger — the nervous-system truth page
+        Route("/api/truth", api_truth),
+        Route("/api/truth/{pid:path}", api_truth_detail),
         Route("/{route:path}", deck_data),  # catch-all data routes (last)
     ]
     return Starlette(routes=routes, middleware=[Middleware(OriginGuard)])

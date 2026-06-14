@@ -1,0 +1,5461 @@
+{
+  "generated": "2026-06-14",
+  "repo": "/Users/michaelbarber/ProjectUtah",
+  "rubric": "RUBRIC-V2-STRICT + v1 fallback + heuristic caps",
+  "counts": {
+    "total": 544,
+    "by_letter": {
+      "A": 0,
+      "B": 329,
+      "C": 209,
+      "D": 4,
+      "F": 2,
+      "?": 0
+    },
+    "below_60": 6,
+    "with_cap": 8,
+    "heuristic_only": 544
+  },
+  "files": [
+    {
+      "path": "tests/test_proof_scheduled.py",
+      "score": 35,
+      "letter": "F",
+      "cap": "fake_test",
+      "failure": "Few/no assertions \u2014 verify manually",
+      "source": "heuristic",
+      "tag": "#grade/F",
+      "dims": null
+    },
+    {
+      "path": "tests/test_proof_schema.py",
+      "score": 35,
+      "letter": "F",
+      "cap": "fake_test",
+      "failure": "Few/no assertions \u2014 verify manually",
+      "source": "heuristic",
+      "tag": "#grade/F",
+      "dims": null
+    },
+    {
+      "path": "tests/test_memory_init.py",
+      "score": 40,
+      "letter": "D",
+      "cap": "eval_exec",
+      "failure": "eval_exec",
+      "source": "heuristic",
+      "tag": "#grade/D",
+      "dims": null
+    },
+    {
+      "path": "tests/test_recall_eval.py",
+      "score": 40,
+      "letter": "D",
+      "cap": "eval_exec",
+      "failure": "eval_exec",
+      "source": "heuristic",
+      "tag": "#grade/D",
+      "dims": null
+    },
+    {
+      "path": "utah/proof.py",
+      "score": 40,
+      "letter": "D",
+      "cap": "shell_true",
+      "failure": "shell_true; no_timeout",
+      "source": "heuristic",
+      "tag": "#grade/D",
+      "dims": null
+    },
+    {
+      "path": "tests/test_supervisor.py",
+      "score": 58,
+      "letter": "D",
+      "cap": "swallowed_exception",
+      "failure": "swallowed_exception",
+      "source": "heuristic",
+      "tag": "#grade/D",
+      "dims": null
+    },
+    {
+      "path": "tests/test_canary.py",
+      "score": 62,
+      "letter": "C",
+      "cap": "hardcoded_path",
+      "failure": "hardcoded_path",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "tests/test_operator_app.py",
+      "score": 62,
+      "letter": "C",
+      "cap": "hardcoded_path",
+      "failure": "hardcoded_path",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "ops/render_30s_reel.py",
+      "score": 68,
+      "letter": "C",
+      "cap": null,
+      "failure": "no_timeout",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "ops/verify.py",
+      "score": 68,
+      "letter": "C",
+      "cap": null,
+      "failure": "no_timeout",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/auth_repair.py",
+      "score": 68,
+      "letter": "C",
+      "cap": null,
+      "failure": "no_timeout",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/core.py",
+      "score": 68,
+      "letter": "C",
+      "cap": null,
+      "failure": "oversize_650",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/daemon/cli.py",
+      "score": 68,
+      "letter": "C",
+      "cap": null,
+      "failure": "no_timeout",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/daemon/supervisor.py",
+      "score": 68,
+      "letter": "C",
+      "cap": null,
+      "failure": "no_timeout",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/fm_local.py",
+      "score": 68,
+      "letter": "C",
+      "cap": null,
+      "failure": "no_timeout",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/integrations/browser.py",
+      "score": 68,
+      "letter": "C",
+      "cap": null,
+      "failure": "no_timeout",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/integrations/notes.py",
+      "score": 68,
+      "letter": "C",
+      "cap": null,
+      "failure": "no_timeout",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/integrations/notify.py",
+      "score": 68,
+      "letter": "C",
+      "cap": null,
+      "failure": "no_timeout",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/integrations/wc_feed.py",
+      "score": 68,
+      "letter": "C",
+      "cap": null,
+      "failure": "oversize_650; no_timeout",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/interface/static/live.html",
+      "score": 68,
+      "letter": "C",
+      "cap": null,
+      "failure": "oversize_650",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/interface/web.py",
+      "score": 68,
+      "letter": "C",
+      "cap": null,
+      "failure": "oversize_650",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/operator_app.py",
+      "score": 68,
+      "letter": "C",
+      "cap": null,
+      "failure": "no_timeout",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/product/console.py",
+      "score": 68,
+      "letter": "C",
+      "cap": null,
+      "failure": "no_timeout",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/product/leads.py",
+      "score": 68,
+      "letter": "C",
+      "cap": null,
+      "failure": "oversize_650",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/product/ledger.py",
+      "score": 68,
+      "letter": "C",
+      "cap": null,
+      "failure": "oversize_650",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/product/selfcode_web.py",
+      "score": 68,
+      "letter": "C",
+      "cap": null,
+      "failure": "no_timeout",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/sica_overseer.py",
+      "score": 68,
+      "letter": "C",
+      "cap": null,
+      "failure": "no_timeout",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/voice/loop.py",
+      "score": 68,
+      "letter": "C",
+      "cap": null,
+      "failure": "oversize_650; no_timeout",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/voice/macapp.py",
+      "score": 68,
+      "letter": "C",
+      "cap": null,
+      "failure": "no_timeout",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/voice/stt.py",
+      "score": 68,
+      "letter": "C",
+      "cap": null,
+      "failure": "no_timeout",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "app/bin/proof.dart",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "app/ios/Flutter/AppFrameworkInfo.plist",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "app/ios/Flutter/ephemeral/flutter_lldb_helper.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "app/ios/Flutter/flutter_export_environment.sh",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "app/ios/Runner.xcodeproj/project.xcworkspace/xcshareddata/IDEWorkspaceChecks.plist",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "app/ios/Runner.xcodeproj/xcuserdata/michaelbarber.xcuserdatad/xcschemes/xcschememanagement.plist",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "app/ios/Runner.xcworkspace/xcshareddata/IDEWorkspaceChecks.plist",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "app/ios/Runner/Info.plist",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "app/lib/api.dart",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "app/lib/deck_config.dart",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "app/lib/main.dart",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "app/macos/Flutter/ephemeral/flutter_export_environment.sh",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "app/macos/Runner.xcodeproj/project.xcworkspace/xcshareddata/IDEWorkspaceChecks.plist",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "app/macos/Runner.xcworkspace/xcshareddata/IDEWorkspaceChecks.plist",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "app/macos/Runner/Info.plist",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "app/test/widget_test.dart",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "app/web/index.html",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "migrations/__init__.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "migrations/ace_knowledge.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "ops/bin/utah_pg.sh",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "ops/bin/utah_tailserve.sh",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "ops/cleanup-boundaries.sh",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "ops/drill.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "ops/export_leads.sh",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "ops/export_leads_xlsx.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "ops/foundation_check.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "ops/google_oauth_setup.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "ops/launchd/com.utah.brief.plist",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "ops/launchd/com.utah.canary.plist",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "ops/launchd/com.utah.codeindex.plist",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "ops/launchd/com.utah.consolidate.plist",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "ops/launchd/com.utah.engine-audit.plist",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "ops/launchd/com.utah.enrich.plist",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "ops/launchd/com.utah.foundation.plist",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "ops/launchd/com.utah.grade-fires.plist",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "ops/launchd/com.utah.leads-maps.plist",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "ops/launchd/com.utah.leads.plist",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "ops/launchd/com.utah.mailcheck.plist",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "ops/launchd/com.utah.marketer.plist",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "ops/launchd/com.utah.operator.plist",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "ops/launchd/com.utah.outreach.plist",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "ops/launchd/com.utah.postgres.plist",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "ops/launchd/com.utah.probate-enrich.plist",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "ops/launchd/com.utah.probate-outreach.plist",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "ops/launchd/com.utah.probate.plist",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "ops/launchd/com.utah.proof.plist",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "ops/launchd/com.utah.replies.plist",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "ops/launchd/com.utah.selfcode.plist",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "ops/launchd/com.utah.signals.plist",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "ops/launchd/com.utah.supervisor.plist",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "ops/launchd/com.utah.tailserve.plist",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "ops/launchd/com.utah.verify.plist",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "ops/launchd/com.utah.wcfeed.plist",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "ops/utah_grade_index.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "ops/verify_stack.sh",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/__init__.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/_probe_marker.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/actions.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/advisory.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/agents.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/alerts.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/attribution.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/canary.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/codebase.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/connectivity.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/consolidate.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/courier.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/daemon/bus.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/daemon/client.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/daemon/codec.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/daemon/daemon.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/daemon/data_client.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/daemon/data_server.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/daemon/dispatch.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/daemon/frame.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/daemon/handlers/__init__.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/daemon/handlers/core_handlers.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/daemon/handlers/panels.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/daemon/pool.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/daemon/rpc.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/daemon/runtime.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/daemon/server.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/db_pool.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/drift.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/embed.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/entities.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/failures.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/foundation.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/integrations/__init__.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/integrations/calendar.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/integrations/contacts.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/integrations/discord.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/integrations/discord_feed.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/integrations/external.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/integrations/imessage.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/integrations/macos.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/integrations/maps.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/integrations/oauth.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/integrations/pushover.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/integrations/social_post.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/interface/__init__.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/interface/static/route.html",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/interface/static/terminal.html",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/interface/static/truth.html",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/introspect.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/knowledge/__init__.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/knowledge/douglas.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/local.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/local_brain.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/mail.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/mail_capacity.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/mail_replies.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/maintenance.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/memory/__init__.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/memory/eval.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/memory/exceptions.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/memory/logic.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/memory/pipeline.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/memory/store.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/memory/types.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/objects.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/operator.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/permissions.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/product/__init__.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/product/backtest.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/product/brief.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/product/clock.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/product/engine_audit.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/product/engine_status.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/product/enrich.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/product/fire_grader.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/product/jobs_status.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/product/leads_eval.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/product/leads_status.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/product/mail_status.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/product/marketer.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/product/news.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/product/outreach.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/product/pipeline.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/product/probate.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/product/probate_export.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/product/probate_outreach.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/product/property.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/product/reel_queue.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/product/research_signal.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/product/researcher.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/product/route.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/product/signals.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/product/sitegen.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/product/tasks.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/product/timers.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/product/trackers.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/product/trade_alert.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/product/trade_lore.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/product/trading.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/product/weather.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/profile.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/proof_skeleton.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/rerank.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/revenue_heal.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/router.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/secrets_sync.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/sica.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/sica_autonomy.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/sica_discover.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/sica_goals.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/sica_loop.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/sica_selfaudit.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/sms.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/social.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/store/__init__.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/store/olap.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/voice/__init__.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/voice/agent.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/voice/barge.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/voice/barge_control.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/voice/liveness.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/voice/oww.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/voice/state.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/voice/stt_worker.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/voice/tts.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/voice/vad.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/voice/wake.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/watchdog.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "utah/win.py",
+      "score": 72,
+      "letter": "C",
+      "cap": null,
+      "failure": "heuristic pass \u2014 no auto caps hit",
+      "source": "heuristic",
+      "tag": "#grade/C",
+      "dims": null
+    },
+    {
+      "path": "tests/__init__.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/fakes.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test___init__.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_ace_isolation.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_ace_knowledge_migration.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_actions.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_advisory.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_advisory_gates.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_agents_loader.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_alert_wiring.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_alerts.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_attribution.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_attribution_edges.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_attribution_refusal_forms.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_auth_repair.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_auth_repair_boundary.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_backtest.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_backtest_guards.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_barge_control.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_brain.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_brain_rate_limit.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_brain_runner_timeout.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_brain_stream.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_brief.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_browser_courier.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_browser_hardening.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_browser_visible.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_calendar_client.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_canary_probes.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_canspam_completeness.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_clock.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_clock_zone.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_codebase.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_connectivity.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_console.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_consolidate.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_consolidate_limits.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_contacts_lookup.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_core.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_core_handlers.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_cron_governor.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_daemon_bus.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_daemon_bus_counters.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_daemon_bus_overflow.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_daemon_cli.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_daemon_cli_repair.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_daemon_client.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_daemon_client_edges.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_daemon_codec.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_daemon_codec_edges.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_daemon_daemon.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_daemon_server.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_daemon_stream.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_daemon_wire.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_data_client.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_data_server.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_db_pool.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_db_pool_validation.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_discord.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_discord_client.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_discord_feed.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_dispatch.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_douglas.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_douglas_hardening.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_drift.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_drift_caps.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_drill.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_drill_probes.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_embed.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_embed_boundary.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_engine_audit.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_enrich.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_enrich_boundaries.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_enrich_dns_bounds.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_enrich_sitegen_wire.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_entities.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_entities_extractor.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_export_leads.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_external_data.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_failures.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_failures_limits.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_failures_paging.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_fire_grader.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_fire_grader_edges.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_fire_grader_levels.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_fm_local.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_foundation.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_foundation_bounds.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_foundation_check.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_foundation_probes.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_frame.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_git_state_agent.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_google_oauth_setup.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_governor.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_governor_gauges.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_handlers_registry.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_imessage_quoting.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_imessage_send.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_integration_pg.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_integrations.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_integrations_pkg.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_interface_pkg.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_interface_web.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_interface_web_hardening.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_introspect.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_knowledge_pkg.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_leads.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_leads_edges.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_leads_eval.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_leads_eval_edges.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_leads_maps.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_leads_status.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_ledger.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_lifecycle.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_live_html.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_local.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_local_brain.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_local_hardening.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_macos_external_profile.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_macos_ops.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_mail.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_mail_capacity.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_mail_hardening.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_mail_replies.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_mail_replies_fetch.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_mail_replies_hardening.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_mail_replies_state.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_mail_rotation.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_mail_security.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_mail_status.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_maintenance.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_maintenance_hardening.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_maintenance_report_shape.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_maps.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_maps_hardening.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_marketer.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_marketer_publish.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_marketer_run.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_marketer_wire.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_marketing_stress.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_memory_confab.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_memory_drilldown.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_memory_eval.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_memory_eval_boundary.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_memory_eval_edges.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_memory_exceptions.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_memory_logic.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_memory_logic_rules.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_memory_pipeline.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_memory_pipeline_hardening.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_memory_store.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_memory_store_links.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_memory_store_queries.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_memory_types.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_memory_types_protocol.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_migrations.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_news.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_news_connectivity.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_no_asterisks.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_notes.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_notify_hardening.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_oauth.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_oauth_hardening.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_objects.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_objects_contracts.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_olap.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_operator.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_outcome_gate.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_outreach.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_outreach_cadence.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_outreach_edges.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_outreach_followups.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_outreach_template.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_outreach_work_leads.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_panels.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_peercred.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_peercred_accept.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_permissions.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_pipeline.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_pool.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_probate.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_probate_edges.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_probate_outreach.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_probate_outreach_edges.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_probe_marker.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_product_exports.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_product_init.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_product_row_contracts.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_profile.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_profile_boundaries.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_proof_cron.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_proof_gate.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_proof_human.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_proof_meta.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_proof_register.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_proof_run.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_proof_skeleton.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_proof_tier.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_property.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_property_hardening.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_pushover.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_pushover_e2ee_fallback.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_pushover_hardening.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_reel_queue.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_rerank.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_rerank_degrade.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_rerank_model_load.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_research_engine.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_researcher.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_researcher_hardening.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_revenue_heal.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_revenue_heal_db.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_revenue_heal_outcome.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_route.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_router.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_rpc.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_runtime.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_secrets_sync.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_secrets_sync_memory.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_selfcode.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_selfcode_guard.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_selfcode_offlimits.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_selfcode_setup_guard.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_selfcode_tiers.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_selfcode_timeouts.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_selfcode_web.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_selfheal_bridge.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_server_edges.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_sica.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_sica_autonomy.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_sica_autonomy_git.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_sica_discover.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_sica_discover_hardening.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_sica_goals.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_sica_goals_bounds.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_sica_loop.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_sica_loop_bounds.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_sica_loop_proposer_contract.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_sica_novelty.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_sica_overseer.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_sica_overseer_runner.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_sica_pg.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_sica_selfaudit.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_signals.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_sms_creds_gate.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_sms_daily_cap.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_sms_send.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_sms_twilio_api.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_social.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_social_consistency.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_social_post.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_social_reply.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_status_capabilities.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_store_init.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_store_init_lazy.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_stt_boundary.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_stt_respawn_cooldown.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_stt_worker.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_supervisor_edges.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_tasks.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_tell_stream.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_timers_bounded.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_timers_notify.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_timers_validation.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_trackers_advisory.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_trackers_bounded.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_trackers_validation.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_trade_alert.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_trade_lore.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_trade_lore_hardening.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_trade_lore_prompt_guard.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_trading.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_trading_edge_gate.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_trading_hardening.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_trading_stress.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_trading_unfed_edge.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_truth_route.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_tts_hardening.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_tts_speech_clean.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_utah_pg.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_utah_tailserve.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_vad_segmenter_edges.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_verify_ops.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_verify_stack.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_voice_agent.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_voice_agent_hardening.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_voice_agent_paths.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_voice_barge.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_voice_barge_loop.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_voice_echo_gate.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_voice_init.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_voice_liveness.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_voice_liveness_hardening.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_voice_liveness_threading.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_voice_loop.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_voice_loop_dsp.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_voice_loop_gate.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_voice_macapp.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_voice_macapp_hardening.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_voice_oww.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_voice_oww_bounded.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_voice_oww_hardening.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_voice_state.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_voice_state_contract.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_voice_state_hardening.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_voice_stt.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_voice_tts.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_voice_vad.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_voice_wake.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_wake_band.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_wake_gate_edges.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_watchdog.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_watchdog_edges.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_wc_feed.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_wc_feed_env.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_wc_feed_hardening.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_weather.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_weather_forecast.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_weather_hardening.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_whispercpp_stt.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_win.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/test_win_codec_edges.py",
+      "score": 80,
+      "letter": "B",
+      "cap": null,
+      "failure": "No automated hazards; not a human v2 review",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "tests/conftest.py",
+      "score": 85,
+      "letter": "B",
+      "cap": null,
+      "failure": "Tier-D safety path \u2014 human review required before edits",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "utah/brain.py",
+      "score": 85,
+      "letter": "B",
+      "cap": null,
+      "failure": "Tier-D safety path \u2014 human review required before edits",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "utah/config.py",
+      "score": 85,
+      "letter": "B",
+      "cap": null,
+      "failure": "Tier-D safety path \u2014 human review required before edits",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "utah/daemon/governor.py",
+      "score": 85,
+      "letter": "B",
+      "cap": null,
+      "failure": "Tier-D safety path \u2014 human review required before edits",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "utah/daemon/lifecycle.py",
+      "score": 85,
+      "letter": "B",
+      "cap": null,
+      "failure": "Tier-D safety path \u2014 human review required before edits",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "utah/daemon/peercred.py",
+      "score": 85,
+      "letter": "B",
+      "cap": null,
+      "failure": "Tier-D safety path \u2014 human review required before edits",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    },
+    {
+      "path": "utah/selfcode.py",
+      "score": 85,
+      "letter": "B",
+      "cap": null,
+      "failure": "Tier-D safety path \u2014 human review required before edits",
+      "source": "heuristic",
+      "tag": "#grade/B",
+      "dims": null
+    }
+  ]
+}

@@ -58,8 +58,11 @@ def test_count_since_bounds_connect_and_statement(monkeypatch):
     assert revenue_heal._count_since("mail_ledger", 26.0) == 3
     assert captured.get("connect_timeout", 0) > 0
     assert "statement_timeout" in captured.get("options", "")
-    # the window is BOUND as a parameter, never interpolated
-    assert conn.sql and conn.sql[0][1] == (26.0,)
+    # existence probe first, then count — window is BOUND as a parameter, never interpolated
+    assert len(conn.sql) == 2
+    assert conn.sql[0] == ("select to_regclass(%s)", ("mail_ledger",))
+    assert conn.sql[1][0].startswith("select count(*)")
+    assert conn.sql[1][1] == (26.0,)
 
 
 def test_non_identifier_table_is_refused_without_touching_db(monkeypatch):

@@ -5,6 +5,7 @@ through :data:`PANEL_REGISTRY`; no inline ``if panel ==`` sprawl.
 """
 from __future__ import annotations
 
+import json
 import os
 from collections.abc import Awaitable, Callable
 
@@ -200,13 +201,18 @@ async def _panel_trading(ctx: Context) -> dict:
         try:
             lg = Ledger()
             fires = lg.counts().get("fires", 0)
-            rows = lg.recent("fires", 30)
+            signals = lg.recent("fires", 200)
+            rows = signals[:30]
         except Exception:  # noqa: BLE001
-            fires, rows = 0, []
+            fires, signals, rows = 0, [], []
         try:
             ticks = lg.live_ticks()
         except Exception:  # noqa: BLE001 — surface may predate the wc_live table
             ticks = []
+        try:
+            logs = lg.recent_lore(100)
+        except Exception:  # noqa: BLE001
+            logs = []
         # Real per-engine truth: GROUP BY totals + graded scorecard, not a count
         # over the 30-row recents window (18 'fires' beside a 2,044 ledger total).
         try:
@@ -217,15 +223,59 @@ async def _panel_trading(ctx: Context) -> dict:
             from collections import Counter
             totals, score = {}, {}
             by_engine = dict(Counter((r.get("engine") or "?") for r in rows))
+        # Per-engine BEST proven per-symbol edge from the nightly audit — so the lab
+        # shows WHERE an engine wins (research proves edge on QQQ/SPY/GLD), not the
+        # misleading 'no edge' of the single-symbol dash_config.
+        try:
+            from utah.product import engine_audit
+            best = engine_audit.latest().get("best_edges", {})
+        except Exception:  # noqa: BLE001 — no audit yet => no best-edge annotation
+            best = {}
         state = trading.lab_state(fires, by_engine=by_engine)
         for e in state["engines"]:
             e.update(score.get(e["name"], {}))
             e["fires_24h"] = totals.get(e["name"], {}).get("last_24h", 0)
-        return {"panel": "trading", **state, "rows": rows, "recent_window": 30,
-                "ticks": ticks}
+            e["best_edge"] = best.get(e["name"])
+        backtests = trading.dash_config()
+        dash_updated = ""
+        try:
+            if trading.APEX_DASH_CONFIG.exists():
+                dash_updated = json.loads(trading.APEX_DASH_CONFIG.read_text()).get("updated", "")
+        except Exception:  # noqa: BLE001
+            dash_updated = ""
+        try:
+            from utah import failures
+            fail_rows = [
+                {"ts": r.ts, "kind": r.kind, "detail": r.detail}
+                for r in failures.recent(80)
+                if r.source == "trading"
+            ]
+        except Exception:  # noqa: BLE001
+            fail_rows = []
+        return {"panel": "trading", **state, "rows": rows, "signals": signals,
+                "logs": logs, "backtests": backtests, "failures": fail_rows,
+                "dash_updated": dash_updated, "recent_window": 30, "ticks": ticks}
 
     with ctx.governor.read_admission():
         return await ctx.pool.run(_lab)
+
+
+async def _panel_engine_audit(ctx: Context) -> dict:
+    """The nightly per-(engine,symbol) edge matrix — the full fleet review, in the app.
+    Cheap read of the last persisted audit (``engine_audit.run_scheduled`` writes it
+    nightly @02:30); honest empty + how-to-run note if it has never run."""
+    from utah.product import engine_audit
+
+    with ctx.governor.read_admission():
+        data = await ctx.pool.run(engine_audit.latest)
+    if not data:
+        return {"panel": "engine_audit", "fleet": [],
+                "summary": {"proven": 0, "total_pairs": 0}, "best_edges": {},
+                "note": "audit not run yet — runs nightly (com.utah.engine-audit) "
+                        "or: launchctl kickstart gui/$(id -u)/com.utah.engine-audit"}
+    return {"panel": "engine_audit", "generated_at": data.get("generated_at"),
+            "fleet": data.get("fleet", []), "summary": data.get("summary", {}),
+            "best_edges": data.get("best_edges", {})}
 
 
 async def _panel_mail(ctx: Context) -> dict:
@@ -387,6 +437,7 @@ PANEL_REGISTRY: dict[str, PanelHandler] = {
     "watchdog": _panel_watchdog,
     "trading": _panel_trading,
     "lab": _panel_trading,
+    "engine_audit": _panel_engine_audit,
     "mail": _panel_mail,
     "marketer": _panel_marketer,
     "research": _panel_research,

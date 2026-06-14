@@ -34,17 +34,24 @@
   <key>WorkingDirectory</key>
   <string>/Users/michaelbarber/Desktop/ProjectUtah</string>
 
-  <key>EnvironmentVariables</key>
-  <dict>
-    <key>PYTHONPATH</key>
-    <string>/Users/michaelbarber/Desktop/ProjectUtah</string>
-    <key>PYTHONUNBUFFERED</key>
-    <string>1</string>
-    <key>UTAH_TEST_DSN</key>
-    <string>host=/tmp port=5433 dbname=utah_test</string>
-    <key>PATH</key>
-    <string>/Users/michaelbarber/.utah/venv/bin:/opt/homebrew/bin:/usr/local/bin:/Users/michaelbarber/.local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
-  </dict>
+    <key>EnvironmentVariables</key>
+    <dict>
+      <key>PYTHONPATH</key>
+      <string>/Users/michaelbarber/Desktop/ProjectUtah</string>
+      <key>PYTHONUNBUFFERED</key>
+      <string>1</string>
+      <key>UTAH_TEST_DSN</key>
+      <string>host=/tmp port=5433 dbname=utah_test</string>
+      <!-- 1500s headroom under load; code default is 1200 in ops/verify.py -->
+      <key>UTAH_VERIFY_TIMEOUT</key>
+      <string>1500</string>
+      <key>HF_HUB_OFFLINE</key>
+      <string>1</string>
+      <key>TRANSFORMERS_OFFLINE</key>
+      <string>1</string>
+      <key>PATH</key>
+      <string>/Users/michaelbarber/.utah/venv/bin:/opt/homebrew/bin:/usr/local/bin:/Users/michaelbarber/.local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    </dict>
 
   <key>RunAtLoad</key>
   <true/>

@@ -14,6 +14,7 @@ import os
 import re
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from datetime import date
 from typing import Callable
@@ -247,8 +248,131 @@ def forecast(
     return text
 
 
-def answer(query: str, **kwargs) -> str:
-    """Dispatch a weather query to the forecast (future window) or current reading."""
+# --------------------------------------------------------------------------
+# Location — answer for the place NAMED in the query, not a hardcoded home town.
+# The single biggest weather bug was that "weather in Atlanta" returned the
+# config default (Gulf Shores): the query was parsed only for current-vs-forecast,
+# never for the place. Now the place is pulled out and geocoded (Open-Meteo, free,
+# keyless). No place named → home default. Over-capture is safe: a bogus place
+# simply fails to geocode and degrades to an honest "I don't know" — never a
+# fabricated reading for the wrong city.
+# --------------------------------------------------------------------------
+
+GeoCoder = Callable[[str], "tuple[float, float, str] | None"]
+
+#: Trailing time / courtesy words that follow a place name but aren't part of it.
+#: Shared by :data:`_TAIL` (strips them off the lead form) and :data:`_LOC_PREP`
+#: (uses them as the right boundary of a place), so the two never disagree.
+_TAIL_WORDS = (
+    r"right now|now|currently|today|tonight|tomorrow|this (?:week|weekend|"
+    r"morning|afternoon|evening)|the weekend|next (?:week|few days|days)|coming days|"
+    r"outlook|please|for me|outside|like|gonna be|going to be"
+)
+_TAIL = re.compile(rf"\s*\b(?:{_TAIL_WORDS})\b.*$", re.I)
+#: "... in/at/for/near/around <place>" — read from the FULL query (before the tail
+#: is cut) so a filler or time word sitting BETWEEN the verb and the place
+#: ("weather LIKE in Atlanta", "weather TODAY in Atlanta") can't swallow the city.
+#: The place runs lazily until the next tail word, punctuation, or end of string.
+_LOC_PREP = re.compile(
+    rf"\b(?:in|at|for|near|around|over)\s+(?P<loc>[A-Za-z][\w.'\- ]*?)"
+    rf"(?=\s+(?:{_TAIL_WORDS})\b|[?.!,]|$)",
+    re.I,
+)
+#: "<place> weather|forecast|temperature|temp" — the place leads the query.
+_LOC_LEAD = re.compile(
+    r"^(?:what(?:'s|s| is)?\s+|hows?\s+|the\s+)*"
+    r"(?P<loc>[A-Za-z][\w.'\- ]*?)\s+(?:weather|forecast|temp(?:erature)?)\b",
+    re.I,
+)
+#: A captured "place" that is really one of these is no place at all → home default.
+#: Includes the pronouns/adverbs that legitimately follow "for"/"near" ("for me",
+#: "for now") so they degrade to home instead of geocoding as a bogus city.
+_NOT_PLACE = {
+    "the", "my", "your", "our", "this", "that", "a", "an", "current", "local",
+    "today", "tomorrow", "tonight", "it", "here", "there", "what", "whats",
+    "weather", "forecast", "temperature", "temp", "rain", "snow", "humidity",
+    "me", "us", "you", "now",
+}
+
+#: Resolved geocodes, cached for the process — place names are stable, so this
+#: spares a repeat round-trip on every "Atlanta weather". Only the default
+#: :func:`_geocode` consults it; injected geocoders (tests) bypass it.
+_GEO_CACHE: dict[str, tuple[float, float, str]] = {}
+
+
+def _clean_loc(raw: str | None) -> str | None:
+    """Normalise a captured place; reject non-places (pronouns, bare nouns)."""
+    loc = " ".join((raw or "").split()).strip(" ,.-'")
+    return loc if loc and loc.lower() not in _NOT_PLACE else None
+
+
+def _extract_location(query: str) -> str | None:
+    """The place named in *query*, or ``None`` to mean "home". Cheap, regex-only,
+    deliberately permissive: a wrong guess fails to geocode and is reported honestly.
+    An explicit "in/at/for/near <place>" is read from the FULL query first, so a time
+    word or filler between the verb and the place can't swallow the city; only then
+    does the lead form ("Atlanta weather") run, against the tail-stripped query."""
+    q = (query or "").strip().rstrip("?.!")
+    if not q:
+        return None
+    m = _LOC_PREP.search(q)
+    if m:
+        loc = _clean_loc(m.group("loc"))
+        if loc:
+            return loc
+    core = _TAIL.sub("", q).strip().rstrip(" ,.-")
+    m = _LOC_LEAD.search(core)
+    if m:
+        loc = _clean_loc(m.group("loc"))
+        if loc:
+            return loc
+    return None
+
+
+def _geocode(name: str) -> tuple[float, float, str] | None:
+    """Resolve a place name to ``(lat, lon, label)`` via Open-Meteo geocoding
+    (free, keyless). ``None`` when the place doesn't resolve or the call fails —
+    the caller then degrades to an honest "I don't know", never a wrong-city number."""
+    key = (name or "").strip().lower()
+    if not key:
+        return None
+    if key in _GEO_CACHE:
+        return _GEO_CACHE[key]
+    url = "https://geocoding-api.open-meteo.com/v1/search?" + urllib.parse.urlencode(
+        {"name": name, "count": 1, "language": "en", "format": "json"})
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": "utah/1.0"})
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+    except Exception as exc:  # noqa: BLE001 — any geocode failure degrades honestly
+        failures.record("weather", "geocode_failed", f"{name[:40]}: {exc}")
+        return None
+    hits = (data or {}).get("results") or []
+    if not hits:
+        return None
+    hit = hits[0]
+    lat, lon = hit.get("latitude"), hit.get("longitude")
+    if lat is None or lon is None:
+        return None
+    place = hit.get("name") or name
+    region = hit.get("admin1")
+    label = f"{place}, {region}" if region and region != place else place
+    resolved = (float(lat), float(lon), label)
+    _GEO_CACHE[key] = resolved
+    return resolved
+
+
+def answer(query: str, *, geocode: GeoCoder = _geocode, **kwargs) -> str:
+    """Dispatch a weather query. Resolves the place NAMED in *query* (default: home)
+    before choosing the forecast (future window) or the current reading."""
+    if kwargs.get("lat") is None and kwargs.get("lon") is None:
+        place = _extract_location(query)
+        if place:
+            resolved = geocode(place)
+            if resolved is None:
+                return f'I don\'t know — I couldn\'t find a place called "{place}".'
+            lat, lon, label = resolved
+            kwargs.update(lat=lat, lon=lon, label=label)
     if _FORECAST_Q.search(query or ""):
         return forecast(query, **kwargs)
     return current(**kwargs)

@@ -1,0 +1,43 @@
+<!doctype html><meta charset=utf-8><title>Proof Ledger — Truth</title>
+<meta name=viewport content="width=device-width,initial-scale=1">
+<style>
+body{font:14px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;background:#0b0b0c;color:#e6e6e6;margin:0;padding:20px}
+h1{font-size:18px;margin:0 0 4px}.score{margin:6px 0 18px;color:#9aa}
+.sys{margin:20px 0 6px;color:#cda434;font-weight:700;text-transform:capitalize;font-size:13px;letter-spacing:.5px}
+.sys.you{color:#ff9bb0}
+.row{display:flex;gap:10px;align-items:center;padding:5px 8px;border-bottom:1px solid #1c1c1f;cursor:pointer}
+.row:hover{background:#141417}
+.b{padding:1px 7px;border-radius:4px;font-size:11px;flex:none;min-width:64px;text-align:center}
+.unproven,.failing,.stale{background:#3a1212;color:#ff7a7a}.proven,.promoted{background:#10301a;color:#6ee7a0}
+.reviewed{background:#23262b;color:#9aa}.claim{flex:1}.art{color:#7f8a99;font-size:12px}
+#d{position:fixed;inset:5% 5%;background:#101013;border:1px solid #333;border-radius:8px;padding:18px;overflow:auto;display:none;box-shadow:0 20px 60px #000a}
+#d button{float:right;background:#222;color:#ccc;border:1px solid #444;border-radius:4px;padding:4px 10px;cursor:pointer}
+pre{white-space:pre-wrap;background:#0b0b0c;padding:10px;border:1px solid #222;border-radius:6px;max-height:40vh;overflow:auto}
+h4{margin:14px 0 4px;color:#cda434}
+</style>
+<h1>🧠 Proof Ledger — what's actually proven</h1>
+<div class=score id=score>loading…</div><div id=app></div>
+<div id=d><button onclick="document.getElementById('d').style.display='none'">close</button><div id=dc></div></div>
+<script>
+const $=id=>document.getElementById(id), esc=s=>(s||'').replace(/[&<]/g,m=>m=='&'?'&amp;':'&lt;');
+const tier=t=>`<span class="b ${t}">${t}</span>`;
+async function load(){
+ const j=await (await fetch('/api/truth')).json(), s=j.scoreboard;
+ $('score').innerHTML=`${s.proven||0} proven · ${s.promoted||0} promoted · <b style="color:#ff7a7a">${s.red} RED</b> / ${s.total}`;
+ const order=Object.keys(j.by_system).sort((a,b)=>(a=='you')-(b=='you'));
+ $('app').innerHTML=order.map(sys=>
+  `<div class="sys ${sys=='you'?'you':''}">${sys=='you'?'👤 ON YOU (Michael)':sys}</div>`+
+  j.by_system[sys].map(x=>
+   `<div class=row onclick="drill('${encodeURIComponent(x.id)}')">${tier(x.tier)}<span class=claim>${esc(x.claim)}</span><span class=art>${esc(x.artifact)}</span></div>`
+  ).join('')).join('');
+}
+async function drill(id){
+ const j=await (await fetch('/api/truth/'+id)).json();
+ $('dc').innerHTML=`<h3>${esc(j.claim)} ${tier(j.tier)}</h3><div class=art>${esc(j.artifact)} · ${esc(j.proof_kind)}${j.owner?' · owner: '+esc(j.owner):''}</div>`
+  +`<h4>proof command</h4><pre>${esc(j.proof_cmd)||'(no proof written yet — dormant / RED)'}</pre>`
+  +`<h4>last output</h4><pre>${esc(j.last_output)||'(never run)'}</pre>`
+  +`<h4>live source — ${esc(j.artifact)}</h4><pre>${esc(j.source)}</pre>`;
+ $('d').style.display='block';
+}
+load();setInterval(load,15000);
+</script>

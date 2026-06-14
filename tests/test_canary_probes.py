@@ -102,15 +102,15 @@ def test_closed_market_never_judges_freshness(monkeypatch):
 
 # ── check_sovereign (multi-port) ─────────────────────────────────────────────
 
-def test_sovereign_found_on_second_port(monkeypatch):
+def test_sovereign_found_on_8775(monkeypatch):
     def fake(url, timeout=8.0):
         if ":8775" in url:
-            raise OSError("connection refused")
-        return {"ok": True, "agents": 7}
+            return {"ok": True, "agents": 7}
+        raise OSError("connection refused")
 
     monkeypatch.setattr(canary, "_http_json", fake)
     ok, detail = canary.check_sovereign()
-    assert ok is True and ":8765" in detail and "7" in detail
+    assert ok is True and ":8775" in detail and "7" in detail
 
 
 def test_sovereign_all_ports_dead_is_unreachable(monkeypatch):

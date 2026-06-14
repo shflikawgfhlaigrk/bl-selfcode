@@ -1,0 +1,34 @@
+# Utah CI — fast gate (L9-12 / J-046)
+#
+# This job runs a hermetic pytest subset (~41 tests, <2 min) that covers
+# architecture probe budgets, ops/verify.py truth semantics, and drift probes.
+#
+# NOT run here (local launchd only — needs live Postgres, Ollama, daemon, ~20 min):
+#   - ops/verify.py full suite (com.utah.verify, UTAH_VERIFY_TIMEOUT=1500s)
+#   - bash ops/verify_stack.sh (hardware/substrate claims on the Mac host)
+#   - utah/canary.py run_scheduled() (live sovereign/drift/deck checks)
+#
+name: Utah verify (fast gate)
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  fast-gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install test deps (pyproject core + pytest)
+        # No requirements.txt; requirements.lock is Mac/MLX-heavy — CI uses pyproject minimum only.
+        run: pip install pytest msgspec 'psycopg[binary]' psycopg_pool pgvector fastembed
+
+      - name: Fast probe gate
+        run: pytest tests/test_architecture_probes.py tests/test_verify_ops.py tests/test_drift.py -q

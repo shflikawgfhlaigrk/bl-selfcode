@@ -507,10 +507,19 @@ def _apply(dc: "Discord", guild_id: str, rep: ProvisionReport) -> None:
                     rep.errors.append(f"webhook {ch.name}: {exc}")
 
 
+_mock_post_logged = False
+
+
 def post(channel_webhook_url: str, content: str, username: str = "Utah", embeds: list | None = None,
          *, http_post=None) -> bool:
     """Post a message to a channel via its webhook URL (the spine feeds the server
     this way — no gateway connection needed). Returns True on success."""
+    global _mock_post_logged
+    if "mock" in channel_webhook_url.lower():
+        if not _mock_post_logged:
+            _mock_post_logged = True
+            log.debug("discord post gated: mock webhook URL")
+        return False
     payload: dict = {"content": content[:2000], "username": username}
     if embeds:
         payload["embeds"] = embeds

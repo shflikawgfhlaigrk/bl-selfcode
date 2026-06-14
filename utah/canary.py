@@ -25,9 +25,9 @@ from utah import failures
 log = logging.getLogger("utah.canary")
 
 DECK = "http://127.0.0.1:8766"
-#: Sovereign Command Center — 8775 after Michael's cutover, 8765 for the
-#: pre-cutover /tmp instance. Probe both so the canary is right either way.
-SOVEREIGN_PORTS = (8775, 8765)
+#: Sovereign Command Center — local demo install only (8775). Never 8765/8766 —
+#: those are Utah (8766 loopback; 8765 tailnet via com.utah.tailserve).
+SOVEREIGN_PORTS = (8775,)
 #: A live WC feed ticks every few hundred ms; 120s of silence IN SESSION is dead.
 TICK_MAX_AGE_S = 120.0
 

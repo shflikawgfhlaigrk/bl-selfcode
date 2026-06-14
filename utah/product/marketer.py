@@ -25,9 +25,17 @@ def creds_available(channel: str) -> bool:
 
 
 def compose_caption(subject: dict) -> str:
-    """A short, honest promo caption for a local business subject."""
+    """A short, honest promo caption for a local business subject.
+
+    Tries Foundation Models first (UTAH_USE_LOCAL_BRAIN=1, zero cost);
+    falls back to the rule-based template when unavailable.
+    """
+    from utah import local_brain
     name = (subject.get("name") or "this local business").strip()
     kind = (subject.get("kind") or "business").strip()
+    local_cap = local_brain.caption(name, {"type": kind})
+    if local_cap:
+        return local_cap[:MAX_CAPTION]
     cap = (f"Spotlight: {name} — a local {kind} worth knowing. "
            "Support local. DM us to get your business featured. #local #smallbusiness")
     return cap[:MAX_CAPTION]
@@ -127,6 +135,19 @@ def run_scheduled(ledger=None, *, to: str | None = None, foundation_gate=None,
     name, kind = picked
     out = spotlight({"name": name, "kind": kind}, to=to, send_fn=send_fn, ledger=lg)
     log.info("marketer cron: %s", out)
+
+    # Queue rendered reels UP TO the human gate: each rendered reel is recorded in
+    # the ledger (idempotent) and lights the deck via a real bus event. The social
+    # POST stays gated on TikTok creds — no-op (never a fake confirmation) until
+    # connected. The shared ledger carries the deck publisher, so the reel queue
+    # pushes the same bus the spotlight does.
+    try:
+        from utah.product import reel_queue
+        reel_result = reel_queue.run_scheduled(lg)
+        out["reels"] = reel_result
+    except Exception as exc:  # noqa: BLE001
+        failures.record("marketer", "reel_queue_error", str(exc))
+
     return out
 
 

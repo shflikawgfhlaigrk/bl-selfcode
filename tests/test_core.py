@@ -6,7 +6,7 @@ import json
 
 import pytest
 
-from utah import brain, core, local, memory
+from utah import brain, core, local, memory, social
 from utah.objects import ReplySource
 from tests.fakes import basis, blend
 
@@ -288,6 +288,21 @@ def test_empty_input_is_handled(mem, fake_brain):
     assert mem.store.rows == {}
 
 
+def test_thanks_ace_with_praise_is_social_not_memory(mem, fake_brain):
+    """J-049: gratitude to Ace must canned-thanks, not recall a CORE identity manifesto."""
+    manifesto = "Ace and Michael are ONE — the mission is the rebuild."
+    memory.store(manifesto, source="core", confidence=1.0)
+    mem.embedder.register(manifesto, basis(0))
+    mem.embedder.register("Thanks ace, you're the best", blend(basis(0), basis(1), 0.99))
+    fake_brain.respond = AssertionError("brain must not run for thanks ace")
+
+    reply = core.tell("Thanks ace, you're the best")
+
+    assert reply.source is ReplySource.SOCIAL
+    assert "ONE" not in reply.text
+    assert reply.text in social._REPLIES["thanks"]
+
+
 # --- learn-on-miss: find → understand → remember, then answer -------------------------
 
 _EIFFEL = "The Eiffel Tower is 330 metres tall."
@@ -521,3 +536,111 @@ def test_cli_help(capsys):
 def test_cli_closes_the_backend(mem):
     core.main(["--decay"])
     assert mem.store.closed is True
+
+
+# --- J-050: bare "ok" in thread must not hit LOCAL_QUICK meta-garbage ---
+
+
+def test_bare_ok_in_thread_uses_social_not_local(mem, fake_brain, monkeypatch):
+    """Bare 'ok' with an active thread → canned ack, never the 3B local lane."""
+    core.reset_conversation()
+    monkeypatch.setattr(memory, "answer", lambda t: (None, []))
+    fake_brain.respond = "The spinning jenny was invented in 1764."
+    core.tell("who invented the spinning jenny")
+    local.set_runner(lambda *a, **k: (_ for _ in ()).throw(
+        AssertionError("local must not run for bare ok in thread")))
+    fake_brain.respond = AssertionError("brain must not run for bare ok in thread")
+    reply = core.tell("ok")
+    assert reply.source is ReplySource.SOCIAL
+    assert "After reviewing" not in reply.text
+    assert len(reply.text) <= 20
+    core.reset_conversation()
+
+
+def test_bare_ok_in_thread_canned_ack(mem, fake_brain, monkeypatch):
+    core.reset_conversation()
+    monkeypatch.setattr(memory, "answer", lambda t: (None, []))
+    fake_brain.respond = "Some prior answer."
+    core.tell("what is project utah")
+    local.set_runner(lambda payload, timeout: {
+        "content": "After reviewing the provided context, I can answer the question: ok",
+        "thinking": "",
+    })
+    fake_brain.respond = AssertionError("brain must not run")
+    reply = core.tell("ok")
+    assert reply.source is ReplySource.SOCIAL
+    assert social.threaded_ack_reply("ok") == reply.text
+    core.reset_conversation()
+
+
+def test_threaded_yes_skips_local_for_brain(mem, fake_brain, monkeypatch):
+    """Two-token threaded answers like 'yes' skip LOCAL_QUICK and use the brain."""
+    core.reset_conversation()
+    monkeypatch.setattr(memory, "answer", lambda t: (None, []))
+    fake_brain.respond = "Want me to send it?"
+    core.tell("should I email the brief")
+    local.set_runner(lambda *a, **k: (_ for _ in ()).throw(
+        AssertionError("local must not run for threaded yes")))
+    fake_brain.respond = "Yes — send it."
+    reply = core.tell("yes")
+    assert reply.source is ReplySource.BRAIN
+    assert reply.text == "Yes — send it."
+    core.reset_conversation()
+
+
+def test_local_meta_preface_escalates_to_brain(mem, fake_brain):
+    """LOCAL_QUICK meta-preface output is rejected and escalates to the brain."""
+    local.set_runner(lambda payload, timeout: {
+        "content": "After reviewing the provided context, I can answer: hi",
+        "thinking": "",
+    })
+    fake_brain.respond = "Hi back."
+    reply = core.tell("say hi")
+    assert reply.source is ReplySource.BRAIN
+    assert reply.text == "Hi back."
+
+
+# --- J-051: anaphoric follow-up after refusal binds to refused topic ---
+
+_JENNY_Q = "Who invented the spinning jenny in 1764?"
+
+
+def test_why_after_refusal_expands_brain_question(mem, fake_brain, monkeypatch):
+    """After a factual refusal, 'why?' must reach the brain bound to that question."""
+    core.reset_conversation()
+    monkeypatch.setattr(memory, "answer", lambda t: (None, []))
+    monkeypatch.setattr("utah.config.LEARN_ON_MISS", False)
+    fake_brain.respond = brain.I_DONT_KNOW
+    core.tell(_JENNY_Q)
+    fake_brain.respond = (
+        "I don't know because that inventor wasn't in my context — want me to look it up?"
+    )
+    reply = core.tell("why?")
+    assert reply.source is ReplySource.BRAIN
+    assert _JENNY_Q in fake_brain.last_prompt
+    assert "spinning jenny" in fake_brain.last_prompt.lower()
+    core.reset_conversation()
+
+
+@pytest.mark.parametrize("followup", ["why not?", "prove it", "how do you know?"])
+def test_anaphoric_refusal_followups_expand(mem, fake_brain, monkeypatch, followup):
+    core.reset_conversation()
+    monkeypatch.setattr(memory, "answer", lambda t: (None, []))
+    monkeypatch.setattr("utah.config.LEARN_ON_MISS", False)
+    fake_brain.respond = brain.I_DONT_KNOW
+    core.tell(_JENNY_Q)
+    fake_brain.respond = "Not in the context for that one."
+    core.tell(followup)
+    assert _JENNY_Q in fake_brain.last_prompt
+    core.reset_conversation()
+
+
+def test_why_without_prior_refusal_is_unexpanded(mem, fake_brain, monkeypatch):
+    """Bare 'why?' with no refusal in thread is not rewritten."""
+    core.reset_conversation()
+    monkeypatch.setattr(memory, "answer", lambda t: (None, []))
+    fake_brain.respond = "Because the gate said so."
+    core.tell("why?")
+    assert "earlier refusal" not in fake_brain.last_prompt
+    assert 'QUESTION: why?' in fake_brain.last_prompt
+    core.reset_conversation()

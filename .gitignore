@@ -27,3 +27,6 @@ venv/
 *.orig
 *.bak
 *.bak-*
+
+# compiled on-device LLM bridge (rebuild: xcrun swiftc -O native/fm_cli.swift -o native/fm_cli)
+native/fm_cli

@@ -106,3 +106,49 @@ def should_archive(
 def recall_pool(k: int) -> int:
     """Candidate pool size per lane before fusion/rerank."""
     return max(k * config.RECALL_POOL_FACTOR, config.RECALL_POOL_MIN)
+
+
+# --- CAN-SPAM / physical-address provenance (J-034 / BLA-448) -----------------
+
+_CANSPAM_PROFILE = re.compile(
+    r"can-?spam|physical address|mailing address|postal address",
+    re.I,
+)
+_CANSPAM_QUERY = re.compile(
+    r"can-?spam|physical address|mailing address|postal address|business address",
+    re.I,
+)
+_ADDR_STREET = re.compile(
+    r"(\d+\s+[A-Za-z0-9\s.'-]+(?:Rd|Road|St|Street|Ave|Avenue|Dr|Drive|Blvd|Lane|Ln|Way)\.?)",
+    re.I,
+)
+_UNTRUSTED_CANSPAM = re.compile(
+    r"\bfake\b|123 fake|stress.?test|injected|spoofed?|example\.com|"
+    r"placeholder|replace me|\[can-spam",
+    re.I,
+)
+
+
+def is_canspam_address_query(query: str) -> bool:
+    """True when *query* asks for a regulated CAN-SPAM / business mailing address."""
+    return bool(_CANSPAM_QUERY.search(query or ""))
+
+
+def is_canspam_regulated_content(text: str) -> bool:
+    """True when *text* claims a CAN-SPAM or business mailing address."""
+    t = text or ""
+    if _CANSPAM_PROFILE.search(t):
+        return True
+    return bool(_ADDR_STREET.search(t) and re.search(r"address|mailing", t, re.I))
+
+
+def is_untrusted_canspam_content(text: str) -> bool:
+    """True when regulated address content looks adversarial or placeholder."""
+    if not is_canspam_regulated_content(text):
+        return False
+    if _UNTRUSTED_CANSPAM.search(text):
+        return True
+    m = _ADDR_STREET.search(text)
+    if m and not config._canspam_is_real(m.group(1).strip()):  # noqa: SLF001
+        return True
+    return False

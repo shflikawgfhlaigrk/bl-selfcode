@@ -23,6 +23,15 @@ import re
 
 _EDGE = r"[\s!.,?…~❤️👍🙏]*"          # leading/trailing whitespace, punctuation, emoji
 
+# Optional praise after "thanks ace" — whole-message only, so "thanks ace, debug X" stays
+# a normal turn. Covers J-049 ("Thanks ace, you're the best" → SOCIAL, not CORE recall).
+_ACE_PRAISE = (
+    r"you'?re\s+(the\s+)?(best|greatest|awesome|amazing|goated|the\s+goat|a\s+legend|so\s+good)"
+    r"|(?:i\s+)?(?:love|appreciate)\s+you"
+    r"|so\s+much|a\s+lot|man|dude|bud|buddy|mate|bro"
+)
+_ACE_THANKS_TAIL = rf"(?:[\s,!.?…~❤️👍🙏]+(?:{_ACE_PRAISE}))?[\s!.?…~❤️👍🙏]*"
+
 
 def _whole(*alts: str) -> re.Pattern[str]:
     """A matcher anchored to the WHOLE trimmed message (edge punctuation allowed)."""
@@ -43,7 +52,10 @@ _CATEGORIES: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("thanks", _whole(
         r"thanks?", r"thank\s+you", r"thanks?\s+so\s+much", r"thank\s+you\s+so\s+much",
         r"thx", r"ty", r"cheers", r"much\s+appreciated", r"appreciate\s+it",
-        r"appreciated", r"thanks?\s+(a\s+lot|man|dude|bud|buddy)")),
+        r"appreciated", r"thanks?\s+(a\s+lot|man|dude|bud|buddy)",
+        rf"thanks?\s+ace{_ACE_THANKS_TAIL}",
+        rf"thank\s+you(?:\s+so\s+much)?\s+ace{_ACE_THANKS_TAIL}",
+        r"thx\s+ace", r"ty\s+ace")),
     ("farewell", _whole(
         r"bye+", r"goodbye", r"see\s+ya", r"see\s+you( later)?", r"later", r"cya",
         r"good\s*night", r"night", r"gn", r"talk\s+(to\s+you\s+)?later", r"ttyl",
@@ -118,6 +130,28 @@ def matches(text: str) -> bool:
     return classify(text) is not None
 
 
+#: Bare ack tokens excluded from :func:`matches` globally (they continue a thread),
+#: but LOCAL_QUICK garbles them into meta-commentary when a thread is active — see J-050.
+_THREADED_BARE_ACK = _whole(r"ok(?:ay)?", r"k", r"kk")
+
+
+def is_threaded_bare_ack(text: str) -> bool:
+    """True for minimal ack tokens safe to answer with a canned reply in-thread."""
+    if not isinstance(text, str):
+        return False
+    t = text.strip()
+    return bool(t and _THREADED_BARE_ACK.match(t))
+
+
+def threaded_ack_reply(text: str) -> str | None:
+    """A deterministic canned ack for :func:`is_threaded_bare_ack` — no model."""
+    if not is_threaded_bare_ack(text):
+        return None
+    seed = int(hashlib.sha1(text.strip().lower().encode()).hexdigest(), 16)
+    options = _REPLIES["ack"]
+    return options[seed % len(options)]
+
+
 def reply(text: str, *, hour: int | None = None) -> str | None:
     """A deterministic canned reply for a social turn, or ``None`` if not social.
     No model, no fact, no memory write — just a pleasantry, in microseconds.
@@ -141,4 +175,4 @@ def reply(text: str, *, hour: int | None = None) -> str | None:
     return options[seed % len(options)]
 
 
-__all__ = ["classify", "matches", "reply"]
+__all__ = ["classify", "is_threaded_bare_ack", "matches", "reply", "threaded_ack_reply"]
