@@ -99,6 +99,11 @@ def _count_since(table: str, hours: float) -> int | None:
         with psycopg.connect(config.DB_DSN, autocommit=True, connect_timeout=8,
                              options=f"-c statement_timeout={config.DB_STATEMENT_TIMEOUT_MS}",
                              ) as conn:
+            # Skip the count when the table isn't created yet (e.g. 'sales' before any
+            # Stripe sale). Otherwise the failing query throws "relation does not exist"
+            # into pg.log every pass (~28x/day) and pollutes Ace's own error report.
+            if conn.execute("select to_regclass(%s)", (table,)).fetchone()[0] is None:
+                return None
             row = conn.execute(
                 # NB: not make_interval(hours => %s) — that signature is integer-only and
                 # psycopg binds a Python float as double precision → "function does not
