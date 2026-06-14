@@ -117,33 +117,52 @@ def set_store(store: FailureStore | None) -> None:
         _store = store
 
 
+#: Re-entrancy guard. The alert/discord side-effects below themselves call code that
+#: records failures (a failed Discord post records ``webhook_post_failed``, a failed page
+#: records its own error). Without this, ONE record() fanned out to ~250 recorded rows in a
+#: single call (proven 2026-06-14: `record('daemon','test')` → 249 rows via discord mirror),
+#: poisoning the failure feed AND turning every count-based test red (which silently stalled
+#: the selfcode gate for ~28h). The fix is structural, not whack-a-mole on kinds: a failure
+#: recorded WHILE handling another failure's side-effects is PERSISTED (step 1) but never
+#: re-triggers paging/mirroring (steps 2-3). Thread-local so concurrent senders don't share.
+_handling = threading.local()
+
+
 def record(source: str, kind: str, detail: str = "") -> None:
     """Record a failure. NEVER raises — de-silencing must not cause a failure.
 
     Genuinely-critical kinds (``config.CRITICAL_FAILURE_KINDS``) ALSO page the phone,
     fired on a background thread so this hot path never blocks, deduped so a storm
     (e.g. a Postgres restart) pages once, not forty times. Paging must never cause a
-    failure either, so the whole hook is swallowed."""
+    failure either, so the whole hook is swallowed. The alert/mirror side-effects are
+    re-entrancy-guarded so a failure they themselves record can never cascade."""
     try:
         get_store().insert(str(source), str(kind), str(detail)[:MAX_DETAIL])
     except Exception:  # noqa: BLE001 — the whole point is to never propagate
         log.debug("failure-record swallowed (source=%s kind=%s)", source, kind, exc_info=True)
+    # Already inside an outer record()'s side-effects → persist only, never fan out again.
+    if getattr(_handling, "active", False):
+        return
+    _handling.active = True
     try:
-        if str(kind) in config.CRITICAL_FAILURE_KINDS:
-            from utah import alerts
-            alerts.critical_async(str(source), str(detail), key=f"{source}/{kind}")
-    except Exception:  # noqa: BLE001 — paging must never break recording
-        log.debug("failure-page swallowed (source=%s kind=%s)", source, kind, exc_info=True)
-    try:
-        src, knd = str(source), str(kind)
-        # J-016: never mirror discord/webhook failures back into the audit feed — that
-        # re-posts via discord.post → failures.record and blew up to 100k+ rows.
-        if src != "discord" and not knd.startswith("webhook_post"):
-            from utah.integrations import discord_feed
+        try:
+            if str(kind) in config.CRITICAL_FAILURE_KINDS:
+                from utah import alerts
+                alerts.critical_async(str(source), str(detail), key=f"{source}/{kind}")
+        except Exception:  # noqa: BLE001 — paging must never break recording
+            log.debug("failure-page swallowed (source=%s kind=%s)", source, kind, exc_info=True)
+        try:
+            src, knd = str(source), str(kind)
+            # J-016: never mirror discord/webhook failures back into the audit feed — that
+            # re-posts via discord.post → failures.record and blew up to 100k+ rows.
+            if src != "discord" and not knd.startswith("webhook_post"):
+                from utah.integrations import discord_feed
 
-            discord_feed.feed_audit(src, knd, str(detail))
-    except Exception:  # noqa: BLE001 — Discord must never break recording
-        log.debug("failure-discord swallowed (source=%s kind=%s)", source, kind, exc_info=True)
+                discord_feed.feed_audit(src, knd, str(detail))
+        except Exception:  # noqa: BLE001 — Discord must never break recording
+            log.debug("failure-discord swallowed (source=%s kind=%s)", source, kind, exc_info=True)
+    finally:
+        _handling.active = False
 
 
 def record_silent(source: str, detail: str = "") -> None:
