@@ -21,7 +21,7 @@ from typing import Iterator
 
 import msgspec
 
-from utah import brain, config, failures, local, memory, router, social
+from utah import agents, brain, config, failures, local, memory, router, social
 from utah.brain import BrainRateLimited, BrainUnavailable
 from utah.embed import EmbedError
 from utah.memory import AdmissionDenied, MemoryUnavailable
@@ -445,6 +445,14 @@ def _tell_core(text: str, *, persist: bool = True) -> Reply:
                     _remember_turn(text, grounded)
                 return Reply(text=grounded, source=ReplySource.LEARNED, hits=hits)
 
+    # 3.9 HOT-LOADED AGENTS: a self-built single-file agent answers its own domain
+    #     (e.g. disk space) before the paid brain. Declines (None) pass through. This is
+    #     Ace's self-build surface — a new capability is one file he writes, no core edit.
+    agent_out = agents.route(text)
+    if agent_out is not None:
+        _CONVO.append((text, agent_out))
+        return Reply(text=agent_out, source=ReplySource.CAPABILITY, hits=hits)
+
     # 4. REASON: Claude CLI brain, grounded in the conversation thread + recall.
     try:
         reply_text = brain.think(text, context)
@@ -574,6 +582,16 @@ def _tell_stream_core(text: str, *, want_thinking: bool = True, voice: bool = Fa
                 yield ("done", grounded)
                 return
             # the web didn't answer it → fall through to the honest brain pass below.
+
+    # 1.9 HOT-LOADED AGENT: a self-built single-file agent answers its own domain before
+    #     the paid brain (same surface as tell()). Declines (None) pass through.
+    _agent_out = agents.route(text)
+    if _agent_out is not None:
+        _CONVO.append((text, _agent_out))
+        yield ("source", "capability")
+        yield ("answer", _agent_out)
+        yield ("done", _agent_out)
+        return
 
     # 2. REASON — stream the Claude CLI brain, grounded in the conversation + hits.
     #    Thinking always streams live (chat box reasons like Claude). For a factual
