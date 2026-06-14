@@ -92,3 +92,38 @@ def test_summary_line_is_one_line_for_the_brief():
     line = engine_audit.summary_line(r)
     assert "\n" not in line
     assert "1" in line  # 1 proven edge
+
+
+# ── best_edges: per-engine best PROVEN symbol (so the app/lab shows WHERE edge is) ──
+
+def test_best_edges_picks_highest_net_proven_per_engine():
+    v = {("research", "QQQ"): _sc(True, net=3.6, win=0.40),
+         ("research", "SPY"): _sc(True, net=1.2, win=0.41),
+         ("research", "DIA"): _sc(False, net=-1.8),
+         ("meanrev", "NQ"): _sc(False)}
+    r = engine_audit.audit(engines=("research", "meanrev"),
+                           symbols_fn=lambda: ["QQQ", "SPY", "DIA", "NQ"], score_fn=_score(v))
+    be = engine_audit.best_edges(r)
+    assert be["research"]["symbol"] == "QQQ"          # highest net proven
+    assert be["research"]["net_pts"] == 3.6
+    assert be["meanrev"] is None                       # nothing proven → honest None
+
+
+def test_best_edges_engine_with_no_proven_pair_is_none():
+    v = {("research", "QQQ"): _sc(False, net=-1.0)}
+    r = engine_audit.audit(engines=("research",), symbols_fn=lambda: ["QQQ"], score_fn=_score(v))
+    assert engine_audit.best_edges(r)["research"] is None
+
+
+# ── latest(): the cheap deck/app read of the last persisted audit ──
+
+def test_latest_reads_persisted_audit(tmp_path, monkeypatch):
+    monkeypatch.setattr(engine_audit, "AUDIT_DIR", tmp_path)
+    assert engine_audit.latest() == {}                 # nothing written yet → honest empty
+    payload = {"generated_at": "2026-06-13T02:00:00Z", "summary": {"proven": 1},
+               "fleet": [{"engine": "research", "symbol": "QQQ", "edge_proven": True}]}
+    import json
+    (tmp_path / "latest.json").write_text(json.dumps(payload))
+    got = engine_audit.latest()
+    assert got["summary"]["proven"] == 1
+    assert got["fleet"][0]["symbol"] == "QQQ"

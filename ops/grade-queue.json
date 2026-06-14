@@ -1,13 +1,13 @@
 [
   {
     "file": "utah/product/outreach.py",
-    "weakness": "work_leads RPC has zero failure-path tests — add tests for send raising mid-batch, DB unavailable, and invalid/negative limit (tests/test_outreach_work_leads.py covers 3 happy paths only)",
+    "weakness": "work_leads RPC has zero failure-path tests \u2014 add tests for send raising mid-batch, DB unavailable, and invalid/negative limit (tests/test_outreach_work_leads.py covers 3 happy paths only)",
     "verified_at": "2026-06-12",
     "source": "RUBRIC-V2 utah-tests #7, re-verified at HEAD"
   },
   {
     "file": "utah/integrations/calendar.py",
-    "weakness": "calendar/notes/contacts commands lack failure-path tests — injected client/runner raising mid-command, partial permissions; tests/test_integrations.py covers gating + happy paths only",
+    "weakness": "calendar/notes/contacts commands lack failure-path tests \u2014 injected client/runner raising mid-command, partial permissions; tests/test_integrations.py covers gating + happy paths only",
     "verified_at": "2026-06-12",
     "source": "RUBRIC-V2 utah-tests #10, re-verified at HEAD"
   },
@@ -25,8 +25,44 @@
   },
   {
     "file": "utah/product/probate_export.py",
-    "weakness": "coverage rides tests/test_product_exports.py only — add direct failure-path tests (empty result set, DB error mid-export)",
+    "weakness": "coverage rides tests/test_product_exports.py only \u2014 add direct failure-path tests (empty result set, DB error mid-export)",
     "verified_at": "2026-06-12",
     "source": "untested-module scan near-miss (content-matched only)"
+  },
+  {
+    "file": "tests/test_memory_init.py",
+    "weakness": "eval_exec",
+    "verified_at": "2026-06-13",
+    "source": "utah_grade_index (heuristic, score=40, cap=eval_exec)"
+  },
+  {
+    "file": "utah/operator.py",
+    "weakness": "line 227: `ok=True` when mail is gated (dead integration passes health check). Dishonest-signal cap 45.",
+    "verified_at": "2026-06-13",
+    "source": "utah_grade_index (v2-core, score=45, cap=dishonest-signal/45)"
+  },
+  {
+    "file": "utah/introspect.py",
+    "weakness": "Only imported in tests; capability list not consumed live. Orphan cap 55.",
+    "verified_at": "2026-06-13",
+    "source": "utah_grade_index (v2-core, score=55, cap=orphan/55)"
+  },
+  {
+    "file": "utah/operator_app.py",
+    "weakness": "Orphan (no live caller); hardcoded `/Users/michaelbarber/Desktop/ProjectUtah` lines 9 and 131. Cap 55 (orphan) wins over cap 62 (hardcoded path).",
+    "verified_at": "2026-06-13",
+    "source": "utah_grade_index (v2-core, score=55, cap=orphan+hardcoded-path/55)"
+  },
+  {
+    "file": "utah/permissions.py",
+    "weakness": "Called only from `operator_app.py` (itself orphan); no live import chain. Orphan cap 55.",
+    "verified_at": "2026-06-13",
+    "source": "utah_grade_index (v2-core, score=55, cap=orphan/55)"
+  },
+  {
+    "file": "utah/product/news.py",
+    "weakness": "Only imported in tests; thin wrapper not wired live. Orphan cap 55.",
+    "verified_at": "2026-06-13",
+    "source": "utah_grade_index (v2-core, score=55, cap=orphan/55)"
   }
 ]

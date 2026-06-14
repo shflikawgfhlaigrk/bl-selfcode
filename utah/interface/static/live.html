@@ -52,19 +52,42 @@
   .discord-strip .ds-meta{color:#9aa3ff;font-size:9px}
 
   /* hamburger menu — labs & consoles */
-  .hamb{background:#0f0e0a;border:1px solid var(--line);color:var(--gold2);width:34px;height:34px;border-radius:8px;cursor:pointer;font-size:15px;flex:none}
+  .hamb{background:#0f0e0a;border:1px solid var(--line);color:var(--gold2);width:40px;height:40px;border-radius:8px;cursor:pointer;font-size:17px;flex:none;
+    touch-action:manipulation;-webkit-tap-highlight-color:transparent}
   .hamb:hover{border-color:var(--gold);box-shadow:0 0 10px var(--goldglow)}
   .menu{position:fixed;inset:0;background:rgba(4,4,8,.5);display:none;z-index:70}
   .menu.open{display:block}
   .menu-box{position:absolute;top:54px;left:16px;width:312px;background:var(--panel);border:1px solid var(--gold);border-radius:11px;padding:8px;box-shadow:0 18px 70px rgba(0,0,0,.7)}
   .menu-h{color:var(--gold);font-size:10px;letter-spacing:2px;padding:6px 8px}
-  .menu-item{display:flex;flex-direction:column;gap:2px;width:100%;text-align:left;background:#0f0e0a;border:1px solid var(--line);border-radius:8px;padding:9px 11px;cursor:pointer;margin-top:6px;color:var(--txt);font:inherit}
+  .menu-item{display:flex;flex-direction:column;gap:2px;width:100%;text-align:left;background:#0f0e0a;border:1px solid var(--line);border-radius:8px;padding:9px 11px;cursor:pointer;margin-top:6px;color:var(--txt);font:inherit;
+    touch-action:manipulation;-webkit-tap-highlight-color:transparent}
   .menu-item:hover{border-color:var(--gold)}
   .menu-item.dim{opacity:.55}
   .menu-item b{color:var(--gold2);font-size:12px;letter-spacing:1px} .menu-item span{color:var(--mut);font-size:10px}
   .lab-banner{padding:9px 12px;border-radius:8px;font-size:11px;letter-spacing:.4px;margin-bottom:10px}
   .lab-banner.gated{background:#1a1407;border:1px solid #2a2415;color:var(--gold2)}
   .lab-banner.live{background:#0e1a12;border:1px solid #1c3a28;color:var(--ok)}
+  /* apex dash — per-engine OOS bar charts (fleet_backtest → apex_dash.json) */
+  .lab-graphs{background:var(--panel2);border:1px solid var(--line);border-radius:9px;padding:10px 12px;margin-bottom:10px}
+  .lab-graphs .sub{color:var(--mut);font-size:9.5px;letter-spacing:1px;margin-bottom:8px}
+  .lab-bar-row{display:grid;grid-template-columns:72px 1fr 42px 1fr 42px auto;gap:6px 8px;align-items:center;
+    padding:5px 0;border-bottom:1px dotted #1b1b24;font-size:10.5px}
+  .lab-bar-row:last-child{border-bottom:0}
+  .lab-bar-name{color:var(--gold2);font-weight:600;letter-spacing:.4px}
+  .lab-bar-track{height:14px;background:#0a0a0e;border:1px solid var(--line);border-radius:4px;overflow:hidden}
+  .lab-bar-fill{height:100%;border-radius:3px;min-width:2px;transition:width .4s ease}
+  .lab-bar-fill.win{background:linear-gradient(90deg,#1c3a28,#33d17a)}
+  .lab-bar-fill.pos{background:linear-gradient(90deg,var(--gold),var(--gold2))}
+  .lab-bar-fill.neg{background:linear-gradient(90deg,#5a201b,#e2554b)}
+  .lab-bar-val{color:var(--mut);font-size:9.5px;text-align:right}
+  .lab-sig,.lab-log{max-height:min(42vh,360px);overflow:auto;border:1px solid var(--line);border-radius:8px;
+    background:#0a0a0e;padding:6px 10px;margin-bottom:10px}
+  .lab-sig .drill-row,.lab-log .drill-row{padding:6px 0}
+  .trading-back{display:block;width:100%;margin-bottom:10px;background:#0f0e0a;border:1px solid var(--line);
+    color:var(--gold2);padding:9px 14px;border-radius:8px;cursor:pointer;font:inherit;font-size:10px;letter-spacing:1.5px;
+    touch-action:manipulation;-webkit-tap-highlight-color:transparent;text-align:left}
+  .trading-back:hover{border-color:var(--gold)}
+  body.menu-open{overflow:hidden}
 
   /* deck */
   .deck{display:grid;grid-template-columns:262px 1fr 312px;gap:14px;padding:14px 16px;overflow:hidden;min-height:0}
@@ -123,8 +146,10 @@
 
   /* center dash (tabbed real-data viewer) */
   .dash{flex:1;min-height:0;display:flex;flex-direction:column}
-  .dtabs{display:flex;gap:5px;flex-wrap:wrap;margin-bottom:8px}
-  .dtab{background:transparent;border:1px solid var(--line);color:var(--mut);padding:5px 12px;border-radius:7px;cursor:pointer;font:inherit;font-size:10px;letter-spacing:1.5px}
+  .dtabs{display:flex;gap:5px;flex-wrap:nowrap;margin-bottom:8px;overflow-x:auto;overflow-y:hidden;
+    -webkit-overflow-scrolling:touch;scrollbar-width:none;padding-bottom:2px}
+  .dtabs::-webkit-scrollbar{display:none}
+  .dtab{flex-shrink:0;background:transparent;border:1px solid var(--line);color:var(--mut);padding:5px 12px;border-radius:7px;cursor:pointer;font:inherit;font-size:10px;letter-spacing:1.5px}
   .dtab:hover:not(.active){color:var(--gold2)} .dtab .ct{color:var(--gold);margin-left:5px}
   .dtab.active{color:#1a1407;background:linear-gradient(180deg,var(--gold2),var(--gold));border-color:var(--gold);font-weight:700}
   .dtab.active .ct{color:#1a1407}
@@ -316,8 +341,11 @@
   #drill{position:fixed;inset:0;background:rgba(4,4,8,.74);display:none;z-index:60;align-items:center;justify-content:center}
   #drill.open{display:flex}
   .drill-box{width:min(880px,92vw);max-height:84vh;display:flex;flex-direction:column;background:var(--panel);border:1px solid var(--gold);border-radius:11px;overflow:hidden;box-shadow:0 18px 70px rgba(0,0,0,.7)}
-  .drill-head{display:flex;justify-content:space-between;align-items:center;padding:13px 16px;border-bottom:1px solid var(--line);color:var(--gold);letter-spacing:2px;font-size:12px}
-  .drill-x{cursor:pointer;color:var(--mut);border:1px solid var(--line);border-radius:6px;padding:2px 9px}
+  .drill-head{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:13px 16px;border-bottom:1px solid var(--line);color:var(--gold);letter-spacing:2px;font-size:12px}
+  .drill-head #drill-title{flex:1;min-width:0}
+  .drill-x{cursor:pointer;color:var(--mut);border:1px solid var(--line);border-radius:6px;padding:6px 12px;background:#0f0e0a;font:inherit;font-size:10px;letter-spacing:1.5px;
+    touch-action:manipulation;-webkit-tap-highlight-color:transparent;flex:none}
+  .drill-x:hover{border-color:var(--gold);color:var(--gold2)}
   .drill-body{padding:12px 16px;overflow:auto}
   .drill-sec{color:var(--gold2);font-size:10px;letter-spacing:2px;margin:12px 0 6px;font-weight:600}
   .drill-row{padding:7px 0;border-bottom:1px dotted #1b1b24}
@@ -439,25 +467,39 @@
   .hud .core-wrap{order:1}
   .hud .dash{order:2}
 
-  /* ===== PHONE / NARROW — MUST BE LAST (overrides .core-wrap{display:flex} above) ===== */
+  /* ===== PHONE / NARROW — MUST BE LAST (overrides desktop center-column order) ===== */
   @media(max-width:1180px){
     .deck{display:flex;flex-direction:column;overflow:hidden;padding:4px 8px;gap:0;min-height:0}
     .deck .hud-core{flex:1;min-height:0;overflow:hidden}
     .deck .rail-spine,.deck .rail-fn{display:none}
-    .core-wrap{display:none !important}
-    .hud{gap:4px;flex:1;min-height:0}
-    .dash{flex:1;min-height:0}
+    .hud{gap:6px;flex:1;min-height:0}
+    /* live data first; compact wake orb below tabs (not a 148px header billboard) */
+    .hud .dash{order:0;flex:1;min-height:0}
+    .core-wrap{display:flex !important;order:1;flex:none;padding:0;justify-content:center}
+    .core{width:88px;height:88px}
+    .r1{width:88px;height:88px}
+    .r2{width:66px;height:66px}
+    .r3{width:46px;height:46px}
+    .orb{width:44px;height:44px}
+    .orb b{font-size:11px}
+    .orb span{font-size:6px;letter-spacing:1px}
+    .orbit{display:none}
+    .tiles{display:none}
     .dbody{padding:8px 10px}
-    .dtabs{margin-bottom:4px;gap:4px}
-    .dtab{padding:4px 10px}
-    .header-row{padding:4px 10px;gap:6px}
+    .dtabs{margin-bottom:4px;gap:4px;margin-left:-2px;margin-right:-2px;padding-left:2px;padding-right:2px}
+    .dtab{padding:4px 10px;font-size:9px}
+    .header-row{padding:6px 10px;gap:8px;flex-wrap:nowrap}
     .logo b{font-size:14px}
     .logo span{display:none}
     .chips{display:none}
-    .hstat{gap:8px;margin-left:auto}
+    .hstat{gap:10px;margin-left:auto;flex-shrink:0}
     .hstat .m.drillable{display:none}
+    .hstat .m b{font-size:13px}
+    #clock{font-size:12px;white-space:nowrap}
     .dock .footer,.dock .legend,.dock .quick{display:none}
-    .cmd{padding:6px 10px 8px}
+    .cmd{padding:6px 10px 8px;gap:8px}
+    .cmd input{padding:10px 12px;font-size:12px}
+    .cmd button.send{padding:0 16px;font-size:11px}
     #stream.open{height:22vh}
     #stream.expanded{height:40vh}
     .term-banner pre{display:none}
@@ -466,9 +508,25 @@
     .discord-strip{padding:5px 8px;font-size:9px;line-height:1.3;letter-spacing:.8px}
     .discord-strip b{font-size:10px}
     .xp{display:none}
+    .kpis{grid-template-columns:repeat(2,1fr);gap:8px}
+    .fstage{grid-template-columns:88px 1fr auto;gap:6px}
+    .fnote{margin-left:94px}
+    .lab-bar-row{grid-template-columns:52px 1fr 32px 1fr 32px auto;gap:4px 6px;font-size:9px}
   }
-  html.phone .core-wrap{display:none !important}
+  /* mobile UA on wide screens (iPad landscape) — mirror narrow rules */
+  html.phone .deck{display:flex;flex-direction:column;overflow:hidden;padding:4px 8px;gap:0;min-height:0}
+  html.phone .deck .hud-core{flex:1;min-height:0;overflow:hidden}
   html.phone .deck .rail-spine,html.phone .deck .rail-fn{display:none !important}
+  html.phone .hud{gap:6px;flex:1;min-height:0}
+  html.phone .hud .dash{order:0;flex:1;min-height:0}
+  html.phone .core-wrap{display:flex !important;order:1;flex:none;padding:0;justify-content:center}
+  html.phone .core{width:88px;height:88px}
+  html.phone .r1{width:88px;height:88px}
+  html.phone .r2{width:66px;height:66px}
+  html.phone .r3{width:46px;height:46px}
+  html.phone .orb{width:44px;height:44px}
+  html.phone .orbit{display:none}
+  html.phone .tiles{display:none}
   html.phone .discord-strip{padding:5px 8px;font-size:9px;line-height:1.3}
 
   /* ---- lead-pipeline funnel (PIPELINE tab + side-rail snapshot) ---- */
@@ -521,21 +579,21 @@
       <b>JOIN UTAH DISCORD</b> · live deck · guests welcome<span class="ds-meta" id="dbtn-meta"></span>
     </a>
     <div class="header-row">
-    <button class="hamb" id="hamb" title="labs & consoles" onclick="toggleMenu()">☰</button>
-    <div class="logo"><div class="mark"></div><b>UTAH</b><span>LOCAL COMMAND DECK</span></div>
-    <div class="chips">
-      <span class="chip"><span class="led" id="led-core"></span>LOCAL CORE</span>
-      <span class="chip"><span class="led" id="led-brain"></span>BRAIN · CLAUDE CLI</span>
-      <span class="chip"><span class="led" id="led-bus"></span>EVENT BUS</span>
-      <span class="chip"><span class="led" id="led-voice"></span>VOICE</span>
-    </div>
-    <div class="hstat">
-      <div class="m drillable" onclick="drill('governor')" title="click for CPU detail"><b id="h-load">—</b><span>CORE LOAD</span></div>
-      <div class="m drillable" onclick="drill('memory')" title="click for memory detail"><b id="h-mem">—</b><span>MEMORY ROWS</span></div>
-      <div class="m drillable" onclick="drill('bus')" title="click for event-bus detail"><b id="h-bus">—</b><span>BUS EVENTS</span></div>
-      <div class="m drillable" onclick="drillGated()" title="what's gated and why"><b id="h-gates">—</b><span>GATED</span></div>
-      <div class="m" id="clock">—</div>
-    </div>
+      <button type="button" class="hamb" id="hamb" title="labs & consoles" aria-label="Open menu">☰</button>
+      <div class="logo"><div class="mark"></div><b>UTAH</b><span>LOCAL COMMAND DECK</span></div>
+      <div class="chips">
+        <span class="chip"><span class="led" id="led-core"></span>LOCAL CORE</span>
+        <span class="chip"><span class="led" id="led-brain"></span>BRAIN · CLAUDE CLI</span>
+        <span class="chip"><span class="led" id="led-bus"></span>EVENT BUS</span>
+        <span class="chip"><span class="led" id="led-voice"></span>VOICE</span>
+      </div>
+      <div class="hstat">
+        <div class="m drillable" onclick="drill('governor')" title="click for CPU detail"><b id="h-load">—</b><span>CORE LOAD</span></div>
+        <div class="m drillable" onclick="drill('memory')" title="click for memory detail"><b id="h-mem">—</b><span>MEMORY ROWS</span></div>
+        <div class="m drillable" onclick="drill('bus')" title="click for event-bus detail"><b id="h-bus">—</b><span>BUS EVENTS</span></div>
+        <div class="m drillable" onclick="drillGated()" title="what's gated and why"><b id="h-gates">—</b><span>GATED</span></div>
+        <div class="m" id="clock">—</div>
+      </div>
     </div>
   </header>
 
@@ -618,21 +676,24 @@
   </div>
 </div>
 
-<div id="menu" class="menu" onclick="if(event.target===this)toggleMenu()">
+<div id="menu" class="menu">
   <div class="menu-box">
     <div class="menu-h">◆ LABS &amp; CONSOLES</div>
-    <button class="menu-item" onclick="openScope()"><b>🗺 System Map</b><span id="menu-scope-sub">every area · live row counts · the whole scheme + where it grows</span></button>
-    <button class="menu-item" onclick="openLab()"><b>⚡ Trading Engine Lab</b><span id="menu-lab-sub">engine roster · paper/sim · WealthCharts feed</span></button>
-    <button class="menu-item" onclick="openTerminal()"><b>⌨️ Self-Code Console</b><span>genuine / commands · /code · /findings · /do · /ask · propose-only</span></button>
-    <button class="menu-item" onclick="openConsole('selfcode','🤖 SELF-CODING BAY')"><b>🤖 Self-Coding Bay</b><span>propose-only · isolated branch · suite-gated · never main</span></button>
-    <button class="menu-item" onclick="openConsole('browser','🌐 BROWSER')"><b>🌐 Browser</b><span>headless Chrome · JS-rendered fetch</span></button>
-    <button class="menu-item dim" disabled><b>🛡 Risk / Threat Kernel</b><span>pre-exec gate · gated</span></button>
+    <button type="button" class="menu-item" data-menu="scope"><b>🗺 System Map</b><span id="menu-scope-sub">every area · live row counts · the whole scheme + where it grows</span></button>
+    <button type="button" class="menu-item" data-menu="lab"><b>⚡ Trading Engine Lab</b><span id="menu-lab-sub">engine roster · paper/sim · WealthCharts feed</span></button>
+    <button type="button" class="menu-item" data-menu="terminal"><b>⌨️ Self-Code Console</b><span>genuine / commands · /code · /findings · /do · /ask · propose-only</span></button>
+    <button type="button" class="menu-item" data-menu="selfcode"><b>🤖 Self-Coding Bay</b><span>propose-only · isolated branch · suite-gated · never main</span></button>
+    <button type="button" class="menu-item" data-menu="browser"><b>🌐 Browser</b><span>headless Chrome · JS-rendered fetch</span></button>
+    <button type="button" class="menu-item dim" disabled><b>🛡 Risk / Threat Kernel</b><span>pre-exec gate · gated</span></button>
   </div>
 </div>
 
-<div id="drill" onclick="if(event.target===this)drillClose()">
+<div id="drill">
   <div class="drill-box">
-    <div class="drill-head"><span id="drill-title">—</span><span class="drill-x" onclick="drillClose()">✕ CLOSE</span></div>
+    <div class="drill-head">
+      <span id="drill-title">—</span>
+      <button type="button" class="drill-x" id="drill-close">✕ CLOSE</button>
+    </div>
     <div class="drill-body" id="drill-body"></div>
   </div>
 </div>
@@ -866,6 +927,7 @@ function renderFns(s,m,st,voice){
 const TABS=[
   {id:"overview", label:"OVERVIEW"},
   {id:"pipeline", label:"PIPELINE"},
+  {id:"trading",  label:"TRADING"},
   {id:"terminal", label:"ACE TERMINAL"},
   {id:"memory",   label:"MEMORY"},
   {id:"leads",    label:"LEADS"},
@@ -890,6 +952,7 @@ function metaOf(r){return [r.kind,r.region,r.county,r.campaign,r.channel,r.sourc
 const TAB_INTRO={
   overview:"A quick snapshot of everything. Tap any tile or row for the full story.",
   pipeline:"How a lead moves from discovered to paid — every stage live, where it leaks, and the free next win. SMB no-website lane + probate real-estate lane.",
+  trading:"Engines on the WealthCharts feed — apex dash graphs (held-out OOS backtests), every signal fire, then logs and backtest scorecards.",
   terminal:"A live terminal straight into Ace. Type a line, press Enter — it streams his reasoning and answer in real time.",
   memory:"Everything Utah has learned and remembers. Tap a fact to read it in full.",
   leads:"Local businesses with no website — your prospects. Tap one for its type, location and contact info.",
@@ -1028,7 +1091,13 @@ async function refreshMinis(){
 }
 
 async function loadDash(tab, quiet){
-  const body=$("dbody"); if(!quiet) body.innerHTML=emptyBox("LOADING…");
+  const body=$("dbody");
+  if(tab!=="trading"){
+    if(_labTimer){clearInterval(_labTimer);_labTimer=null;}
+    _tradingView="list";
+    _tradingEngine=null;
+  }
+  if(!quiet) body.innerHTML=emptyBox("LOADING…");
   try{
     if(tab==="overview"){
       const s=LAST.s, m=LAST.m, st=LAST.st;
@@ -1052,6 +1121,10 @@ async function loadDash(tab, quiet){
       const d=await fetch("/panel/pipeline").then(r=>r.json());
       if(!d||d.error||!d.smb){ body.innerHTML=intro("pipeline")+emptyBox("LEDGER UNREACHABLE — "+esc((d&&d.error)||"no data")); return; }
       body.innerHTML=intro("pipeline")+renderFunnel(d); return;
+    }
+    if(tab==="trading"){
+      await loadTradingTab(body, quiet);
+      return;
     }
     if(tab==="memory"){
       const d=await getPanel("memory"); tabCounts.memory=(d.rows||[]).length; _tabRows.memory=d.rows||[];
@@ -1485,10 +1558,48 @@ function ask(preset){
 $("q").addEventListener("keydown",e=>{if(e.key==="Enter")ask();});
 
 /* ============================ DRILL-DOWN (transparency) ============================ */
-function drillClose(){ $("drill").classList.remove("open"); $("drill-body").innerHTML=""; if(typeof _labTimer!=="undefined"&&_labTimer){clearInterval(_labTimer);_labTimer=null;} }
-function drillOpen(title,html){ $("drill-title").textContent=title; $("drill-body").innerHTML=html; $("drill").classList.add("open"); }
-function toggleMenu(){ $("menu").classList.toggle("open"); }
-function closeMenu(){ $("menu").classList.remove("open"); }
+function drillClose(){
+  $("drill").classList.remove("open");
+  $("drill-body").innerHTML="";
+}
+function drillOpen(title,html){
+  $("drill-title").textContent=title;
+  $("drill-body").innerHTML=html;
+  $("drill").classList.add("open");
+}
+function toggleMenu(){
+  const m=$("menu");
+  const open=m.classList.toggle("open");
+  document.body.classList.toggle("menu-open",open);
+}
+function closeMenu(){
+  $("menu").classList.remove("open");
+  document.body.classList.remove("menu-open");
+}
+function wireMenu(){
+  const acts={
+    scope:()=>openScope(),
+    lab:()=>openLab(),
+    terminal:()=>openTerminal(),
+    selfcode:()=>openConsole("selfcode","🤖 SELF-CODING BAY"),
+    browser:()=>openConsole("browser","🌐 BROWSER"),
+  };
+  const hamb=$("hamb"), menu=$("menu");
+  if(hamb) hamb.addEventListener("click",e=>{ e.preventDefault(); e.stopPropagation(); toggleMenu(); });
+  if(menu) menu.addEventListener("click",e=>{ if(e.target===menu) closeMenu(); });
+  document.querySelectorAll(".menu-item[data-menu]").forEach(btn=>{
+    btn.addEventListener("click",e=>{
+      e.preventDefault(); e.stopPropagation();
+      closeMenu();
+      const fn=acts[btn.dataset.menu];
+      if(fn) fn();
+    });
+  });
+  const drill=$("drill"), dclose=$("drill-close");
+  if(drill) drill.addEventListener("click",e=>{ if(e.target===drill) drillClose(); });
+  if(dclose) dclose.addEventListener("click",e=>{ e.preventDefault(); drillClose(); });
+  wireTradingClicks();
+}
 
 /* ============================ PLAIN-LANGUAGE TRANSPARENCY LAYER ============================ */
 /* Every panel, number and row on this deck can be opened to its FULL underlying detail,
@@ -1765,77 +1876,142 @@ async function openConsole(panel, title){
    rather than toggle it — toggling from the card would pop the menu over the lab drawer. */
 let _labTimer=null;
 function tickerHtml(ticks){
-  if(!ticks||!ticks.length) return '<div class="drill-sec">LIVE TICKS</div>'+emptyBox("NO LIVE TICKS YET — feed warming up");
-  return '<div class="drill-sec">LIVE TICKS — straight off the WealthCharts hook</div>'+
-    '<div class="kpis" id="lab-ticker">'+ticks.map(t=>{
+  if(!ticks||!ticks.length) return "";
+  return '<div class="drill-sec">LIVE TICKS</div>'+
+    '<div class="kpis" id="lab-ticker" style="margin-bottom:8px">'+ticks.map(t=>{
       const fresh=t.age_ms<2500;
-      /* 1h+ silence on a symbol = its session is closed (US ETFs overnight), not a
-         broken pipe — gray "closed", not alarm-red, while futures tick ms-fresh */
       const closed=t.age_ms>3600000;
       const col=fresh?'#7dc97f':(closed?'#8a8a8a':'#c97d7d');
-      const age=closed?'closed (no session)':(t.age_ms<1000?t.age_ms+' ms ago':(t.age_ms/1000).toFixed(1)+' s ago');
-      return `<div class="kpi" style="min-width:120px"><b style="color:${col}">${esc(t.price)}</b>`+
+      const age=closed?'closed':(t.age_ms<1000?t.age_ms+' ms':(t.age_ms/1000).toFixed(1)+' s');
+      return `<div class="kpi" style="min-width:100px"><b style="color:${col}">${esc(t.price)}</b>`+
              `<span>${esc(t.symbol)} · ${esc(age)}</span></div>`;
     }).join("")+'</div>';
 }
-async function refreshTicker(){
-  try{
-    const d=await getPanel("trading");
-    const el=document.getElementById("lab-ticker");
-    if(!el){ return; }
-    const fresh=tickerHtml(d.ticks||[]);
-    const tmp=document.createElement("div"); tmp.innerHTML=fresh;
-    const nw=tmp.querySelector("#lab-ticker");
-    if(nw) el.replaceWith(nw);
-  }catch(e){/* next tick retries */}
+function apexDashGraphs(engines, dashUpdated){
+  const rows=(engines||[]);
+  const nets=rows.map(e=>{
+    const bt=e.backtest||{};
+    return bt.net_pts!=null?bt.net_pts:(e.net_pnl!=null?e.net_pnl:0);
+  });
+  const maxNet=Math.max(1,...nets.map(n=>Math.abs(n)));
+  const sub=dashUpdated?`Updated ${esc(dashUpdated)} · held-out OOS on real bars (fleet_backtest)`
+    :"Held-out OOS on real bars — fleet_backtest writes apex_dash.json when bars exist";
+  const hdr='<div class="lab-bar-row" style="opacity:.65;font-size:9px;letter-spacing:1.5px;padding-bottom:2px">'+
+    '<span>ENGINE</span><span>WIN %</span><span></span><span>NET PTS</span><span></span><span></span></div>';
+  const body=rows.map(e=>{
+    const bt=e.backtest||{};
+    const wr=bt.win_rate!=null?Math.round(bt.win_rate*100):null;
+    const net=bt.net_pts!=null?bt.net_pts:(e.net_pnl!=null?e.net_pnl:null);
+    const wPct=wr!=null?Math.max(2,Math.min(100,wr)):0;
+    const nPct=net!=null?Math.max(2,Math.abs(net)/maxNet*100):0;
+    const edge=bt.edge_proven;
+    return `<div class="lab-bar-row drillable" data-eng="${esc(e.name)}"><span class="lab-bar-name">${esc(e.name)}</span>`+
+      `<div class="lab-bar-track"><div class="lab-bar-fill win" style="width:${wPct}%"></div></div>`+
+      `<span class="lab-bar-val">${wr!=null?wr+'%':'—'}</span>`+
+      `<div class="lab-bar-track"><div class="lab-bar-fill ${net==null?'':net>=0?'pos':'neg'}" style="width:${nPct}%"></div></div>`+
+      `<span class="lab-bar-val">${net!=null?((net>=0?'+':'')+net):'—'}</span>`+
+      `<span>${edge?'<span class="pill">EDGE</span>':''}</span></div>`;
+  }).join("");
+  return '<div class="drill-sec">APEX DASH GRAPHS — tap an engine for full detail</div>'+
+    '<div class="lab-graphs"><div class="sub">'+sub+'</div>'+hdr+body+'</div>';
 }
-async function openLab(){
-  closeMenu();
-  if(_labTimer){clearInterval(_labTimer);_labTimer=null;}
-  drillOpen("⚡ TRADING ENGINE LAB", emptyBox("LOADING…"));
-  try{
-    const d=await getPanel("trading");
-    const gated=d.feed!=="live";
-    let h=`<div class="lab-banner ${gated?'gated':'live'}">${esc(d.note||"")}</div>`;
-    h+=tickerHtml(d.ticks||[]);
-    h+='<div class="kpis">'+
-       `<div class="kpi"><b>${esc((d.engines||[]).length)}</b><span>ENGINES</span></div>`+
-       `<div class="kpi"><b>${esc((d.feed||"—").toUpperCase())}</b><span>WC FEED</span></div>`+
-       `<div class="kpi"><b>${esc(d.fires||0)}</b><span>FIRES (LEDGER)</span></div></div>`;
-    h+='<div class="drill-sec">ENGINE ROSTER — is each one making money? (tap for the full record)</div>';
-    /* engine names are API-fed strings: bind via data-attribute, never an inline
-       onclick (entities decode before handler JS parses — esc() can't protect it) */
-    h+=(d.engines||[]).map(e=>{
-       const score=e.graded?` · ${esc(e.graded)} graded · ${esc(Math.round((e.win_rate||0)*100))}% win · ${e.net_pnl>=0?'+':''}${esc(e.net_pnl)} pnl`:'';
-       const day=e.fires_24h?` · ${esc(e.fires_24h)} today`:'';
-       return `<div class="drill-row drillable" data-eng="${esc(e.name)}"><span class="led ${e.state==='live'?'ok':''}"></span> `+
-       `<b>${esc(e.name)}</b><span class="hint">TAP</span><span class="drill-meta">${esc(e.kind)} · ${esc((e.state||'').toUpperCase())}${e.fires?` · ${esc(e.fires)} FIRES`:''}${day}${score}</span></div>`;
-    }).join("");
-    h+='<div class="drill-sec">LAST '+((d.rows||[]).length)+' FIRES (of '+esc(d.fires||0)+' total in the ledger)</div>';
-    h+= (d.rows&&d.rows.length)
-        ? d.rows.map(r=>`<div class="drill-row"><b>${esc(r.engine)}</b><span class="drill-meta">${esc(r.direction)} · ${esc(r.outcome||'open')} · ${esc(r.ts||'')}</span></div>`).join("")
-        : emptyBox("DORMANT — 0 FIRES (NO PRODUCER WIRED · WC FEED LANDS TOMORROW)");
-    drillOpen("⚡ TRADING ENGINE LAB", h);
-    document.querySelectorAll("#drill-body .drill-row[data-eng]").forEach(el=>
-      el.onclick=()=>openEngine(el.dataset.eng));
-    _labTimer=setInterval(refreshTicker,1000);   // ms-fresh ticker while the lab is open
-  }catch(e){ drillOpen("⚡ TRADING ENGINE LAB", emptyBox("unavailable — "+String(e.message||e))); }
+function signalsHtml(signals, total){
+  const arr=signals||[];
+  if(!arr.length) return '<div class="drill-sec">ALL SIGNALS</div>'+emptyBox("DORMANT — 0 FIRES IN THE LEDGER");
+  return '<div class="drill-sec">ALL SIGNALS — '+arr.length+' shown · '+esc(total||arr.length)+' total fires</div>'+
+    '<div class="lab-sig">'+arr.map(r=>
+      `<div class="drill-row drillable" data-eng="${esc(r.engine||"")}"><b>${esc(r.engine||"?")}</b> · ${esc(r.direction||"")}`+
+      `<span class="drill-meta">${esc(r.symbol||"?")} @ ${esc(r.entry??"—")} · ${esc(r.outcome||"open")}`+
+      `${r.pnl!=null?` · ${r.pnl>=0?"+":""}${esc(r.pnl)} pts`:""} · ${esc(r.ts||"")}</span></div>`).join("")+'</div>';
 }
-/* ===================== PER-ENGINE PAGE — apex-style drill ===================== */
-function eqSvg(eq){
-  if(!eq || eq.length<2) return '<div class="empty" style="padding:18px">EQUITY CURVE ARMS AFTER 2+ GRADED FIRES</div>';
-  const W=640,H=150,P=10, vals=eq.map(p=>p.cum);
-  const mn=Math.min(0,...vals), mx=Math.max(0,...vals), span=(mx-mn)||1;
-  const x=i=>P+i*(W-2*P)/(eq.length-1), y=v=>H-P-(v-mn)*(H-2*P)/span;
-  const pts=eq.map((p,i)=>`${x(i).toFixed(1)},${y(p.cum).toFixed(1)}`).join(" ");
-  const zero=y(0).toFixed(1), last=vals[vals.length-1];
-  return `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:150px;display:block">`+
-    `<line x1="${P}" y1="${zero}" x2="${W-P}" y2="${zero}" stroke="#3a352a" stroke-dasharray="3 4"/>`+
-    `<polyline points="${pts}" fill="none" stroke="${last>=0?'#7dc97f':'#c97d7d'}" stroke-width="2"/>`+
-    `<text x="${W-P}" y="${y(last)-6}" fill="#d4af37" font-size="12" text-anchor="end">${last>=0?'+':''}${last.toFixed(1)} pts</text></svg>`;
+function logsBacktestsHtml(d){
+  const engines=d.engines||[];
+  const logs=d.logs||[];
+  const failures=d.failures||[];
+  let h='<div class="drill-sec">BACKTEST SCORECARDS — measured OOS (not painted)</div>';
+  h+=engines.length?engines.map(e=>{
+    const bt=e.backtest||{};
+    const n=bt.trades||0;
+    const wr=bt.win_rate!=null?(bt.win_rate*100).toFixed(1)+'%':'—';
+    const net=bt.net_pts!=null?((bt.net_pts>=0?'+':'')+bt.net_pts):'—';
+    const pap=e.graded?` · paper ${e.graded} graded · ${e.win_rate!=null?Math.round(e.win_rate*100)+'% win':''} · ${e.net_pnl!=null?e.net_pnl+' pts':''}`:'';
+    const edge=e.best_edge?` · best edge ${esc(e.best_edge.symbol||"")}`:'';
+    return `<div class="drill-row drillable" data-eng="${esc(e.name)}"><b>${esc(e.name)}</b>`+
+      `<span class="drill-meta">${esc(bt.archetype||e.kind||"")} · OOS n=${esc(n)} · win ${esc(wr)} · net ${esc(net)}`+
+      `${bt.edge_proven?' · edge proven':''}${pap}${edge}</span></div>`;
+  }).join(''): emptyBox("NO ENGINES");
+  h+='<div class="drill-sec">LOGS — trade lore & commentary</div>';
+  h+=logs.length?'<div class="lab-log">'+logs.map(l=>
+    `<div class="drill-row"><b>${esc(l.engine||"")}</b> · <span class="pill">${esc(l.kind||"")}</span>`+
+    `<span class="drill-meta">${esc(l.ts||"")}</span>`+
+    `<div style="color:#9a8f6f;font-size:11px;margin-top:3px;line-height:1.4">${esc(l.content||"")}</div></div>`).join('')+'</div>'
+    : emptyBox("DORMANT — 0 LORE ROWS");
+  if(failures.length){
+    h+='<div class="drill-sec">TRADING FAILURES — black-box ledger</div>';
+    h+='<div class="lab-log">'+failures.map(f=>
+      `<div class="drill-row"><b>${esc(f.kind||"error")}</b><span class="drill-meta">${esc(f.ts||"")}</span>`+
+      `<div style="color:#c97d7d;font-size:11px;margin-top:3px;line-height:1.4">${esc(f.detail||"")}</div></div>`).join('')+'</div>';
+  }
+  return h;
 }
-async function openEngine(name){
-  drillOpen("⚙️ ENGINE — "+name.toUpperCase(), emptyBox("LOADING…"));
+function renderTradingLab(d){
+  const gated=d.feed!=="live";
+  let h=`<div class="lab-banner ${gated?'gated':'live'}">${esc(d.note||"")}</div>`;
+  h+='<div class="kpis" style="margin-bottom:10px">'+
+    `<div class="kpi"><b>${esc((d.engines||[]).length)}</b><span>ENGINES</span></div>`+
+    `<div class="kpi"><b>${esc((d.feed||"—").toUpperCase())}</b><span>WC FEED</span></div>`+
+    `<div class="kpi"><b>${esc(d.fires||0)}</b><span>TOTAL FIRES</span></div></div>`;
+  h+=apexDashGraphs(d.engines, d.dash_updated);
+  h+=tickerHtml(d.ticks||[]);
+  h+=signalsHtml(d.signals||d.rows, d.fires);
+  h+=logsBacktestsHtml(d);
+  return h;
+}
+let _tradingView="list", _tradingEngine=null;
+function tradingBackBtn(){
+  return '<button type="button" class="trading-back" id="trading-back">← BACK TO TRADING LIST</button>';
+}
+function wireTradingBack(){
+  const b=$("trading-back");
+  if(b) b.onclick=tradingBack;
+}
+function tradingBack(){
+  _tradingView="list";
+  _tradingEngine=null;
+  loadDash("trading");
+}
+function wireTradingClicks(){
+  const body=$("dbody");
+  if(!body||body.dataset.tradingWired) return;
+  body.dataset.tradingWired="1";
+  body.addEventListener("click",e=>{
+    if(curTab!=="trading"||_tradingView==="engine") return;
+    const el=e.target.closest("[data-eng]");
+    if(!el||!body.contains(el)) return;
+    e.preventDefault();
+    openTradingEngine(el.dataset.eng);
+  });
+}
+async function loadTradingTab(body, quiet){
+  if(_tradingView==="engine"&&_tradingEngine){
+    if(!quiet) await paintTradingEngine(body, _tradingEngine);
+    renderTabs();
+    return;
+  }
+  const d=await getPanel("trading");
+  tabCounts.trading=(d.signals||[]).length;
+  if(!quiet) body.innerHTML=intro("trading")+renderTradingLab(d);
+  if(!_labTimer) _labTimer=setInterval(refreshTicker,1000);
+  renderTabs();
+}
+async function openTradingEngine(name){
+  _tradingView="engine";
+  _tradingEngine=name;
+  await loadDash("trading");
+}
+async function paintTradingEngine(body, name){
+  body.innerHTML=intro("trading")+tradingBackBtn()+emptyBox("LOADING…");
+  wireTradingBack();
   try{
     const d=await getPanel("engine:"+name);
     const sc=d.scorecard||{};
@@ -1854,10 +2030,51 @@ async function openEngine(name){
       (f.assessment?`<div style="flex-basis:100%;color:#9a8f6f;font-size:11px;font-style:italic;padding:3px 0 0 14px">🧠 ${esc(f.assessment)}</div>`:"")+
       `</div>`).join("")
       : emptyBox(d.implemented?"NO FIRES YET — warming up on the live feed":"NO RULES PORTED YET — this engine has never fired");
-    drillOpen("⚙️ ENGINE — "+name.toUpperCase(), h);
-  }catch(e){ drillOpen("⚙️ ENGINE — "+name.toUpperCase(), emptyBox("unavailable — "+String(e.message||e))); }
+    body.innerHTML=intro("trading")+tradingBackBtn()+h;
+    wireTradingBack();
+  }catch(e){
+    body.innerHTML=intro("trading")+tradingBackBtn()+emptyBox("unavailable — "+String(e.message||e));
+    wireTradingBack();
+  }
 }
-document.addEventListener("keydown",e=>{ if(e.key==="Escape")drillClose(); });
+async function refreshTicker(){
+  try{
+    const d=await getPanel("trading");
+    const el=document.getElementById("lab-ticker");
+    if(!el) return;
+    const fresh=tickerHtml(d.ticks||[]);
+    const tmp=document.createElement("div"); tmp.innerHTML=fresh;
+    const nw=tmp.querySelector("#lab-ticker");
+    if(nw) el.replaceWith(nw);
+  }catch(e){/* next tick retries */}
+}
+async function openLab(){
+  closeMenu();
+  _tradingView="list";
+  _tradingEngine=null;
+  curTab="trading";
+  renderTabs();
+  await loadDash("trading");
+}
+/* ===================== PER-ENGINE EQUITY SVG ===================== */
+function eqSvg(eq){
+  if(!eq || eq.length<2) return '<div class="empty" style="padding:18px">EQUITY CURVE ARMS AFTER 2+ GRADED FIRES</div>';
+  const W=640,H=150,P=10, vals=eq.map(p=>p.cum);
+  const mn=Math.min(0,...vals), mx=Math.max(0,...vals), span=(mx-mn)||1;
+  const x=i=>P+i*(W-2*P)/(eq.length-1), y=v=>H-P-(v-mn)*(H-2*P)/span;
+  const pts=eq.map((p,i)=>`${x(i).toFixed(1)},${y(p.cum).toFixed(1)}`).join(" ");
+  const zero=y(0).toFixed(1), last=vals[vals.length-1];
+  return `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:150px;display:block">`+
+    `<line x1="${P}" y1="${zero}" x2="${W-P}" y2="${zero}" stroke="#3a352a" stroke-dasharray="3 4"/>`+
+    `<polyline points="${pts}" fill="none" stroke="${last>=0?'#7dc97f':'#c97d7d'}" stroke-width="2"/>`+
+    `<text x="${W-P}" y="${y(last)-6}" fill="#d4af37" font-size="12" text-anchor="end">${last>=0?'+':''}${last.toFixed(1)} pts</text></svg>`;
+}
+document.addEventListener("keydown",e=>{
+  if(e.key!=="Escape") return;
+  if($("menu").classList.contains("open")){ closeMenu(); return; }
+  if(curTab==="trading"&&_tradingView==="engine"){ tradingBack(); return; }
+  if($("drill").classList.contains("open")) drillClose();
+});
 
 /* ============================ BOOT ============================ */
 // DEMO build (B16): /?demo=1 (or #demo) hides no-producer/gated panels for a clean walk-
@@ -1865,10 +2082,14 @@ document.addEventListener("keydown",e=>{ if(e.key==="Escape")drillClose(); });
 if(/[?&#]demo\b/.test(location.search+location.hash)) document.body.classList.add("demo");
 // Ace.app opens ?lab=1 after setup so Michael lands in the Trading Engine Lab (local only).
 const _labBoot=/[?&#]lab\b/.test(location.search+location.hash);
-function clock(){$("clock").textContent=new Date().toLocaleTimeString([],{hour:"2-digit",minute:"2-digit",second:"2-digit"})+" · ET";}
+function clock(){
+  const d=new Date(), p=new Intl.DateTimeFormat(undefined,{hour:"2-digit",minute:"2-digit",second:"2-digit",timeZoneName:"short"}).formatToParts(d);
+  const tz=(p.find(x=>x.type==="timeZoneName")||{}).value||"";
+  $("clock").textContent=p.filter(x=>x.type!=="timeZoneName").map(x=>x.value).join("").trim()+(tz?" · "+tz:"");
+}
 // label the static "awaiting events…" placeholder from STATE_LABELS (first-paint a11y)
 $("ticker").innerHTML=`<div${markerAttrs("awaiting events…")}>awaiting events…</div>`;
-renderLegend(); renderMarkerLegend(); renderTabs(); loadDash("overview");
+renderLegend(); renderMarkerLegend(); renderTabs(); wireMenu(); loadDash("overview");
 poll(); setInterval(poll,2500);
 // side-rail mini-windows (funnel + system map) — slow cadence; counts move on daily crons.
 {const mfc=$("mini-funnel-card"); if(mfc) mfc.onclick=()=>{curTab="pipeline";renderTabs();loadDash("pipeline");};}

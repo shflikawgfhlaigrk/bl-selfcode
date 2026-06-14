@@ -637,6 +637,16 @@ class Ledger:
         with self._conn() as c:
             return int(c.execute("SELECT count(*) FROM trade_lore").fetchone()[0])
 
+    def recent_lore(self, limit: int = 80) -> list[dict]:
+        """Recent commentary rows across all engines — the trading lab log stream."""
+        limit = max(1, min(int(limit), 200))
+        with self._conn() as c:
+            rows = c.execute(
+                "SELECT ts, engine, kind, content FROM trade_lore "
+                "ORDER BY ts DESC LIMIT %s", (limit,),
+            ).fetchall()
+        return [{"ts": str(r[0])[:19], "engine": r[1], "kind": r[2], "content": r[3]} for r in rows]
+
     def engine_detail(self, engine, limit: int = 80) -> dict:
         """Everything the deck's per-engine page shows (apex-style drill, 2026-06-10):
         scorecard, the cumulative paper-PnL curve over graded fires (chronological),

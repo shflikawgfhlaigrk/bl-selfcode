@@ -182,3 +182,28 @@ def test_panel_mail_ready_with_creds(ctx, monkeypatch):
     monkeypatch.setattr("utah.mail.creds_available", lambda: True)
     out = run(panels._panel_mail, ctx)
     assert out["status"] == "ready"
+
+
+# -- regression: a handler that defines but never calls its worker returns None --
+# (2026-06-13: an edit to _panel_trading left `await ctx.pool.run(_lab)` dangling in
+# the next handler, so _panel_trading fell off the end → None → the deck/app trading
+# panel served literal `null`. These assert the handlers actually return their dict.)
+
+def test_panel_trading_returns_dict_not_none(ctx):
+    out = run(panels._panel_trading, ctx)
+    assert isinstance(out, dict) and out.get("panel") == "trading"
+    assert "engines" in out  # the lab roster the deck/app renders
+    assert "signals" in out and isinstance(out["signals"], list)
+    assert "logs" in out and isinstance(out["logs"], list)
+    assert "backtests" in out
+    assert "failures" in out and isinstance(out["failures"], list)
+
+
+def test_panel_engine_audit_returns_dict_not_none(ctx):
+    out = run(panels._panel_engine_audit, ctx)
+    assert isinstance(out, dict) and out.get("panel") == "engine_audit"
+    assert "fleet" in out and "summary" in out
+
+
+def test_engine_audit_registered_for_the_app():
+    assert "engine_audit" in panels.PANEL_REGISTRY
