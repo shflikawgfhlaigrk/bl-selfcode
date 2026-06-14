@@ -19,6 +19,8 @@ import sys
 from collections import deque
 from typing import Iterator
 
+import msgspec
+
 from utah import brain, config, failures, local, memory, router, social
 from utah.brain import BrainRateLimited, BrainUnavailable
 from utah.embed import EmbedError
@@ -346,7 +348,32 @@ def _prelude(text: str) -> "tuple[str, Route | None, Reply | None]":
     return text, route, None
 
 
+_BULLET_RE = re.compile(r'(?m)^([ \t]*)\*[ \t]+')
+_BOLD_RE = re.compile(r'\*\*([^*\n]+)\*\*')
+_ITALIC_RE = re.compile(r'\*([^*\n]+)\*')
+
+
+def _clean_text(s: str) -> str:
+    """Strip markdown asterisks from anything the user sees (chat + voice). Michael's
+    hard 'no asterisks' rule; a prompt instruction never held, so this is the code-level
+    guarantee. Bullets become '- ', bold/italic markers drop, any straggler '*' removed."""
+    if not s or "*" not in s:
+        return s
+    s = _BULLET_RE.sub(r"\1- ", s)   # "* item" -> "- item"
+    s = _BOLD_RE.sub(r"\1", s)        # **x** -> x
+    s = _ITALIC_RE.sub(r"\1", s)      # *x* -> x
+    return s.replace("*", "")         # any straggler -> guarantee zero asterisks
+
+
 def tell(text: str, *, persist: bool = True) -> Reply:
+    """Public turn entry: delegate to the pipeline, then guarantee no asterisk reaches
+    the user (Michael's hard rule). See :func:`_clean_text`."""
+    r = _tell_core(text, persist=persist)
+    cleaned = _clean_text(r.text)
+    return r if cleaned == r.text else msgspec.structs.replace(r, text=cleaned)
+
+
+def _tell_core(text: str, *, persist: bool = True) -> Reply:
     """One full turn: recall -> ground -> reason -> remember.
 
     ``persist=False`` skips the durable turn write — for the diagnostic CLI (``utah tell``),
@@ -447,6 +474,13 @@ def tell(text: str, *, persist: bool = True) -> Reply:
 
 
 def tell_stream(text: str, *, want_thinking: bool = True, voice: bool = False) -> Iterator[tuple[str, str]]:
+    """Public streaming entry: clean every emitted chunk so no asterisk reaches chat or
+    voice, regardless of which internal path produced it."""
+    for channel, chunk in _tell_stream_core(text, want_thinking=want_thinking, voice=voice):
+        yield (channel, _clean_text(chunk) if isinstance(chunk, str) else chunk)
+
+
+def _tell_stream_core(text: str, *, want_thinking: bool = True, voice: bool = False) -> Iterator[tuple[str, str]]:
     """Streaming turn: recall → ground → stream the brain's reasoning+answer →
     remember. Same no-fabrication contract as :func:`tell`, but yields ordered
     ``(channel, chunk)`` events so chat AND voice can show reasoning live like
