@@ -98,6 +98,24 @@ def canspam_configured() -> bool:
     return _canspam_is_complete(canspam_address())
 
 
+def checkout_url() -> str:
+    """Stripe Payment Link (or storefront checkout) for the $700 site — ``UTAH_CHECKOUT_URL``
+    env, then ``business.json`` ``checkout_url``. Empty when unset: the preview then falls
+    back to the contact CTA (no fake 'Buy' button — honest gating, same as every paid lane).
+    The actual checkout/charge stays on Michael's Stripe; Utah only links to it."""
+    env = os.environ.get("UTAH_CHECKOUT_URL", "").strip()
+    if env.startswith("https://"):
+        return env
+    try:
+        data = json.loads(BUSINESS_CREDS.read_text(encoding="utf-8"))
+        url = (data.get("checkout_url") or "").strip()
+        if url.startswith("https://"):
+            return url
+    except (OSError, json.JSONDecodeError, TypeError, AttributeError):
+        pass
+    return ""
+
+
 # --- Outreach cadence doctrine (Michael, 2026-06-09) ------------------------
 #: Structural no-fabrication proof (audit TIER3): after the brain answers, verify each
 #: salient numeric claim traces to a span in the CONTEXT. ADVISORY by default (records an
