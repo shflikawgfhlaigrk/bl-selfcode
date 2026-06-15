@@ -56,6 +56,8 @@ for row in "${FLEET[@]}"; do
   <key>WorkingDirectory</key><string>$DEBT/$dir</string>
   <key>EnvironmentVariables</key><dict>
     <key>DATA_FEED</key><string>chrome</string>
+    <key>DASHBOARD_YAHOO_SEED</key><string>false</string>
+    <key>DISABLE_YAHOO</key><string>true</string>
     <key>CHROME_DEBUG_URL</key><string>http://127.0.0.1:9223/json</string>
     <key>CHROME_CDP_LEVEL</key><string>browser</string>
     <key>CHROME_PAGE_FILTER</key><string>wealth</string>
