@@ -116,6 +116,21 @@ def checkout_url() -> str:
     return ""
 
 
+def previews_live() -> bool:
+    """True only when per-lead site previews are actually published and reachable — the
+    cold email may then link the prospect straight to THEIR sample site. Gated so the pitch
+    never ships a dead preview link before the host (previews.blacklabelbots.com) is up:
+    ``UTAH_PREVIEWS_LIVE=1`` env, or ``previews_live: true`` in business.json. Flip this on
+    the moment the preview host is live (tonight) and every email starts carrying the link."""
+    if os.environ.get("UTAH_PREVIEWS_LIVE", "").strip().lower() in ("1", "true", "yes"):
+        return True
+    try:
+        data = json.loads(BUSINESS_CREDS.read_text(encoding="utf-8"))
+        return bool(data.get("previews_live"))
+    except (OSError, json.JSONDecodeError, TypeError, AttributeError):
+        return False
+
+
 # --- Outreach cadence doctrine (Michael, 2026-06-09) ------------------------
 #: Structural no-fabrication proof (audit TIER3): after the brain answers, verify each
 #: salient numeric claim traces to a span in the CONTEXT. ADVISORY by default (records an
