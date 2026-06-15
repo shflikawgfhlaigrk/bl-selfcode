@@ -95,3 +95,37 @@ def test_completed_at_preserves_stripe_time():
     stripe_sync.sync(fetch_fn=lambda: [_charge("ch_t", created=1_700_000_000)], ledger=led)
     completed = led.sales["ch_t"]["completed_at"]
     assert completed is not None and completed.year == 2023   # epoch 1.7e9 -> Nov 2023 UTC
+
+
+def test_secret_key_reads_file_and_rejects_garbage(tmp_path, monkeypatch):
+    p = tmp_path / "stripe.json"
+    p.write_text('{"secret_key": "rk_live_demo"}', encoding="utf-8")
+    monkeypatch.setattr(stripe_sync, "STRIPE_CREDS", p)
+    assert stripe_sync._secret_key() == "rk_live_demo"
+    p.write_text("not json", encoding="utf-8")
+    assert stripe_sync._secret_key() is None
+
+
+def test_run_scheduled_is_the_cron_entrypoint(monkeypatch):
+    monkeypatch.setattr(stripe_sync, "_secret_key", lambda: None)
+    assert stripe_sync.run_scheduled()["gated"] is True
+
+
+def test_first_picks_first_nonempty_stripped():
+    assert stripe_sync._first(None, "", "  ", "x", "y") == "x"
+    assert stripe_sync._first(None, "") == ""
+
+
+def test_fetch_charges_parses_stripe_payload(monkeypatch):
+    import json as _json
+
+    class _FakeResp:
+        def __init__(self, b): self._b = b
+        def read(self): return self._b
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+
+    payload = _json.dumps({"data": [{"id": "ch_1", "paid": True}]}).encode()
+    monkeypatch.setattr(stripe_sync.urllib.request, "urlopen",
+                        lambda req, timeout=0: _FakeResp(payload))
+    assert stripe_sync.fetch_charges("rk_live_x", limit=5) == [{"id": "ch_1", "paid": True}]
