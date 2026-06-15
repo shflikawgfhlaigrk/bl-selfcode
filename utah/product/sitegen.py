@@ -56,6 +56,28 @@ def _clean_region(region: str) -> str:
     return re.sub(r"\[[^\]]*\]", "", (region or "")).replace("Maps", "").strip()
 
 
+def _blocks(*, tel: str, e_phone: str, e_checkout: str, place: str, maps_q: str,
+            e_address: str, address: str, region: str) -> dict:
+    """The conditional HTML fragments (CTA buttons, map, address, region suffix) pulled out
+    of :func:`render` so the template assembly stays flat — keeps render's complexity low
+    and lets each fragment be unit-checked in isolation."""
+    call = (f'<a class="btn" href="tel:{tel}">Call {e_phone}</a>' if tel
+            else '<a class="btn" href="#contact">Get in touch</a>')
+    # The deliverable IS the sales page: a real checkout link turns "preview" into "buy".
+    # No link configured -> no button (honest), the page still drives to contact/call.
+    buy = (f'<a class="btn buy" href="{e_checkout}">Buy this site — $700</a>'
+           if e_checkout else "")
+    mapb = (f'<iframe title="map" loading="lazy" '
+            f'src="https://maps.google.com/maps?q={maps_q}&output=embed"></iframe>'
+            if place else "")
+    return {
+        "call": call, "buy": buy, "map": mapb,
+        "addr": f"<p>{e_address}</p>" if address else "",
+        "region_suffix": (" · " + region) if region else "",
+        "service_area": region or '<span class="placeholder">Your service area here.</span>',
+    }
+
+
 def render(lead: dict, *, checkout_url: str | None = None) -> str:
     """Lead row → complete single-file HTML site. Pure; deterministic; no fabrication.
 
@@ -97,21 +119,15 @@ def render(lead: dict, *, checkout_url: str | None = None) -> str:
     e_kind_label = _h(kind_label)
     name, region, address, kind_label = e_name, e_region, e_address, e_kind_label
 
-    call_btn = (f'<a class="btn" href="tel:{tel}">Call {e_phone}</a>' if tel else
-                '<a class="btn" href="#contact">Get in touch</a>')
-    # The deliverable IS the sales page: a real checkout link turns "preview" into "buy".
-    # No link configured -> no button (honest), the page still drives to contact/call.
     e_checkout = _h(checkout_url) if checkout_url else ""
-    buy_btn = (f'<a class="btn buy" href="{e_checkout}">Buy this site — $700</a>'
-               if e_checkout else "")
-    map_block = (f'<iframe title="map" loading="lazy" '
-                 f'src="https://maps.google.com/maps?q={maps_q}&output=embed"></iframe>'
-                 if place else "")
-    addr_line = f"<p>{e_address}</p>" if address else ""
+    b = _blocks(tel=tel, e_phone=e_phone, e_checkout=e_checkout, place=place, maps_q=maps_q,
+                e_address=e_address, address=address, region=region)
+    call_btn, buy_btn, map_block, addr_line = b["call"], b["buy"], b["map"], b["addr"]
+    region_suffix, service_area = b["region_suffix"], b["service_area"]
     return f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>{name} — {kind_label}{(' · ' + region) if region else ''}</title>
+<title>{name} — {kind_label}{region_suffix}</title>
 <meta name="description" content="{name}: {sub}">
 <style>
 :root{{--ink:#15181d;--paper:#fafaf7;--accent:#1f5f43;--soft:#e8e6df}}
@@ -134,7 +150,7 @@ footer{{text-align:center;padding:28px;color:#777;font-size:14px;border-top:1px 
 footer a{{color:var(--accent)}}
 </style></head><body>
 <header>
-  <div class="kicker">{kind_label}{(' · ' + region) if region else ''}</div>
+  <div class="kicker">{kind_label}{region_suffix}</div>
   <h1>{name}</h1>
   <p>{head}. {sub}</p>
   {call_btn}
@@ -147,7 +163,7 @@ footer a{{color:var(--accent)}}
     jobs go here — send 3–5 favorites.</p></div>
     <div class="card"><strong>Hours</strong><p class="placeholder">Your hours here —
     tell us and we'll set them.</p></div>
-    <div class="card"><strong>Service area</strong><p>{region or '<span class="placeholder">Your service area here.</span>'}</p></div>
+    <div class="card"><strong>Service area</strong><p>{service_area}</p></div>
   </div>
 </section>
 <section id="contact">

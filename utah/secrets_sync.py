@@ -231,9 +231,8 @@ def sync_google(*, write: bool = True) -> dict[str, Any]:
     """Seed google.json OAuth client from Ace config when absent."""
     if GOOGLE.exists() and _load_json(GOOGLE).get("refresh_token"):
         return {"updated": [], "skipped": "google.json already has refresh_token"}
-    ace = _parse_yaml_kv(OAUTH_CFG) if OAUTH_CFG.is_file() else {}
     # config.yaml nests under google_oauth — parse crudely from raw file
-    client_id = client_secret = ""
+    client_id = client_secret = ""  # nosec B105 — empty init, not a credential
     try:
         raw = OAUTH_CFG.read_text(encoding="utf-8")
         m = re.search(r'client_id:\s*"?([^"\n]+)"?', raw)

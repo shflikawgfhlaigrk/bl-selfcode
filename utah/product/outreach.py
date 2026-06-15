@@ -330,7 +330,7 @@ def queue(ledger, campaign: str, leads: list[dict], footer: dict | None = None,
                 "blocked": 0, "sent": 0,
                 "gated": "probate leads use probate_motivated pipeline, not SMB outreach"}
     if campaign == SMB_OUTREACH_CAMPAIGN:
-        leads = [l for l in leads if _is_smb_lead(l)]
+        leads = [ld for ld in leads if _is_smb_lead(ld)]
     sender = send_fn or mail.send
     # Deliverability gate: only ever send to an address that can actually RECEIVE mail.
     # An unverified guess that hard-bounces is precisely what blacklists the sending domain,
@@ -545,7 +545,7 @@ def run_scheduled(campaign: str = DEFAULT_CAMPAIGN, limit: int = DAILY_OUTREACH,
 
     if ch == "sms":
         candidates = ledger.uncontacted_phone_leads(campaign, max(limit * 4, limit))
-        leads = [l for l in candidates if _is_phone_prospect(l)][:limit]
+        leads = [ld for ld in candidates if _is_phone_prospect(ld)][:limit]
         if not leads:
             return {"campaign": campaign, "channel": "sms", "sent": 0, "queued": 0,
                     "reason": "no phone SMB prospects (chains filtered)"}
@@ -554,7 +554,7 @@ def run_scheduled(campaign: str = DEFAULT_CAMPAIGN, limit: int = DAILY_OUTREACH,
         result["channel"] = "sms"
     elif ch == "email":
         candidates = ledger.uncontacted_email_leads(campaign, max(limit * 4, limit))
-        leads = [l for l in candidates if _is_emailable_prospect(l)][:limit]
+        leads = [ld for ld in candidates if _is_emailable_prospect(ld)][:limit]
         if not leads:
             # No early return: follow-ups below must still run — an exhausted cold
             # pool is exactly when the due day-3/day-7 nudges are the day's sends.
@@ -595,18 +595,18 @@ def _run_auto(ledger, campaign: str, limit: int, send_fn, *, verify_fn=None) -> 
     email_budget = 0 if mail_exhausted else min(limit, mail.sends_remaining())
 
     email_cand = ledger.uncontacted_email_leads(campaign, max(limit * 4, limit))
-    email_leads = [l for l in email_cand if _is_emailable_prospect(l)][:email_budget]
-    seen_ids = {l.get("id") for l in email_leads if l.get("id") is not None}
+    email_leads = [ld for ld in email_cand if _is_emailable_prospect(ld)][:email_budget]
+    seen_ids = {ld.get("id") for ld in email_leads if ld.get("id") is not None}
 
     remaining = limit - len(email_leads)
     phone_leads: list[dict] = []
     if remaining > 0:
         phone_cand = ledger.uncontacted_phone_leads(campaign, max(remaining * 4, remaining))
-        for l in phone_cand:
-            if l.get("id") is not None and l.get("id") in seen_ids:
+        for cand in phone_cand:
+            if cand.get("id") is not None and cand.get("id") in seen_ids:
                 continue
-            if _is_phone_prospect(l):
-                phone_leads.append(l)
+            if _is_phone_prospect(cand):
+                phone_leads.append(cand)
             if len(phone_leads) >= remaining:
                 break
 

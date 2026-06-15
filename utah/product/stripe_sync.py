@@ -54,7 +54,7 @@ def fetch_charges(secret_key: str, limit: int = DEFAULT_LIMIT) -> list[dict]:
         f"{API_BASE}/charges?limit={limit}",
         headers={"Authorization": f"Bearer {secret_key}"},
     )
-    with urllib.request.urlopen(req, timeout=_HTTP_TIMEOUT) as resp:  # noqa: S310 — fixed https Stripe host
+    with urllib.request.urlopen(req, timeout=_HTTP_TIMEOUT) as resp:  # noqa: S310  # nosec B310 — fixed https://api.stripe.com host, no user-controlled scheme
         payload = json.loads(resp.read().decode("utf-8"))
     data = payload.get("data")
     return data if isinstance(data, list) else []
@@ -68,6 +68,16 @@ def _is_real_sale(charge: dict) -> bool:
     return (charge.get("amount") or 0) - (charge.get("amount_refunded") or 0) > 0
 
 
+def _first(*values) -> str:
+    """First non-empty, stripped string among *values* ('' if none) — keeps the field
+    mapping below flat (no nested ``or`` chains) and trivially testable."""
+    for v in values:
+        s = str(v or "").strip()
+        if s:
+            return s
+    return ""
+
+
 def _sale_fields(charge: dict) -> dict:
     """Map a Stripe charge onto :meth:`Ledger.record_sale` kwargs (net amount, buyer
     email, completion time). Defensive on every field — Stripe nulls description often."""
@@ -75,16 +85,35 @@ def _sale_fields(charge: dict) -> dict:
     created = charge.get("created")
     net = (charge.get("amount") or 0) - (charge.get("amount_refunded") or 0)
     return {
-        "stripe_id": str(charge.get("id") or ""),
-        "product": str(charge.get("description") or charge.get("statement_descriptor") or "")[:200],
-        "customer": str(charge.get("receipt_email") or bd.get("email")
-                        or charge.get("customer") or "")[:200],
+        "stripe_id": _first(charge.get("id")),
+        "product": _first(charge.get("description"), charge.get("statement_descriptor"))[:200],
+        "customer": _first(charge.get("receipt_email"), bd.get("email"),
+                           charge.get("customer"))[:200],
         "amount_cents": int(net),
-        "currency": str(charge.get("currency") or "usd"),
+        "currency": _first(charge.get("currency")) or "usd",
         "status": "paid",
         "completed_at": (datetime.fromtimestamp(int(created), tz=timezone.utc)
                          if created else None),
     }
+
+
+def _mirror_charges(led, charges: list) -> tuple[int, int]:
+    """Record each real paid charge through the ledger (idempotent on the Stripe id).
+    Returns ``(seen, new)`` — paid charges considered, and brand-new sales recorded."""
+    seen = new = 0
+    for ch in charges:
+        if not isinstance(ch, dict) or not _is_real_sale(ch):
+            continue
+        seen += 1
+        fields = _sale_fields(ch)
+        if not fields["stripe_id"]:
+            continue
+        try:
+            if led.record_sale(**fields):
+                new += 1
+        except LedgerError as exc:
+            failures.record("stripe_sync", "record_failed", f"{fields['stripe_id']}: {exc}"[:200])
+    return seen, new
 
 
 def _record_sync(led, rows_in: int, status: str, detail: str) -> None:
@@ -123,20 +152,7 @@ def sync(*, fetch_fn: Fetcher | None = None, ledger=None, limit: int = DEFAULT_L
         _record_sync(led, 0, "failed", str(exc)[:200])
         return {"ok": False, "gated": False, "synced": 0, "seen": 0, "error": str(exc)[:200]}
 
-    seen = new = 0
-    for ch in charges:
-        if not isinstance(ch, dict) or not _is_real_sale(ch):
-            continue
-        seen += 1
-        fields = _sale_fields(ch)
-        if not fields["stripe_id"]:
-            continue
-        try:
-            if led.record_sale(**fields):
-                new += 1
-        except LedgerError as exc:
-            failures.record("stripe_sync", "record_failed", f"{fields['stripe_id']}: {exc}"[:200])
-
+    seen, new = _mirror_charges(led, charges)
     fetched = len(charges)
     _record_sync(led, new, "ok", f"{new} new / {seen} paid of {fetched} fetched")
     if new:
