@@ -285,6 +285,26 @@ def test_answer_never_re_serves_a_conversational_turn(mem):
     assert any(h.source == "turn" for h in hits)       # still available to the brain as context
 
 
+def test_answer_never_re_serves_a_behavioral_directive(mem):
+    """A directive (behavioral guidance addressed to Ace, e.g. "When asked X, do Y")
+    must NOT be re-served verbatim as the answer even when it's the top, gate-passing
+    hit — otherwise Ace recites the instruction ("pull from the trade log…") instead of
+    following it. It stays a hit (context for the brain); answer is None. Mirrors the
+    'turn' guard. Live bug: a 'how is trading doing today' question echoed the rule."""
+    directive = (
+        "When asked how the trading engines did today (P&L, trade count, per-engine "
+        "breakdown), pull from the day's trade log rather than deflecting. If no log "
+        "data is available, say 'no reading on today's trades' explicitly."
+    )
+    query = "how is the trading doing today"
+    mem.embedder.register(directive, basis(0))
+    mem.embedder.register(query, blend(basis(0), basis(1), 0.90))
+    memory.store(directive, source="fact")
+    answer, hits = memory.answer(query)
+    assert answer is None                               # NOT recited as the answer
+    assert any(directive == h.content for h in hits)    # still context for the brain
+
+
 def test_answer_gate_rejects_wrong_entity_even_with_word_overlap(mem):
     """The live bug: an 'Everest' fact answered a 'Kilimanjaro' question because
     generic words (tall, mount, metres) gave a passing overlap. The hit's entity is
