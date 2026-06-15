@@ -372,8 +372,11 @@ def run_cycle(*, repo=None, brain_fn=None, propose_fn=None, sync_fn=None, task_f
                 log.info("sica cycle: degenerate task rejected (domain=%s): %s",
                          domain, still)
                 return out
+    # auto_merge=None -> propose() honors the kill-able selfcode.automerge flag
+    # (OFF by default = autonomous changes land as REVIEWED proposals, never silent
+    # auto-merges to the base). Was hardcoded True, which dead-ened that control.
     default_propose = (lambda t: selfcode.propose_governed(
-        t, repo=str(repo), auto_merge=True,
+        t, repo=str(repo), auto_merge=None,
         run_claude=lambda task: sica_overseer.run_claude_supervised(task, cwd=str(repo))))
     loop = MetaLoop(archive=arch, max_steps=1, propose_fn=propose_fn or default_propose)
     res = loop.run([task])
