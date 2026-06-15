@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  com.utah.stripe-sync — Stripe -> sales ledger mirror (every 15 min, READ-ONLY).
+
+  Runs utah.product.stripe_sync.run_scheduled(): pulls completed charges from Stripe
+  (the source of truth) and records each real sale into the `sales` ledger, idempotent
+  on the Stripe charge id. The first sale that lands flips revenue_heal.outcome_gate
+  GREEN — the one event that turns the whole build into a business. Touches NOTHING in
+  the storefront/checkout (that stays Michael's blacklabelbots site — see ops/BOUNDARIES.md);
+  Utah only reads. Honest-gated: with no key it records nothing and never fabricates.
+
+  Arm:   drop ~/.utah/secrets/stripe.json = {"secret_key": "rk_live_..."}  (a RESTRICTED,
+         read-only key — charges:read — is enough and safer than a full secret key).
+  Install:
+    cp ops/launchd/com.utah.stripe-sync.plist ~/Library/LaunchAgents/
+    launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.utah.stripe-sync.plist
+  Force-run now:  launchctl kickstart gui/$(id -u)/com.utah.stripe-sync
+  Stop:           launchctl bootout  gui/$(id -u)/com.utah.stripe-sync
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.utah.stripe-sync</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/michaelbarber/.utah/venv/bin/python</string>
+    <string>-c</string>
+    <string>from utah.product import stripe_sync; print(stripe_sync.run_scheduled())</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>/Users/michaelbarber/Desktop/ProjectUtah</string>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PYTHONPATH</key>
+    <string>/Users/michaelbarber/Desktop/ProjectUtah</string>
+    <key>PYTHONUNBUFFERED</key>
+    <string>1</string>
+    <key>PATH</key>
+    <string>/Users/michaelbarber/.utah/venv/bin:/opt/homebrew/bin:/usr/local/bin:/Users/michaelbarber/.local/bin:/usr/bin:/bin</string>
+  </dict>
+
+  <key>StartInterval</key>
+  <integer>900</integer>
+
+  <key>RunAtLoad</key>
+  <true/>
+
+  <key>StandardOutPath</key>
+  <string>/Users/michaelbarber/.utah/logs/stripe-sync.log</string>
+
+  <key>StandardErrorPath</key>
+  <string>/Users/michaelbarber/.utah/logs/stripe-sync.err</string>
+</dict>
+</plist>
