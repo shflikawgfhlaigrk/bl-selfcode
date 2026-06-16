@@ -180,60 +180,14 @@ def _save_state(state: dict) -> None:
                     "per-day counts may undercount", ROTATION_STATE, exc)
 
 
-# ── bounce-driven auto-pause ────────────────────────────────────────────────────────────
-#: Pull a sender from rotation the moment its bounce rate crosses the capacity-module
-#: threshold — every further send to a bleeding inbox deepens the blacklist on the sending
-#: domain. This is a PROTECTIVE gate, so it obeys two hard rules: it must never stall a
-#: healthy send (it fails OPEN — a DB hiccup pauses nothing), and it must never pay a Postgres
-#: round-trip inside the rotation's flock'd hot path (the set is resolved OUTSIDE the lock and
-#: cached for a short TTL, so a burst of sends in one cron pass costs at most one query).
-_BOUNCE_PAUSE = os.environ.get("UTAH_MAIL_BOUNCE_PAUSE", "1") != "0"
-_PAUSE_TTL = float(os.environ.get("UTAH_MAIL_BOUNCE_PAUSE_TTL", "120"))
-#: {"at": monotonic seconds of last fetch, "set": frozenset of paused senders}
-_pause_cache: dict = {"at": None, "set": frozenset()}
-
-
-def _fetch_paused() -> set[str]:
-    """Ask the capacity module which senders are bleeding, over a short-lived PG connection.
-    Bounded hard (connect + statement timeouts) so it can never hang the send window."""
-    import psycopg
-
-    from utah import mail_capacity
-    with psycopg.connect(config.DB_DSN, connect_timeout=5,
-                         options="-c statement_timeout=4000") as conn:
-        return set(mail_capacity.paused_accounts(conn))
-
-
-def _paused_senders() -> set[str]:
-    """Senders to skip in rotation right now (bounce auto-pause), cached for :data:`_PAUSE_TTL`.
-    Killable via ``UTAH_MAIL_BOUNCE_PAUSE=0``; fail-open on any error — a measurement gap
-    pauses nothing rather than silently stalling all sending."""
-    if not _BOUNCE_PAUSE:
-        return set()
-    import time
-    now = time.monotonic()
-    at = _pause_cache["at"]
-    if at is not None and (now - at) < _PAUSE_TTL:
-        return set(_pause_cache["set"])
-    try:
-        paused = frozenset(_fetch_paused())
-    except Exception as exc:  # noqa: BLE001 — a protective gate must never block a send
-        log.debug("mail: bounce-pause lookup unavailable (%s) — pausing nothing", exc)
-        paused = frozenset()
-    _pause_cache["at"] = now
-    _pause_cache["set"] = paused
-    return set(paused)
-
-
 def _next_account() -> dict | None:
-    """Round-robin the next UNDER-CAP, NON-PAUSED account, advancing a disk-persisted cursor
-    and per-day per-account counts (shared across the hourly cron processes). Returns None when
-    every inbox has hit :data:`PER_ACCOUNT_DAILY` or been bounce-paused — the send path then
-    gates rather than burning an inbox. Counts reset on a new local date."""
+    """Round-robin the next UNDER-CAP account, advancing a disk-persisted cursor and per-day
+    per-account counts (shared across the hourly cron processes). Returns None when EVERY
+    inbox has hit :data:`PER_ACCOUNT_DAILY` — the send path then gates rather than burning an
+    inbox. Counts reset on a new local date."""
     pool = accounts()
     if not pool:
         return None
-    paused = _paused_senders()  # resolved OUTSIDE the lock — no Postgres in the flock'd hot path
     with _state_lock():  # the read-modify-write below must be atomic across crons
         today = _today()
         state = _load_state()
@@ -245,8 +199,6 @@ def _next_account() -> dict | None:
         for i in range(len(pool)):
             idx = (cursor + i) % len(pool)
             acct = pool[idx]
-            if acct["from"] in paused:
-                continue  # bleeding inbox — pulled from rotation until its bounce rate recovers
             if counts.get(acct["from"], 0) < _cap_for(acct):
                 chosen = acct
                 cursor = idx + 1
@@ -262,36 +214,28 @@ def _next_account() -> dict | None:
 
 
 def inboxes_exhausted() -> bool:
-    """True when every sending account has hit its daily cap for today, or been bounce-paused
-    (a bleeding inbox offers no usable headroom). All-paused counts as exhausted → gate."""
+    """True when every sending account has hit its daily cap for today."""
     pool = accounts()
     if not pool:
         return True
-    paused = _paused_senders()
-    live = [a for a in pool if a["from"] not in paused]
-    if not live:                # nothing left to send through safely
-        return True
-    if PER_ACCOUNT_DAILY == 0:  # explicitly uncapped → never exhausted while a live inbox exists
+    if PER_ACCOUNT_DAILY == 0:  # explicitly uncapped → never exhausted
         return False
     state = _load_state()
     counts = dict(state.get("counts", {})) if state.get("date") == _today() else {}
-    return all(counts.get(acct["from"], 0) >= _cap_for(acct) for acct in live)
+    return all(counts.get(acct["from"], 0) >= _cap_for(acct) for acct in pool)
 
 
 def sends_remaining() -> int:
     """How many cold emails can still go out today across the pool (read-only), summing each
-    non-paused inbox's remaining headroom under its (warmup-aware or override) cap. A
-    bounce-paused inbox contributes zero — the count never promises a send rotation will refuse."""
+    inbox's remaining headroom under its (warmup-aware or override) cap."""
     pool = accounts()
     if not pool:
         return 0
-    paused = _paused_senders()
-    live = [a for a in pool if a["from"] not in paused]
     if PER_ACCOUNT_DAILY == 0:  # cap disabled — effectively unlimited, but a real int
-        return len(live) * _UNCAPPED_SENDS
+        return len(pool) * _UNCAPPED_SENDS
     state = _load_state()
     counts = dict(state.get("counts", {})) if state.get("date") == _today() else {}
-    return sum(max(0, _cap_for(acct) - counts.get(acct["from"], 0)) for acct in live)
+    return sum(max(0, _cap_for(acct) - counts.get(acct["from"], 0)) for acct in pool)
 
 
 def _send_via(account: dict, to: str, subject: str, body: str) -> None:

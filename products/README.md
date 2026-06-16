@@ -1,38 +1,26 @@
-# Utah Products — branch-off areas (COPIES)
+# Utah Products — the 5 branch-off areas (COPIES)
 
-Each product split into its own area so it can be branched off into its own app.
+Five distinct products, each split into its own area as **copies** so it can be branched off
+into its own app. **Ace / ProjectUtah is still the one** — every file here is a copy; `utah/`
+core and `utah/product/` are untouched, and all 286 imports + 13 launchd services still point
+at the live originals.
 
-> **Ace / ProjectUtah is still the one.** Everything here is a **copy**. The live source of
-> truth stays in `~/ProjectUtah/utah/product/` and `~/ProjectUtah/utah/` (core). Editing files
-> in `products/` does **not** touch the running daemon, the 13 launchd services, or the 286
-> imports across the codebase. Nothing live was moved or renamed.
+## The 5 areas
 
-## The areas
+| Area | Product | Spec (what the app must do) |
+|------|---------|------------------------------|
+| `leads/` | **Black Label Leads** (outreach) | Find people in **any market the client requests**; client **inputs their own email** and the app sends from it **autonomously**. |
+| `realestate/` | **Real Estate** | **Probate** + **find builders** in the areas + the **3-mile radius** enrich — all running. |
+| `marketing/` | **Marketing** | Use **Apple's top-of-the-line** imagery/video tools to make marketing videos. |
+| `trading/` | **Trading** | Take **any WealthCharts login** + **any prop firm**; run the engines and **just show the signals**. |
+| `sovereign/` | **Sovereign** | The full assistant — **weather, you name it** — plus an **area to populate the Claude login**. |
 
-| Area | Product | Modules | Live cron services |
-|------|---------|--------:|--------------------|
-| `trading/`    | Signal/edge engines (OOS edge-gating, fire grading) | 10 | engine-audit, grade-fires, signals |
-| `leads/`      | Cold outreach (finder → enrich → gated send)         | 7  | leads, leads-maps, enrich, outreach |
-| `probate/`    | Probate capture → enrich → heir outreach            | 4  | probate, probate-enrich, probate-outreach |
-| `realestate/` | Route optimization (TSP/VRP canvasser + fleet)      | 1  | — (on-demand /api/route) |
-| `marketing/`  | Sitegen, reels, spotlight outreach                  | 4  | marketer |
-| `revenue/`    | Sales ledger + Stripe→Utah mirror                   | 2  | stripe-sync |
-| `_shared_core/` | The spine every product imports (copied once)     | 11 | — |
-
-Each area has a `MANIFEST.md`: its modules, the shared-spine modules it imports, its launchd
-services, and how to run it.
+`_shared_core/` holds the spine every app imports (config, mail, db, …) **plus billing**
+(stripe_sync, ledger), copied once. Each area has a `MANIFEST.md` with its modules, ✅ what
+already exists, 🔨 what's still to build, its shared deps, and its launchd crons.
 
 ## Standing one up as its own app
+1. Take the area folder. 2. Add the `_shared_core/` modules its MANIFEST lists. 3. Vendor
+`utah/integrations/` + `utah/daemon/` from core. 4. Re-point imports to the app's package root.
 
-1. Take the area folder (e.g. `leads/`).
-2. Add the `_shared_core/` modules its `MANIFEST.md` lists.
-3. Vendor the `utah/integrations/` and `utah/daemon/` packages it needs from Utah core.
-4. Re-point imports from `utah.product.<mod>` / `utah.<core>` to the app's own package root.
-
-## Not split out (shared/dashboard, not standalone products)
-
-`brief, clock, console, jobs_status, tasks, timers, trackers, selfcode_web, weather` — these are
-cross-cutting dashboard/assistant modules, not branch-off products. Left in `utah/product/`.
-
-_Generated as copies; `utah/` is untouched. Regenerate by re-running the copy step — never edit
-live code from here._
+_Copies only — `utah/` is untouched. Never edit live code from here._

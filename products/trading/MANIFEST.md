@@ -1,20 +1,19 @@
-# Trading / Signals — branch-off manifest
+# Trading  ·  branch-off app
 
-> **COPY for branch-off.** Source of truth stays in `~/ProjectUtah/utah/product/` (and `utah/` core).
-> These files are copies; edits here do **not** affect the live Ace/Utah system.
+> COPY for branch-off. Source of truth = `~/ProjectUtah/utah/product/` + `utah/`.
 
-Multi-strategy signal engines with OOS edge-gating and honest fire grading.
+## Spec (what the app must do)
+- Take **any WealthCharts login** and **any prop firm** the client uses.
+- Run the trading engines and **just show the signals** (signal-only).
 
-## Modules (copied from `utah/product/`)
+## Modules (copied)
 trading, signals, backtest, engine_audit, engine_status, fire_grader, research_signal, researcher, trade_alert, trade_lore
 
-## Shared spine this product imports (copied in `../_shared_core/`)
+## Status
+- ✅ exists: the engine fleet + OOS edge-gate + fire grading; WealthCharts feed integration; signal-only output.
+- 🔨 to build: **generalized login intake** (any WC account) and **any-prop-firm** connector; per-client signal view.
+
+## Shared spine (`../_shared_core/`)
 config, failures, db_pool, alerts, mail
-
-> It also pulls the `utah.integrations` and `utah.daemon` packages from Utah core — vendor those from `~/ProjectUtah/utah/` when standing up the app.
-
-## Live launchd services (in `~/ProjectUtah/ops/launchd/`)
-com.utah.engine-audit → engine_audit.run_scheduled() · com.utah.grade-fires → fire_grader · com.utah.signals → python -m utah.product.signals
-
-## Entry points / run
-`python -m utah.product.signals` (live signal loop) · `engine_audit.run_scheduled()` (nightly review)
+## Live crons
+com.utah.signals (python -m utah.product.signals) · com.utah.engine-audit · com.utah.grade-fires

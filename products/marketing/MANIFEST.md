@@ -1,20 +1,19 @@
-# Marketing — branch-off manifest
+# Marketing  ·  branch-off app
 
-> **COPY for branch-off.** Source of truth stays in `~/ProjectUtah/utah/product/` (and `utah/` core).
-> These files are copies; edits here do **not** affect the live Ace/Utah system.
+> COPY for branch-off. Source of truth = `~/ProjectUtah/utah/product/` + `utah/`.
 
-Per-lead website generation, short-form reels, and spotlight outreach.
+## Spec (what the app must do)
+- Use **Apple's top-of-the-line** imagery + video tooling to make marketing videos and assets.
+- Per-lead websites and spotlight outreach.
 
-## Modules (copied from `utah/product/`)
+## Modules (copied)
 marketer, reel_queue, sitegen, news
 
-## Shared spine this product imports (copied in `../_shared_core/`)
+## Status
+- ✅ exists: per-lead site generation (`sitegen`), reel queue (`reel_queue`), spotlight emails (`marketer`).
+- 🔨 to build: **Apple imagery/video pipeline** (Image Playground / Apple Intelligence + video assembly) driving `reel_queue`.
+
+## Shared spine (`../_shared_core/`)
 config, failures, foundation, local_brain, mail
-
-> It also pulls the `utah.integrations` and `utah.daemon` packages from Utah core — vendor those from `~/ProjectUtah/utah/` when standing up the app.
-
-## Live launchd services (in `~/ProjectUtah/ops/launchd/`)
-com.utah.marketer → marketer.run_scheduled()
-
-## Entry points / run
-`marketer.run_scheduled()` · `sitegen.render(lead)` (used by the leads conversion-unlock)
+## Live crons
+com.utah.marketer

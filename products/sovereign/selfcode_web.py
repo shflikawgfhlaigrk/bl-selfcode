@@ -1,0 +1,299 @@
+"""Self-code page data — the four sections of the deck's SELF-CODE tab.
+
+Surfaces what the autonomous self-coder is actually doing, all from REAL sources
+(never fabricated), each section pure + I/O-isolated behind an injectable boundary
+so the logic is fully unit-proven without a live DB or git tree:
+
+1. **finding on google** — web-grounded facts (``research`` panel; memory rows).
+2. **correcting in himself** — recent ``selfcode_log`` cycles (Postgres): task,
+   domain, utility, passed, merged.
+3. **ask-for-edit** — a real governed :func:`selfcode.propose_governed` run on the
+   isolated clone, ``auto_merge=False`` (PROPOSE-ONLY — a web-triggered edit never
+   auto-merges to main). Slow (~minutes), so the web layer runs it off the loop and
+   the page polls; here we expose the single blocking call + result shaper.
+4. **percentage goals** — progress bars derived from REAL counts: autonomous merges
+   (git ``selfcode(auto)`` commits), the gate pass-rate of recent cycles, and the
+   self-code knowledge corpus — every % traces to a real count.
+
+The DB read and git counts are injected (``query_fn``/``git_count_fn``) so the unit
+tests run against fakes; the production defaults hit the real Postgres + the real
+isolated clone.
+"""
+from __future__ import annotations
+
+import json
+import logging
+import os
+import subprocess
+from pathlib import Path
+
+log = logging.getLogger("utah.product.selfcode_web")
+
+#: The isolated clone the autonomous loop (and chat-triggered edits) operate on —
+#: NEVER the live dev tree (matches utah.sica_autonomy.REPO_DIR).
+REPO_DIR = Path(os.environ.get("UTAH_SELFCODE_REPO", str(Path.home() / ".utah" / "selfcode-repo")))
+#: The real Utah repo autonomous work propagates into (matches sica_autonomy.LIVE_REPO).
+LIVE_REPO = Path(os.environ.get("UTAH_LIVE_REPO", str(Path(__file__).resolve().parents[2])))
+#: git must start in a getcwd-readable, non-TCC dir (same fix as sica_autonomy._SAFE_CWD).
+_SAFE_CWD = str(Path.home() / ".utah")
+
+#: The prefix the self-coder stamps on every autonomous merge commit (greppable
+#: provenance — see selfcode._real_merge). The merge-count goal is keyed off it.
+AUTO_COMMIT_GREP = "selfcode(auto)"
+
+# --- section 2: "correcting in himself" — recent self-code cycles ------------
+
+def _default_query(sql: str, params: tuple = ()) -> list[tuple]:
+    """Default DB boundary: one read of the real Postgres (autocommit, short timeout)."""
+    import psycopg
+
+    from utah import config
+
+    with psycopg.connect(
+            config.DB_DSN, autocommit=True, connect_timeout=8,
+            options=f"-c statement_timeout={config.DB_STATEMENT_TIMEOUT_MS}") as c:
+        return c.execute(sql, params).fetchall()
+
+
+def _cycle_summary(data: dict) -> dict:
+    """One self-code cycle → the flat row the page renders: task, domain, the best
+    attempt's utility, and whether it passed the gate / merged. Real fields only."""
+    attempts = data.get("attempts") or []
+    # The representative attempt = the highest-utility one (the cycle's best result).
+    # ``or 0.0`` — a crashed attempt logs utility=None, which must sort lowest, not raise.
+    best = max(attempts, key=lambda a: a.get("utility") or 0.0) if attempts else {}
+    passed = any(bool(a.get("passed")) for a in attempts)
+    merged = any(bool(a.get("merged")) for a in attempts)
+    prop = data.get("propagation") or {}
+    return {
+        "task": (data.get("task") or "").strip(),
+        "domain": data.get("domain") or "",
+        "utility": best.get("utility"),
+        "best_after": data.get("best_after"),
+        "passed": passed,
+        "merged": merged,
+        "attempts": len(attempts),
+        "propagated": bool(prop.get("propagated")) if prop else None,
+        "ts": data.get("ts"),
+    }
+
+
+def recent_cycles(limit: int = 25, *, query_fn=None) -> list[dict]:
+    """Recent ``selfcode_log`` cycles, newest first, flattened for the page.
+    Real-or-empty: an unreachable DB / empty table yields ``[]`` (never fabricated)."""
+    limit = max(1, min(int(limit), 200))
+    q = query_fn or _default_query
+    try:
+        rows = q("SELECT id, ts, data FROM selfcode_log ORDER BY id DESC LIMIT %s", (limit,))
+    except Exception as exc:  # noqa: BLE001 — honest empty on any read failure
+        log.warning("selfcode_log read failed: %s", exc)
+        return []
+    out: list[dict] = []
+    for row in rows:
+        try:
+            rid, ts, data = row
+            d = data if isinstance(data, dict) else json.loads(data)
+            s = _cycle_summary(d)
+        except (TypeError, ValueError, AttributeError) as exc:
+            # One corrupt log row (bad JSON / NULL data / wrong arity) must never
+            # blank the whole panel — skip it loudly, keep the good rows.
+            log.warning("selfcode_log row malformed — skipped: %s", exc)
+            continue
+        s["id"] = rid
+        s["logged_at"] = ts.isoformat() if hasattr(ts, "isoformat") else str(ts)
+        out.append(s)
+    return out
+
+
+def cycle_stats(*, query_fn=None) -> dict:
+    """Aggregate counts over ALL cycles/attempts (the goal denominators). Real-or-zero."""
+    q = query_fn or _default_query
+    try:
+        (cycles,) = q("SELECT count(*) FROM selfcode_log")[0]
+        passed, merged, total = q(
+            "SELECT count(*) FILTER (WHERE (a->>'passed')::bool), "
+            "count(*) FILTER (WHERE (a->>'merged')::bool), count(*) "
+            "FROM selfcode_log, jsonb_array_elements(data->'attempts') a")[0]
+    except Exception as exc:  # noqa: BLE001
+        log.warning("selfcode cycle stats failed: %s", exc)
+        return {"cycles": 0, "attempts": 0, "passed": 0, "merged": 0}
+    return {"cycles": int(cycles or 0), "attempts": int(total or 0),
+            "passed": int(passed or 0), "merged": int(merged or 0)}
+
+
+# --- section 4: percentage goals from real PRs/commits + cycle outcomes -------
+
+def _git_count(repo: Path, grep: str) -> int:
+    """Count commits in *repo* whose subject matches *grep* (the autonomous-merge
+    provenance). git -C + a safe cwd so a TCC-protected process cwd can't abort it.
+    Real-or-zero: timeout / missing git / missing repo all count as 0, logged."""
+    try:
+        # SUBJECT-only: --grep matches the whole message (body too), so a human feature
+        # commit that merely mentions the pattern got miscounted as an autonomous merge.
+        # Count commits whose SUBJECT line starts with the provenance prefix.
+        out = subprocess.run(
+            ["git", "-C", str(repo), "log", "--pretty=%s"],
+            capture_output=True, text=True, cwd=_SAFE_CWD, timeout=15)
+        if out.returncode != 0:
+            return 0
+        return sum(1 for ln in out.stdout.splitlines() if ln.strip().startswith(grep))
+    except (subprocess.SubprocessError, OSError, ValueError) as exc:
+        log.warning("git count failed (%s): %s", repo, exc)
+        return 0
+
+
+def _pct(num: float, den: float) -> int:
+    if not den:
+        return 0
+    return max(0, min(100, round(100.0 * num / den)))
+
+
+def _int_env(name: str, default: int) -> int:
+    """Env-int boundary: a garbage value must degrade to the default, never crash
+    the module import (this file imports inside the daemon's panel handlers)."""
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        log.warning("bad %s=%r — using default %d", name, raw, default)
+        return default
+
+
+#: Real targets (denominators) for each goal — kept modest so the bar reflects genuine
+#: progress against a concrete milestone, not a moving denominator.
+GOAL_TARGETS = {
+    "autonomous_merges": _int_env("UTAH_GOAL_MERGES", 25),
+    "knowledge_corpus": _int_env("UTAH_GOAL_KNOWLEDGE", 200),
+}
+
+
+def goals(*, query_fn=None, git_count_fn=None) -> list[dict]:
+    """Percentage goals wired to REAL counts. Every ``pct`` traces to a git commit
+    count or a ``selfcode_log`` row count — nothing is invented.
+
+    * **autonomous merges** — ``selfcode(auto)`` commits across the live repo + the
+      isolated clone, vs a target. Proves what he's actually merged.
+    * **gate pass-rate** — attempts that passed the full suite ÷ all attempts.
+    * **autonomous merge-rate** — attempts merged ÷ all attempts (how often a green
+      attempt cleared the tier policy).
+    * **self-code knowledge** — cycles logged vs a target corpus (breadth of self-work).
+    """
+    gc = git_count_fn or (lambda repo: _git_count(repo, AUTO_COMMIT_GREP))
+    stats = cycle_stats(query_fn=query_fn)
+    live_merges = gc(LIVE_REPO)
+    clone_merges = gc(REPO_DIR)
+    total_merges = live_merges + clone_merges
+    tgt_m = GOAL_TARGETS["autonomous_merges"]
+    tgt_k = GOAL_TARGETS["knowledge_corpus"]
+    return [
+        {"name": "Autonomous merges",
+         "pct": _pct(total_merges, tgt_m),
+         "num": total_merges, "den": tgt_m,
+         "detail": f"{total_merges} selfcode(auto) commits "
+                   f"({live_merges} live + {clone_merges} clone) of {tgt_m} target"},
+        {"name": "Gate pass-rate",
+         "pct": _pct(stats["passed"], stats["attempts"]),
+         "num": stats["passed"], "den": stats["attempts"],
+         "detail": f"{stats['passed']} of {stats['attempts']} attempts passed the full suite"},
+        {"name": "Autonomous merge-rate",
+         "pct": _pct(stats["merged"], stats["attempts"]),
+         "num": stats["merged"], "den": stats["attempts"],
+         "detail": f"{stats['merged']} of {stats['attempts']} attempts merged "
+                   f"(green + cleared tier policy)"},
+        {"name": "Self-code knowledge",
+         "pct": _pct(stats["cycles"], tgt_k),
+         "num": stats["cycles"], "den": tgt_k,
+         "detail": f"{stats['cycles']} self-code cycles logged of {tgt_k} target"},
+    ]
+
+
+# --- section 3: chat-box "ask for an edit, he does it" -----------------------
+
+def shape_result(res: dict) -> dict:
+    """Trim a ``propose_governed`` dict to the page-facing fields (proposed/ran, task,
+    utility, passed, branch, diff/reason). Never exposes raw test output verbatim."""
+    return {
+        "ran": True,
+        "task": res.get("task", ""),
+        "applied": bool(res.get("applied")),
+        "passed": bool(res.get("tests_passed")),
+        "merged": bool(res.get("merged")),   # always False on the web lane (auto_merge=False)
+        "branch": res.get("branch"),
+        "tier": res.get("tier"),
+        "utility": res.get("utility"),
+        "elapsed_s": res.get("elapsed_s"),
+        "reason": (res.get("reason") or "")[:400],
+        "diff": (res.get("diff") or "")[:6000],
+    }
+
+
+def _branch_diff(repo: Path, branch: str | None) -> str:
+    """Best-effort: the diff the proposal produced on its branch vs main (so the page
+    can SHOW what he changed). Empty on any failure — diff is a bonus, not the gate."""
+    branch = (branch or "").strip()
+    # Option-shaped input must never reach git as a flag (the branch arg comes from a
+    # typed console line via /diff <branch>).
+    if not branch or branch.startswith("-"):
+        return ""
+    try:
+        out = subprocess.run(
+            ["git", "-C", str(repo), "diff", f"main...{branch}"],
+            capture_output=True, text=True, cwd=_SAFE_CWD, timeout=15)
+        return out.stdout if out.returncode == 0 else ""
+    except (subprocess.SubprocessError, OSError, ValueError) as exc:
+        log.debug("branch diff failed (%s): %s", branch, exc)
+        return ""
+
+
+def run_edit(task: str, *, repo=None, propose_fn=None, diff_fn=None,
+             run_claude=None) -> dict:
+    """Run ONE real governed self-code attempt for a web-typed edit request.
+
+    PROPOSE-ONLY: ``auto_merge=False`` — a web-triggered edit is NEVER auto-merged to
+    main; it lands as a reviewable branch on the isolated clone. Returns the shaped
+    result (+ branch diff where available). The blocking call is real (a full claude
+    coding cycle + the gate), so the WEB layer must invoke this OFF the event loop and
+    have the page poll — this function itself is the synchronous unit of work."""
+    task = (task or "").strip()
+    if not task:
+        return {"ran": False, "error": "empty edit request"}
+    repo = Path(repo) if repo else REPO_DIR
+    try:
+        from utah import selfcode
+        if not selfcode.enabled():
+            return {"ran": False, "error": "kill switch — self-coding disabled"}
+    except Exception as exc:  # noqa: BLE001 — a broken gate check = honest refusal, not a 500
+        log.warning("self-code gate check failed: %s", exc)
+        return {"ran": False, "error": f"self-code gate unavailable: {str(exc)[:200]}",
+                "task": task}
+
+    def _default_propose(t: str) -> dict:
+        kw: dict = {}
+        if run_claude is not None:
+            kw["run_claude"] = run_claude
+        else:
+            # Real coding runner under the overseer (bounded/cancellable), exactly like
+            # the autonomous lane (sica_autonomy.run_cycle) but PROPOSE-ONLY.
+            from utah import sica_overseer
+            kw["run_claude"] = lambda task: sica_overseer.run_claude_supervised(task, cwd=str(repo))
+        return selfcode.propose_governed(t, repo=str(repo), auto_merge=False, **kw)
+
+    pf = propose_fn or _default_propose
+    try:
+        res = pf(task)
+    except Exception as exc:  # noqa: BLE001 — never let a coding failure escape as a 500
+        log.warning("web self-code edit failed: %s", exc)
+        return {"ran": False, "error": str(exc)[:300], "task": task}
+    shaped = shape_result(res)
+    if not shaped["diff"]:
+        try:
+            shaped["diff"] = (diff_fn or (lambda b: _branch_diff(repo, b)))(shaped["branch"])[:6000]
+        except Exception as exc:  # noqa: BLE001 — diff is a bonus, never the gate
+            log.debug("diff fallback failed: %s", exc)
+    return shaped
+
+
+__all__ = ["recent_cycles", "cycle_stats", "goals", "run_edit", "shape_result",
+           "REPO_DIR", "LIVE_REPO", "GOAL_TARGETS", "AUTO_COMMIT_GREP"]

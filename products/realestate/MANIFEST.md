@@ -1,20 +1,20 @@
-# Real Estate / Route Optimization — branch-off manifest
+# Real Estate  ·  branch-off app
 
-> **COPY for branch-off.** Source of truth stays in `~/ProjectUtah/utah/product/` (and `utah/` core).
-> These files are copies; edits here do **not** affect the live Ace/Utah system.
+> COPY for branch-off. Source of truth = `~/ProjectUtah/utah/product/` + `utah/`.
 
-Free TSP/VRP routing — single-canvasser (ARV-priority) and multi-vehicle fleet.
+## Spec (what the app must do)
+- **Probate** lead pipeline (statewide capture → heir contact).
+- **Find builders** in the target areas.
+- The **3-mile radius** enrichment (comps / ownership / debt) — all of these must run together.
 
-## Modules (copied from `utah/product/`)
-route
+## Modules (copied)
+probate, probate_export, probate_outreach, property, route
 
-## Shared spine this product imports (copied in `../_shared_core/`)
-config
+## Status
+- ✅ exists: probate capture + outreach (`probate`, `probate_outreach`), property/ARV + **3-mile radius** enrich (`property`), canvassing route optimization (`route`).
+- 🔨 to build: **builder-finder** for the target areas; wire probate + 3mi + ownership/debt enrich to all run on one schedule.
 
-> It also pulls the `utah.integrations` and `utah.daemon` packages from Utah core — vendor those from `~/ProjectUtah/utah/` when standing up the app.
-
-## Live launchd services (in `~/ProjectUtah/ops/launchd/`)
-(none — on-demand via the deck: POST /api/route)
-
-## Entry points / run
-`route.optimize(...)` · deck page :8766/route
+## Shared spine (`../_shared_core/`)
+config, failures, alerts, db_pool, foundation
+## Live crons
+com.utah.probate · com.utah.probate-enrich (property.enrich_ledger) · com.utah.probate-outreach

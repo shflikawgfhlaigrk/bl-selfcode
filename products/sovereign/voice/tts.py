@@ -1,0 +1,397 @@
+"""TTS boundary — speak text aloud (Piper). Injectable; degrades (logs, no-op) if
+the engine/model/audio device is missing so the voice loop never crashes. F5-TTS/
+StyleTTS2 (natural voice) drop into this same boundary later.
+
+``speak`` synthesizes the PROVEN-clean WAV (the same ``synthesize_wav`` bytes the
+round-trip proof checks) and plays it through the macOS reference player (``afplay``).
+The old ``sd.play(int16_array)`` path was the static the live test surfaced: a
+module-global stream that's fragile on dtype, on output-device selection (it followed
+the PortAudio default, not the system output), and — fatally — on concurrency, since
+voice and the chat-speak thread share that one stream and corrupt each other. afplay
+fed a clean WAV, under a global lock, removes all three failure modes at once.
+
+LATENCY — ``speak_stream`` is the low-latency path. The old loop buffered the WHOLE
+answer, synthesized it in one Piper call, then played: time-to-first-audio = synth(
+ENTIRE answer). ``speak_stream`` is a 3-stage pipeline — split → synth → play — on two
+background threads, so the FIRST sentence starts playing as soon as it is formed while
+later sentences are still being generated/synthesized. Time-to-first-audio drops to
+synth(first sentence). ``speak`` is now just ``speak_stream`` over a one-item stream,
+so chat answers get the same pipelining for free.
+"""
+from __future__ import annotations
+
+import contextlib
+import fcntl
+import logging
+import os
+import queue
+import re
+import subprocess
+import tempfile
+import threading
+import time
+import wave
+from typing import Callable, Iterable
+
+from utah import config
+from utah.daemon import runtime
+
+log = logging.getLogger("utah.voice.tts")
+
+#: Markdown headers at the START of a line (``## Title``) — dropped whole so the voice
+#: doesn't read the hashes. Anchored to line-start so a mid-token ``C#`` survives.
+_MD_HEADER_RE = re.compile(r"(?m)^[ \t]*#{1,6}[ \t]+")
+
+
+def clean_for_speech(text: str) -> str:
+    """Strip markdown formatting characters that a TTS engine reads ALOUD as words.
+
+    The brain answers in markdown (``**bold**``, ``* bullet``, ``` `code` ```), and Piper
+    pronounces ``*`` as the literal word "asterisk" — so an answer with any emphasis or
+    bullet became "asterisk asterisk ... asterisk". This is the single chokepoint every
+    spoken path funnels through (``synth_wav``), so cleaning here fixes voice AND chat
+    re-speak permanently. Conservative on purpose: removes ``*`` (bold/italic/bullets),
+    backticks (code), and line-leading header ``#`` — but LEAVES identifiers like ``C#``
+    and ``file_name`` intact so it never mangles a spoken term. Never raises."""
+    if not text:
+        return text
+    t = _MD_HEADER_RE.sub("", text)        # drop "## " header markers (line-start only)
+    t = t.replace("*", "").replace("`", "")  # bold / italic / bullets / code ticks
+    t = t.replace("~~", "")                  # strikethrough
+    return re.sub(r"[ \t]{2,}", " ", t)      # tidy the gaps the removals leave behind
+
+# Serialize ALL playback. A threading.Lock alone only covers ONE process — but the
+# voice loop and the web server are SEPARATE processes, each with its own lock, so two
+# players ran at the same time = overlapping ("multiple") voices. So we ALSO take an
+# flock on a shared file: one voice at a time, machine-wide, across every process.
+_PLAY_LOCK = threading.Lock()
+_PLAY_LOCKFILE = str(runtime.RUN_DIR / "tts-play.lock")
+
+#: THE KILL SWITCH fence. TTS plays from more than one process (the voice loop speaks
+#: brain replies; the web bridge speaks chat re-speaks), so an in-memory flag can't
+#: reach them all: ``stop_speaking()`` touches this file, and every ``speak_stream``
+#: pipeline drops its remaining sentences the moment the fence is newer than its own
+#: start. mtime-fenced so yesterday's stop never mutes today's speech.
+STOP_FILE = runtime.RUN_DIR / "speech.stop"
+
+
+def _stop_requested(since: float) -> bool:
+    """True when a stop fence newer than *since* exists. Never raises."""
+    try:
+        return STOP_FILE.stat().st_mtime >= since
+    except OSError:
+        return False
+
+
+def stop_speaking() -> dict:
+    """Cut the voice NOW, machine-wide: kill the clip playing this instant and fence
+    off every queued sentence in every process's speak pipeline. Before this existed
+    nothing could stop Ace mid-answer short of killing processes by hand."""
+    try:
+        STOP_FILE.parent.mkdir(parents=True, exist_ok=True)
+        STOP_FILE.touch()
+        os.utime(STOP_FILE, None)
+    except OSError as exc:
+        log.warning("tts: stop fence write failed: %s", exc)
+        return {"stopped": False, "error": str(exc)}
+    killed = False
+    try:
+        killed = subprocess.run(["pkill", "-x", "afplay"],
+                                capture_output=True, timeout=5).returncode == 0
+    except Exception as exc:  # noqa: BLE001 — fence alone still stops the queue
+        log.warning("tts: pkill afplay failed: %s", exc)
+    log.info("tts: stop_speaking (clip killed: %s)", killed)
+    return {"stopped": True, "killed_clip": killed}
+
+
+#: Bound on WAITING for another process's playback. A wedged holder (the live
+#: mic_silent class) must never park a speaker forever — past this, the speaker
+#: proceeds UNSERIALIZED (logged loudly): overlapping audio is an audible,
+#: recoverable degradation; a silently mute voice loop is not. Sized well above
+#: one clip's AFPLAY_TIMEOUT_S so legitimate queueing never trips it.
+PLAY_LOCK_TIMEOUT_S = float(os.environ.get("UTAH_PLAY_LOCK_TIMEOUT", "120"))
+
+
+def _flock_bounded(fd: int, timeout: float) -> bool:
+    """Acquire an exclusive flock with a deadline (non-blocking poll loop — flock
+    itself has no native timeout). True = acquired; False = timed out."""
+    deadline = time.monotonic() + timeout
+    while True:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            return True
+        except OSError:
+            if time.monotonic() >= deadline:
+                return False
+            time.sleep(0.05)
+
+
+@contextlib.contextmanager
+def _system_play_lock():
+    """Exclusive cross-process playback lock (flock), so the voice loop and
+    chat-speak never overlap into garble. The wait is BOUNDED by
+    ``PLAY_LOCK_TIMEOUT_S``: on timeout we log and play anyway rather than
+    deadlocking behind a wedged holder (see the constant's rationale)."""
+    runtime.RUN_DIR.mkdir(parents=True, exist_ok=True)
+    fd = os.open(_PLAY_LOCKFILE, os.O_CREAT | os.O_RDWR, 0o600)
+    got = False
+    try:
+        got = _flock_bounded(fd, PLAY_LOCK_TIMEOUT_S)
+        if not got:
+            log.warning(
+                "tts: play-lock not acquired within %.0fs (wedged holder?) — "
+                "playing unserialized so the voice stays alive", PLAY_LOCK_TIMEOUT_S)
+        yield
+    finally:
+        try:
+            if got:
+                fcntl.flock(fd, fcntl.LOCK_UN)
+        finally:
+            os.close(fd)
+
+
+_CHECK_FD: int | None = None
+_CHECK_FD_LOCK = threading.Lock()  # guards the one-time probe-fd open (no fd leak on a race)
+
+
+def is_anything_playing() -> bool:
+    """True if ANY process is currently playing TTS (holds the playback lock). The voice
+    loop's own echo guard only mutes the mic during ITS OWN turn — so when the web/chat
+    process speaks a reply aloud (and Ace's replies say "Ace"), the always-on mic captured
+    it and the wake word re-fired into a self-conversation. The loop calls this to drop mic
+    frames during EVERY process's speech, not just its own. Cheap: a non-blocking SHARED
+    flock probe on a cached fd (conflicts only with the player's exclusive lock)."""
+    global _CHECK_FD
+    try:
+        if _CHECK_FD is None:
+            with _CHECK_FD_LOCK:
+                if _CHECK_FD is None:
+                    runtime.RUN_DIR.mkdir(parents=True, exist_ok=True)
+                    _CHECK_FD = os.open(_PLAY_LOCKFILE, os.O_CREAT | os.O_RDWR, 0o600)
+        fcntl.flock(_CHECK_FD, fcntl.LOCK_SH | fcntl.LOCK_NB)
+        fcntl.flock(_CHECK_FD, fcntl.LOCK_UN)
+        return False          # acquired freely → nobody is playing
+    except OSError:
+        return True           # would block → an exclusive player holds it
+
+#: Closing punctuation that may trail a sentence terminator (".", "!", "?").
+_CLOSERS = "\"')]}»”’"
+
+
+def _drain_sentences(buf: str) -> tuple[list[str], str]:
+    """Split *buf* into complete sentences + the trailing remainder.
+
+    A sentence ends at ``. ! ?`` (plus any closing quote/bracket) FOLLOWED by
+    whitespace, or at a newline. A terminator at the very END of the buffer is
+    LEFT in the remainder — it may be mid-token (``3.14``) or the sentence may
+    continue in the next chunk — so it is only spoken once known-complete (or on
+    the final flush). This is what lets the first sentence go to synth the instant
+    it closes, without ever clipping a number or an abbreviation across chunks."""
+    out: list[str] = []
+    start = i = 0
+    n = len(buf)
+    while i < n:
+        ch = buf[i]
+        if ch in ".!?":
+            j = i + 1
+            while j < n and buf[j] in _CLOSERS:
+                j += 1
+            if j < n and buf[j].isspace():   # terminator + space → real boundary
+                out.append(buf[start:j])
+                start = i = j
+                continue
+        elif ch == "\n":                     # a line break is a speakable boundary
+            out.append(buf[start:i])
+            start = i = i + 1
+            continue
+        i += 1
+    sentences = [s.strip() for s in out if s.strip()]
+    return sentences, buf[start:]
+
+
+#: Hard cap on a single clip's playback. A hung afplay must NEVER hold the exclusive
+#: play-lock indefinitely: while it does, is_anything_playing() is True and the always-on
+#: voice loop drops EVERY mic frame → the loop goes DEAF until a restart. That was the real
+#: root cause of the chronic mic_silent (a stuck afplay held the lock for HOURS). No real
+#: per-sentence TTS clip runs anywhere near this long.
+AFPLAY_TIMEOUT_S = float(os.environ.get("UTAH_AFPLAY_TIMEOUT", "30"))
+
+
+def _afplay(path: str) -> None:
+    """Play a WAV via the macOS reference player — honours the system default output device
+    and handles the sample rate itself. BOUNDED by a timeout: on a hang, afplay is killed so
+    the play-lock releases and the always-on mic recovers instead of going deaf."""
+    try:
+        subprocess.run(["afplay", path], check=True, timeout=AFPLAY_TIMEOUT_S)
+    except subprocess.CalledProcessError as exc:
+        # Killed mid-clip (stop_speaking's pkill) — an intended interrupt, not a failure.
+        log.info("tts: clip interrupted (afplay rc=%s)", exc.returncode)
+    except subprocess.TimeoutExpired:
+        log.warning("tts: afplay hung >%ss on %s — killed to free the play-lock (mic recovers)",
+                    AFPLAY_TIMEOUT_S, path)
+
+
+class TTS:
+    def speak(self, text: str) -> None: ...  # pragma: no cover
+    def speak_stream(self, chunks, on_start=None) -> str: ...  # pragma: no cover
+    def synth_wav(self, text: str, path: str) -> None: ...  # pragma: no cover
+
+
+class PiperTTS:
+    """Piper voice (lazy-loaded). ``synth_wav`` writes a WAV; ``speak`` synthesizes
+    that same clean WAV and plays it via ``player`` (default: macOS ``afplay``).
+    ``player`` is injectable so tests prove the wiring without blasting audio."""
+
+    def __init__(self, model_path: str | None = None, player=None) -> None:
+        self._model_path = model_path or config.PIPER_MODEL
+        self._voice = None
+        self._lock = threading.Lock()
+        self._player = player or _afplay
+
+    def _load(self):
+        with self._lock:
+            if self._voice is None:
+                from piper import PiperVoice
+
+                self._voice = PiperVoice.load(self._model_path, self._model_path + ".json")
+            return self._voice
+
+    def synth_wav(self, text: str, path: str) -> None:
+        voice = self._load()
+        with wave.open(path, "wb") as wf:
+            voice.synthesize_wav(clean_for_speech(text), wf)
+
+    def speak_stream(self, chunks: Iterable[str], on_start: Callable[[], None] | None = None) -> str:
+        """Speak an INCREMENTAL text stream with sentence-level pipelining.
+
+        Three stages on two background threads — split (this thread) → synth →
+        play — so the first sentence reaches the speaker as soon as it closes
+        while later text is still being generated. Ordering is preserved (both
+        queues are FIFO). BLOCKS until every sentence has finished playing — the
+        voice loop relies on this to keep the mic muted through playback (no
+        self-capture). ``on_start`` fires once, just before the first sentence is
+        queued, so the caller can flip UI/voice state to "speaking". Returns the
+        full spoken text. Synth/play failures are logged, never raised (one bad
+        clip must not crash the voice loop)."""
+        sent_q: "queue.Queue[str | None]" = queue.Queue()
+        play_q: "queue.Queue[str | None]" = queue.Queue()
+        spoken: list[str] = []
+        t0 = time.time()  # stop fences newer than this kill THIS stream's queue
+
+        def _synth_loop() -> None:
+            while True:
+                sentence = sent_q.get()
+                if sentence is None:
+                    play_q.put(None)          # FIFO: lands after every WAV path
+                    return
+                if _stop_requested(t0):       # kill switch: drop, don't synthesize
+                    continue
+                fd, path = tempfile.mkstemp(suffix=".wav", prefix="utah_tts_")
+                os.close(fd)
+                try:
+                    self.synth_wav(sentence, path)   # PROVEN-clean bytes
+                except Exception as exc:  # noqa: BLE001 — skip a bad clip, keep speaking
+                    log.warning("TTS synth failed (%r): %s", sentence[:40], exc)
+                    try:
+                        os.remove(path)
+                    except OSError:
+                        pass
+                    continue
+                play_q.put(path)
+
+        def _play_loop() -> None:
+            while True:
+                path = play_q.get()
+                if path is None:
+                    return
+                try:
+                    if _stop_requested(t0):   # kill switch: drop, don't play
+                        continue
+                    with _PLAY_LOCK, _system_play_lock():   # one voice at a time, machine-wide
+                        self._player(path)    # macOS reference player
+                except Exception as exc:  # noqa: BLE001
+                    log.warning("TTS playback failed: %s", exc)
+                finally:
+                    try:
+                        os.remove(path)
+                    except OSError:
+                        pass
+
+        synth_t = threading.Thread(target=_synth_loop, daemon=True)
+        play_t = threading.Thread(target=_play_loop, daemon=True)
+        synth_t.start()
+        play_t.start()
+
+        def _flush(sentences: list[str]) -> None:
+            nonlocal on_start
+            for s in sentences:
+                if on_start is not None:
+                    try:
+                        on_start()
+                    except Exception as exc:  # noqa: BLE001
+                        log.warning("TTS on_start hook failed: %s", exc)
+                    on_start = None           # fire once, at the first real sentence
+                spoken.append(s)
+                sent_q.put(s)
+
+        buf = ""
+        try:
+            for chunk in chunks:
+                buf += chunk or ""
+                sentences, buf = _drain_sentences(buf)
+                _flush(sentences)
+            tail = buf.strip()
+            if tail:
+                _flush([tail])
+        finally:
+            sent_q.put(None)                  # close the pipeline; join both stages
+            synth_t.join()
+            play_t.join()
+        return " ".join(spoken)
+
+    def speak(self, text: str) -> None:
+        """Speak one whole string. Thin wrapper over :meth:`speak_stream` so a
+        single-shot caller (chat reply) gets the same sentence pipelining."""
+        text = (text or "").strip()
+        if not text:
+            return
+        self.speak_stream([text])
+
+
+_tts: TTS | None = None
+
+
+def get_tts() -> TTS:
+    global _tts
+    if _tts is None:
+        _tts = PiperTTS()
+    return _tts
+
+
+def set_tts(tts: TTS | None) -> None:
+    global _tts
+    _tts = tts
+
+
+def speak(text: str) -> None:
+    """Speak text aloud; never raises (logs + no-ops on any failure)."""
+    try:
+        get_tts().speak(text)
+    except Exception as exc:  # noqa: BLE001
+        log.warning("TTS speak failed: %s", exc)
+
+
+def speak_stream(chunks: Iterable[str], on_start: Callable[[], None] | None = None) -> str:
+    """Speak an incremental text stream with sentence pipelining; never raises.
+
+    Returns the full spoken text ("" on any failure, logged). This is the
+    low-latency voice path — the first sentence plays while the rest streams in."""
+    try:
+        return get_tts().speak_stream(chunks, on_start=on_start)
+    except Exception as exc:  # noqa: BLE001
+        log.warning("TTS speak_stream failed: %s", exc)
+        return ""
+
+
+__all__ = ["TTS", "PiperTTS", "get_tts", "set_tts", "speak", "speak_stream",
+           "stop_speaking", "is_anything_playing", "clean_for_speech"]

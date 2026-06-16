@@ -1,22 +1,9 @@
-# _shared_core — the spine every product imports (COPIES)
+# _shared_core — the spine every app imports (COPIES) + billing
 
-These are copies of the Utah core modules that the product areas import in common. Copied
-**once** here instead of duplicating them into all six areas (which would drift). Source of
-truth is `~/ProjectUtah/utah/`.
+Copied once instead of duplicated into all five areas. Source of truth = `~/ProjectUtah/utah/`.
 
-| Module | What a branch-off uses it for |
-|--------|-------------------------------|
-| `config.py` | env/secrets/paths, business identity, feature flags |
-| `failures.py` | the failure ledger (record + gate) |
-| `db_pool.py` | pooled Postgres connections |
-| `foundation.py` | shared DB schema / bootstrap helpers |
-| `alerts.py` | Pushover/Discord alert taxonomy |
-| `mail.py` | real SMTP send + multi-account rotation (now bounce-pause-aware) |
-| `mail_capacity.py` | warmup caps, deliverability, bounce auto-pause |
-| `mail_replies.py` | IMAP reply/bounce detection |
-| `sms.py` | SMS send path |
-| `local_brain.py` | local LLM helper (marketing copy, etc.) |
-| `objects.py` | shared data objects |
+config, failures, db_pool, foundation, alerts, objects — core spine.
+mail, mail_capacity, mail_replies, sms — sending (mail is bounce-pause-aware).
+stripe_sync, ledger — **billing** (sales ledger + Stripe mirror); shared, since every app takes payment — not one of the 5 product areas.
 
-Still package-level deps (not single files — vendor from `utah/` as needed):
-`utah/integrations/`, `utah/daemon/`.
+Still package-level deps to vendor from `utah/`: `utah/integrations/`, `utah/daemon/`.
