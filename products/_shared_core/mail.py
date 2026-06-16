@@ -238,8 +238,11 @@ def sends_remaining() -> int:
     return sum(max(0, _cap_for(acct) - counts.get(acct["from"], 0)) for acct in pool)
 
 
-def _send_via(account: dict, to: str, subject: str, body: str) -> None:
-    """Real adapter — SMTP/SSL send through one specific account's app-password."""
+def _send_via(account: dict, to: str, subject: str, body: str,
+              *, reply_to: str | None = None) -> None:
+    """Real adapter — SMTP/SSL send through one specific account's app-password. ``reply_to``
+    defaults to the house inbox (``BLB_FROM_EMAIL``); a client send overrides it to the
+    client's own address so their replies return to THEM, not the house."""
     import smtplib
     import ssl
     from email.message import EmailMessage
@@ -247,7 +250,7 @@ def _send_via(account: dict, to: str, subject: str, body: str) -> None:
     msg = EmailMessage()
     msg["From"] = account["from"]
     msg["To"] = to
-    msg["Reply-To"] = config.BLB_FROM_EMAIL
+    msg["Reply-To"] = reply_to or config.BLB_FROM_EMAIL
     msg["Subject"] = subject
     msg.set_content(body)
     # Bounded: SMTP_TIMEOUT covers connect AND every socket op (a Gmail hang must
@@ -336,5 +339,93 @@ def send(to: str, subject: str, body: str, *, send_fn=None) -> dict:
                 "from": account.get("from")}
 
 
-__all__ = ["send", "verify", "creds_available", "accounts", "inboxes_exhausted",
-           "sends_remaining", "GMAIL_CREDS", "ACCOUNTS_FILE", "ROTATION_STATE"]
+# ── client sending identity (own the sequencer: send AS the client, from their own inbox) ──
+#: A client's own sending identity: ``{client_id: {from, app_password, smtp_host}}``. This is
+#: how "the client inputs their email and we send AS them, autonomously" is stored — each
+#: client's outreach leaves from their own inbox, with replies returning to them. This is the
+#: in-house Apollo-style sequencer: we own it, no per-seat SaaS.
+CLIENT_ACCOUNTS_FILE = runtime.UTAH_HOME / "secrets" / "client_accounts.json"
+
+
+def _load_client_accounts() -> dict:
+    try:
+        data = json.loads(CLIENT_ACCOUNTS_FILE.read_text())
+        return data if isinstance(data, dict) else {}
+    except (OSError, json.JSONDecodeError, AttributeError, TypeError):
+        return {}
+
+
+def client_account(client_id: str) -> dict | None:
+    """The client's own sending account (normalized), or None if they haven't registered one
+    with a usable ``from`` + ``app_password``."""
+    raw = _load_client_accounts().get(client_id)
+    if not isinstance(raw, dict) or not (raw.get("from") or "").strip() or not raw.get("app_password"):
+        return None
+    return _norm(raw)
+
+
+def register_client_account(client_id: str, account: dict) -> dict:
+    """Store a client's own email + app password so the app can send AS them. Atomic write
+    (tmp + rename) so a crash can't truncate the file. Requires ``client_id`` + ``from`` +
+    ``app_password`` (the client's input). Returns ``{ok}`` or ``{ok: False, error}``."""
+    frm = (account.get("from") or "").strip()
+    if not client_id or not frm or not account.get("app_password"):
+        return {"ok": False, "error": "client_id, from, and app_password are required"}
+    data = _load_client_accounts()
+    data[client_id] = {"from": frm, "app_password": account["app_password"],
+                       "smtp_host": account.get("smtp_host", "smtp.gmail.com")}
+    try:
+        CLIENT_ACCOUNTS_FILE.parent.mkdir(parents=True, exist_ok=True)
+        tmp = Path(str(CLIENT_ACCOUNTS_FILE) + ".tmp")
+        tmp.write_text(json.dumps(data))
+        tmp.replace(CLIENT_ACCOUNTS_FILE)
+    except OSError as exc:
+        return {"ok": False, "error": str(exc)}
+    return {"ok": True, "client_id": client_id, "from": frm}
+
+
+def send_as(account: dict, to: str, subject: str, body: str, *, send_fn=None) -> dict:
+    """Send a single email FROM a specific account (a client's own inbox), with replies
+    returning to that account — not the house inbox. Same header-injection guard and result
+    contract as :func:`send`; never raises. Does not touch the house rotation pool."""
+    if not to.strip() or _header_unsafe(to) or _header_unsafe(subject):
+        failures.record("mail", "header_rejected",
+                        f"send_as to {to[:40]!r} rejected: blank or CR/LF/NUL in header")
+        return {"sent": False, "gated": False, "to": to,
+                "error": "header rejected: blank recipient or CR/LF in recipient/subject"}
+    acct = _norm(account) if account else None
+    if send_fn is None and (not acct or not acct.get("app_password")):
+        failures.record("mail", "gated",
+                        f"send_as to {to[:40]} gated: client account missing from/app_password")
+        return {"sent": False, "gated": True, "to": to, "reason": "no_client_account"}
+    if send_fn is not None:
+        try:
+            send_fn(to, subject, body)
+            return {"sent": True, "gated": False, "to": to,
+                    "from": acct["from"] if acct else None}
+        except Exception as exc:  # noqa: BLE001
+            failures.record("mail", "send_failed", f"{to[:40]}: {exc}")
+            return {"sent": False, "gated": False, "error": str(exc), "to": to}
+    try:
+        _send_via(acct, to, subject, body, reply_to=acct["from"])
+        log.info("mail: sent to %s AS %s (%s)", to, acct["from"], subject[:40])
+        return {"sent": True, "gated": False, "to": to, "from": acct["from"]}
+    except Exception as exc:  # noqa: BLE001
+        failures.record("mail", "send_failed", f"{to[:40]} as {acct.get('from')}: {exc}")
+        return {"sent": False, "gated": False, "error": str(exc), "to": to,
+                "from": acct.get("from")}
+
+
+def send_as_client(client_id: str, to: str, subject: str, body: str, *, send_fn=None) -> dict:
+    """Send AS a registered client — their own email sends the outreach, autonomously. Gated
+    with a clear reason if the client hasn't registered their sending email yet."""
+    acct = client_account(client_id)
+    if send_fn is None and acct is None:
+        return {"sent": False, "gated": True, "to": to,
+                "reason": "client_not_registered", "client_id": client_id}
+    return send_as(acct or {}, to, subject, body, send_fn=send_fn)
+
+
+__all__ = ["send", "send_as", "send_as_client", "client_account", "register_client_account",
+           "verify", "creds_available", "accounts", "inboxes_exhausted", "sends_remaining",
+           "GMAIL_CREDS", "ACCOUNTS_FILE", "ROTATION_STATE", "CLIENT_ACCOUNTS_FILE"]
