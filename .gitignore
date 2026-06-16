@@ -30,3 +30,8 @@ venv/
 
 # compiled on-device LLM bridge (rebuild: xcrun swiftc -O native/fm_cli.swift -o native/fm_cli)
 native/fm_cli
+
+# pytest coverage artifacts
+.coverage
+.coverage.*
+htmlcov/
