@@ -12,7 +12,8 @@
       "files": 7,
       "loc": 2665,
       "status": "live-backed",
-      "shipped": ["any-market finder (any vertical the client names)", "nationwide coverage (geocode any US location + 40-metro sweep)"]
+      "owns": "Apollo.io (in-house, no per-seat SaaS)",
+      "shipped": ["any-market finder (any vertical the client names)", "nationwide coverage (geocode any US location + 40-metro sweep)", "client's own email autonomous sequencer (send_as_client; replies route to the client)"]
     },
     {
       "id": "black-label-real-estate",

@@ -4,6 +4,10 @@
 
 
 > COPY for branch-off. Source of truth = `~/ProjectUtah/utah/product/` + `utah/`. Editing here does not touch the live system.
+>
+> **Vision: this is *our* Apollo.io — we own it, no per-seat SaaS.** Own the search/database
+> (find anyone in any market, anywhere in the US) + own the sequencer (send from the client's
+> own inbox, autonomously).
 
 ## Spec (what the app must do)
 - Client picks **any market they request** — the finder pulls real people/businesses in that market.
@@ -14,8 +18,11 @@
 leads, leads_eval, leads_status, enrich, outreach, pipeline, mail_status
 
 ## Status
-- ✅ exists: finder (`leads`), enrichment (`enrich`), deliverability-gated send + rotation (`outreach`, uses `_shared_core/mail*`), reply/bounce handling, bounce auto-pause.
-- 🔨 to build: client-configurable target market (arbitrary vertical on request); **client's own email as the sending identity** (input → authenticate → autonomous send from it); per-client isolation.
+- ✅ **any market the client requests** — `leads.market_selectors/build_market_query/find_market_smbs/scout_market` (known verticals → OSM selectors; unknown → name-keyword fallback).
+- ✅ **entire United States** — `leads.scout_market_in(market, location)` (geocode any US location) + `leads.scout_market_us(market)` (40-metro coast-to-coast sweep).
+- ✅ **client's own email, autonomous send** — `mail.register_client_account` / `send_as` / `send_as_client` (replies route to the client).
+- ✅ exists: enrichment (`enrich`), deliverability-gated rotation (`outreach`), reply/bounce handling, bounce auto-pause.
+- 🔨 to fully own Apollo: **people-level contacts** (decision-maker names/titles/emails, not just business listings) + **email verification at scale** + a persistent contact DB — Apollo's real moat.
 
 ## Shared spine (`../_shared_core/`)
 config, failures, db_pool, foundation, alerts, mail, mail_capacity, mail_replies, sms, objects
