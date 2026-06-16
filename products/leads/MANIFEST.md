@@ -21,8 +21,9 @@ leads, leads_eval, leads_status, enrich, outreach, pipeline, mail_status
 - ✅ **any market the client requests** — `leads.market_selectors/build_market_query/find_market_smbs/scout_market` (known verticals → OSM selectors; unknown → name-keyword fallback).
 - ✅ **entire United States** — `leads.scout_market_in(market, location)` (geocode any US location) + `leads.scout_market_us(market)` (40-metro coast-to-coast sweep).
 - ✅ **client's own email, autonomous send** — `mail.register_client_account` / `send_as` / `send_as_client` (replies route to the client).
+- ✅ **people-level contacts** (Apollo's moat, in-house) — `contacts.discover_contacts(company, website)`: scrape decision-makers (name/title) from team/about pages → generate ranked email patterns → MX-verify → persist deduped in `contacts.ContactStore`. Honest `pattern+mx` confidence (no fabricated mailboxes).
 - ✅ exists: enrichment (`enrich`), deliverability-gated rotation (`outreach`), reply/bounce handling, bounce auto-pause.
-- 🔨 to fully own Apollo: **people-level contacts** (decision-maker names/titles/emails, not just business listings) + **email verification at scale** + a persistent contact DB — Apollo's real moat.
+- 🔨 next: wire `discover_contacts` into the outreach run (auto-enrich each found company's decision-makers before send); contact-DB review UI.
 
 ## Shared spine (`../_shared_core/`)
 config, failures, db_pool, foundation, alerts, mail, mail_capacity, mail_replies, sms, objects

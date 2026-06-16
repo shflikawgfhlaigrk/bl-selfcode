@@ -13,7 +13,7 @@
       "loc": 2665,
       "status": "live-backed",
       "owns": "Apollo.io (in-house, no per-seat SaaS)",
-      "shipped": ["any-market finder (any vertical the client names)", "nationwide coverage (geocode any US location + 40-metro sweep)", "client's own email autonomous sequencer (send_as_client; replies route to the client)"]
+      "shipped": ["any-market finder (any vertical the client names)", "nationwide coverage (geocode any US location + 40-metro sweep)", "client's own email autonomous sequencer (send_as_client; replies route to the client)", "people-level contact engine: discover decision-makers -> pattern+MX-verified emails -> persistent deduped contact DB (Apollo's moat, in-house)"]
     },
     {
       "id": "black-label-real-estate",
