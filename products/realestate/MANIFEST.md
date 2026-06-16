@@ -11,11 +11,12 @@
 - The **3-mile radius** enrichment (comps / ownership / debt) — all of these must run together.
 
 ## Modules (copied)
-probate, probate_export, probate_outreach, property, route
+probate, probate_export, probate_outreach, property, route, builders
 
 ## Status
+- ✅ **builder-finder** — `builders.find_builders(bbox)` / `find_builders_near(lat,lon)` / `scout_builders(location)`: builders/contractors/roofers in an area or within ~3 miles of a property (`THREE_MILES_KM`), reusing the proven leads any-market finder.
 - ✅ exists: probate capture + outreach (`probate`, `probate_outreach`), property/ARV + **3-mile radius** enrich (`property`), canvassing route optimization (`route`).
-- 🔨 to build: **builder-finder** for the target areas; wire probate + 3mi + ownership/debt enrich to all run on one schedule.
+- 🔨 next: one schedule that runs probate + 3-mile + builder-finder + ownership/debt enrich together.
 
 ## Shared spine (`../_shared_core/`)
 config, failures, alerts, db_pool, foundation
