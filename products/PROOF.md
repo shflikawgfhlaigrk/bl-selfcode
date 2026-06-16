@@ -15,13 +15,18 @@ finished Swift binaries; I built and proved the product each app runs on.
 
 | App (label) | Area | Files | LOC | Byte-identical to live | Backing |
 |---|---|--:|--:|:--:|---|
-| **Black Label Leads** | `leads/` | 7 | 2,474 | 7/7 ✅ | crons: leads, leads-maps, enrich, outreach |
+| **Black Label Leads** | `leads/` | 7 | 2,665 | 7/7 ✅ | crons: leads, leads-maps, enrich, outreach |
 | **Black Label Real Estate** | `realestate/` | 5 | 1,754 | 5/5 ✅ | crons: probate, probate-enrich, probate-outreach |
 | **Black Label Marketing** | `marketing/` | 4 | 740 | 4/4 ✅ | cron: marketer |
 | **Black Label Trading** | `trading/` | 10 | 2,739 | 10/10 ✅ | crons: signals, engine-audit, grade-fires |
 | **Sovereign** | `sovereign/` | 26 | 5,601 | 26/26 ✅ | brain (Claude sub), full voice pipeline, weather |
 | _shared spine + billing_ | `_shared_core/` | 12 | 3,807 | 12/12 ✅ | config, mail, db, stripe/ledger |
-| **Total** | | **64** | **16,115** | **64/64 ✅** | 11 live launchd services |
+| **Total** | | **64** | **16,306** | **64/64 ✅** | 11 live launchd services |
+
+### Shipped this session (Black Label Leads)
+- **Find any market the client requests** — known verticals map to precise OSM selectors; an unknown market falls back to a name/kind keyword match, so it's never limited to a fixed list. (`market_selectors`, `build_market_query`, `find_market_smbs`, `scout_market`)
+- **Entire United States** — `scout_market_in(market, location)` geocodes any US location; `scout_market_us(market)` sweeps 40 metros coast-to-coast (`US_METROS`, `US_BBOX`). No longer Southeast-only.
+- **10 new tests** (`tests/test_leads_any_market.py`), all green; ruff clean.
 
 ## Independently verifiable
 - **Code runs live:** 11 launchd cron services in `ops/launchd/` execute these exact modules in production.

@@ -8,10 +8,11 @@
       "id": "black-label-leads",
       "label": "Black Label Leads",
       "area": "products/leads",
-      "tagline": "Outreach for any market — your email, sending for you.",
+      "tagline": "Outreach for any market, anywhere in the US — your email, sending for you.",
       "files": 7,
-      "loc": 2474,
-      "status": "live-backed"
+      "loc": 2665,
+      "status": "live-backed",
+      "shipped": ["any-market finder (any vertical the client names)", "nationwide coverage (geocode any US location + 40-metro sweep)"]
     },
     {
       "id": "black-label-real-estate",

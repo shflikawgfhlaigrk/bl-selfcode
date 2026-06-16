@@ -21,7 +21,6 @@ import logging
 import os
 import re
 import urllib.request
-from pathlib import Path
 from typing import Callable
 
 from utah.daemon import runtime
@@ -488,6 +487,198 @@ def scout_frontier(ledger, bbox=METRO_BBOX, region="Atlanta Metro Ring",
         found += res["found"]
         new += res["new"]
     return {"tiles_scanned": len(tiles), "found": found, "new": new, "region": region}
+
+
+# ── any market, anywhere in the US (client-requested) ────────────────────────────────────
+#: Continental-US bounding box (lower 48). The any-market finder is NOT limited to the legacy
+#: Southeast frontier — it searches wherever the client points it, across the whole country.
+US_BBOX: tuple[float, float, float, float] = (24.50, -125.00, 49.40, -66.90)
+
+#: Major US metros (name, lat, lon) spanning every region — the national sweep targets these so
+#: a market search covers the entire United States, not one corner. Widen freely for more supply.
+US_METROS: list[tuple[str, float, float]] = [
+    ("New York, NY", 40.71, -74.01), ("Los Angeles, CA", 34.05, -118.24),
+    ("Chicago, IL", 41.88, -87.63), ("Houston, TX", 29.76, -95.37),
+    ("Phoenix, AZ", 33.45, -112.07), ("Philadelphia, PA", 39.95, -75.17),
+    ("San Antonio, TX", 29.42, -98.49), ("San Diego, CA", 32.72, -117.16),
+    ("Dallas, TX", 32.78, -96.80), ("San Jose, CA", 37.34, -121.89),
+    ("Austin, TX", 30.27, -97.74), ("Jacksonville, FL", 30.33, -81.66),
+    ("Fort Worth, TX", 32.76, -97.33), ("Columbus, OH", 39.96, -83.00),
+    ("Charlotte, NC", 35.23, -80.84), ("San Francisco, CA", 37.77, -122.42),
+    ("Indianapolis, IN", 39.77, -86.16), ("Seattle, WA", 47.61, -122.33),
+    ("Denver, CO", 39.74, -104.99), ("Washington, DC", 38.91, -77.04),
+    ("Boston, MA", 42.36, -71.06), ("Nashville, TN", 36.16, -86.78),
+    ("Atlanta, GA", 33.75, -84.39), ("Las Vegas, NV", 36.17, -115.14),
+    ("Portland, OR", 45.52, -122.68), ("Miami, FL", 25.76, -80.19),
+    ("Minneapolis, MN", 44.98, -93.27), ("New Orleans, LA", 29.95, -90.07),
+    ("Kansas City, MO", 39.10, -94.58), ("St. Louis, MO", 38.63, -90.20),
+    ("Salt Lake City, UT", 40.76, -111.89), ("Detroit, MI", 42.33, -83.05),
+    ("Pittsburgh, PA", 40.44, -79.996), ("Tampa, FL", 27.95, -82.46),
+    ("Oklahoma City, OK", 35.47, -97.52), ("Albuquerque, NM", 35.08, -106.65),
+    ("Boise, ID", 43.62, -116.21), ("Omaha, NE", 41.26, -95.93),
+    ("Birmingham, AL", 33.52, -86.81), ("Honolulu, HI", 21.31, -157.86),
+]
+
+#: A client's plain-language market → precise OSM selectors. A market not listed still works:
+#: the finder falls back to the broad business query + a name/kind keyword match, so it can
+#: target ANY market the client names — never a fixed list.
+_MARKET_SELECTORS: dict[str, list[tuple[str, str]]] = {
+    "dentist": [("amenity", "dentist"), ("healthcare", "dentist"), ("office", "dentist")],
+    "doctor": [("amenity", "doctors"), ("healthcare", "doctor")],
+    "chiropractor": [("healthcare", "chiropractor")],
+    "lawyer": [("office", "lawyer")], "attorney": [("office", "lawyer")],
+    "accountant": [("office", "accountant")], "insurance": [("office", "insurance")],
+    "real estate": [("office", "estate_agent")], "realtor": [("office", "estate_agent")],
+    "restaurant": [("amenity", "restaurant")], "cafe": [("amenity", "cafe")],
+    "coffee": [("amenity", "cafe")], "bar": [("amenity", "bar")], "pub": [("amenity", "pub")],
+    "gym": [("leisure", "fitness_centre")], "fitness": [("leisure", "fitness_centre")],
+    "salon": [("shop", "hairdresser"), ("shop", "beauty")],
+    "barber": [("shop", "hairdresser")], "spa": [("leisure", "spa"), ("shop", "beauty")],
+    "vet": [("amenity", "veterinary")], "veterinary": [("amenity", "veterinary")],
+    "car wash": [("amenity", "car_wash")], "auto repair": [("shop", "car_repair")],
+    "mechanic": [("shop", "car_repair")], "plumber": [("craft", "plumber")],
+    "electrician": [("craft", "electrician")], "hvac": [("craft", "hvac")],
+    "roofer": [("craft", "roofer")], "roofing": [("craft", "roofer")],
+    "builder": [("craft", "builder"), ("office", "construction_company")],
+    "contractor": [("craft", "builder"), ("office", "construction_company")],
+    "childcare": [("amenity", "childcare"), ("amenity", "kindergarten")],
+    "daycare": [("amenity", "childcare")], "florist": [("shop", "florist")],
+    "bakery": [("shop", "bakery")], "pharmacy": [("amenity", "pharmacy")],
+}
+
+
+def _market_key(market: str) -> str:
+    """Normalize a market string to lowercase words (drops punctuation/numbers)."""
+    return re.sub(r"[^a-z ]+", " ", (market or "").lower()).strip()
+
+
+def market_selectors(market: str) -> list[tuple[str, str]]:
+    """OSM selectors for a client's *market*: exact match first, then a contained keyword
+    (so "pediatric dentist" → dentist). Empty ⇒ caller uses the broad query + name filter."""
+    key = _market_key(market)
+    if not key:
+        return []
+    if key in _MARKET_SELECTORS:
+        return _MARKET_SELECTORS[key]
+    for term, sels in _MARKET_SELECTORS.items():
+        if term in key or key in term:
+            return sels
+    return []
+
+
+def build_market_query(bbox: tuple[float, float, float, float], market: str) -> str:
+    """Overpass QL for one *market* in *bbox*. Known markets use their precise OSM selectors;
+    an unknown market falls back to the broad business query (caller name-filters the result)."""
+    sels = market_selectors(market) or _CATEGORIES
+    south, west, north, east = bbox
+    box = f"({south},{west},{north},{east})"
+    parts: list[str] = []
+    for k, v in sels:
+        sel = f'["{k}"]' if v == "*" else f'["{k}"="{v}"]'
+        parts.append(f'node{sel}["name"]{box};')
+        parts.append(f'way{sel}["name"]{box};')
+    return f"[out:json][timeout:{QUERY_TIMEOUT_S}];(" + "".join(parts) + ");out tags center;"
+
+
+def _matches_market(name: str, kind: str, market: str, *, known: bool) -> bool:
+    """Known-selector markets are already category-constrained by the query → accept. A
+    fallback market requires every market keyword to appear in the name or kind."""
+    if known:
+        return True
+    key = _market_key(market)
+    if not key:
+        return True
+    hay = f"{name} {kind}".lower()
+    return all(w in hay for w in key.split())
+
+
+def find_market_smbs(bbox: tuple[float, float, float, float], market: str,
+                     fetch: Fetch | None = None) -> list[dict]:
+    """Real OSM businesses in *bbox* matching the client-requested *market*, chains removed.
+    ANY market works: known ones use precise OSM selectors; unknown ones fall back to a
+    name/kind keyword match. Each: ``{name, kind, contact}``. Never fabricated."""
+    known = bool(market_selectors(market))
+    raw = (fetch or _http_fetch)(build_market_query(bbox, market))
+    data = json.loads(raw)
+    out: list[dict] = []
+    seen: set[str] = set()
+    for el in data.get("elements", []):
+        tags = el.get("tags") or {}
+        name = (tags.get("name") or "").strip()
+        if not name or is_national_chain(name):
+            continue
+        kind = tags.get("shop") or tags.get("craft") or tags.get("amenity") \
+            or tags.get("office") or tags.get("leisure") or tags.get("healthcare") or "business"
+        if not _matches_market(name, kind, market, known=known):
+            continue
+        if name.lower() in seen:
+            continue
+        seen.add(name.lower())
+        out.append(Lead(name=name, kind=kind, contact=_extract_contact(tags),
+                        source="osm").as_dict())
+    return out
+
+
+def scout_market(ledger, market: str, bbox: tuple[float, float, float, float] = COWETA_BBOX,
+                 region: str | None = None, fetch: Fetch | None = None) -> dict:
+    """Find SMBs in a client-requested *market* within *bbox* and record each (never-twice).
+    The region is market-tagged so dedup/reporting stay per-market-per-area.
+    Returns ``{found, new, market, region}``."""
+    found = find_market_smbs(bbox, market, fetch=fetch)
+    tagged = f"{region or market} [{_market_key(market)}]"
+    new = 0
+    for s in found:
+        if ledger.record_lead(s["name"], s["kind"], tagged, "osm", contact=s.get("contact")):
+            new += 1
+    log.info("leads scout_market %r: found=%d new=%d", market, len(found), new)
+    return {"found": len(found), "new": new, "market": market, "region": tagged}
+
+
+def bbox_around(lat: float, lon: float,
+                radius_km: float = 12.0) -> tuple[float, float, float, float]:
+    """A ``(south, west, north, east)`` box ~*radius_km* around a point (rough degrees, fine
+    for OSM). Longitude span widens with latitude so the box stays roughly square on the map."""
+    import math
+    dlat = radius_km / 111.0
+    dlon = radius_km / (111.0 * max(0.1, math.cos(math.radians(lat))))
+    return (lat - dlat, lon - dlon, lat + dlat, lon + dlon)
+
+
+def _default_geocoder(location: str):
+    from utah.product.route import geocode_osm
+    return geocode_osm(location)
+
+
+def scout_market_in(ledger, market: str, location: str, *, radius_km: float = 12.0,
+                    geocoder=None, fetch: Fetch | None = None) -> dict:
+    """End-to-end: geocode the client's *location* (anywhere in the US), search that area for
+    *market*, record leads. ``geocoder``/``fetch`` are injectable for offline tests. Honest on
+    a geocode miss (``found=0, geocoded=False``) — never fabricates a location."""
+    coord = (geocoder or _default_geocoder)(location)
+    if not coord:
+        log.warning("scout_market_in: could not geocode %r", location)
+        return {"found": 0, "new": 0, "market": market, "region": location, "geocoded": False}
+    bbox = bbox_around(coord[0], coord[1], radius_km)
+    res = scout_market(ledger, market, bbox=bbox, region=f"{market} — {location}", fetch=fetch)
+    res["geocoded"] = True
+    return res
+
+
+def scout_market_us(ledger, market: str, *, metros=None, radius_km: float = 15.0,
+                    fetch: Fetch | None = None) -> dict:
+    """Sweep a client-requested *market* across the ENTIRE United States — every metro in
+    :data:`US_METROS` (override via *metros*). Aggregates found/new across the country.
+    Returns ``{found, new, market, metros_scanned}``."""
+    targets = metros if metros is not None else US_METROS
+    found = new = 0
+    for name, lat, lon in targets:
+        res = scout_market(ledger, market, bbox=bbox_around(lat, lon, radius_km),
+                           region=f"{market} — {name}", fetch=fetch)
+        found += res["found"]
+        new += res["new"]
+    log.info("leads scout_market_us %r: metros=%d found=%d new=%d",
+             market, len(targets), found, new)
+    return {"found": found, "new": new, "market": market, "metros_scanned": len(targets)}
 
 
 # ── moving frontier (persistent cursor) ──────────────────────────────────────
