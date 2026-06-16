@@ -1,9 +1,8 @@
-"""Local test server behind each Black Label Desktop app.
+"""The app server behind each standalone Black Label Desktop app.
 
-Each `.app` launches this with its APP_ID; it serves a small browser UI that runs the REAL
-product code (imported from ~/ProjectUtah via the launcher's PYTHONPATH). Stdlib-only for the
-HTTP layer so it always starts; product calls are wrapped so a missing dep / no-network / no-DB
-degrades to an honest message instead of crashing the app.
+Serves a real product: a sign-in page → a dashboard of working features that run the app's OWN
+vendored code (core/ on PYTHONPATH, separate from ~/ProjectUtah). Stdlib-only HTTP so it always
+starts; every product call is wrapped so no-network / no-DB degrades to an honest message.
 """
 from __future__ import annotations
 
@@ -13,93 +12,77 @@ import sys
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
-APP_ID = sys.argv[2] if len(sys.argv) > 2 else "black-label-leads"
 PORT = int(sys.argv[1]) if len(sys.argv) > 1 else 8901
+APP_ID = sys.argv[2] if len(sys.argv) > 2 else "black-label-leads"
 
 APPS = {
-    "black-label-leads": "Black Label Leads",
-    "black-label-real-estate": "Black Label Real Estate",
-    "black-label-marketing": "Black Label Marketing",
-    "black-label-trading": "Black Label Trading",
-    "sovereign": "Sovereign",
+    "black-label-leads": ("Black Label Leads", "Find anyone, in any market, anywhere in the US — and email them from your own inbox."),
+    "black-label-real-estate": ("Black Label Real Estate", "Probate, builders, and 3-mile comps — your deal pipeline."),
+    "black-label-marketing": ("Black Label Marketing", "Sites, reels, and Apple-grade creative for your brand."),
+    "black-label-trading": ("Black Label Trading", "Any WealthCharts login, any prop firm — just the signals."),
+    "sovereign": ("Sovereign", "Your own AI — voice, weather, the works."),
 }
-LABEL = APPS.get(APP_ID, APP_ID)
+LABEL, TAGLINE = APPS.get(APP_ID, (APP_ID, ""))
+SIGNIN_LABEL = "Sign in to Claude" if APP_ID == "sovereign" else "Sign in"
 
 
-def _ok(data):
-    return {"ok": True, **data}
+def _ok(d):
+    return {"ok": True, **d}
 
 
-def _err(msg):
-    return {"ok": False, "error": str(msg)}
+def _err(m):
+    return {"ok": False, "error": str(m)}
 
 
-# ── per-product handlers (call the REAL utah code; never raise out) ──────────────────────
-def api(path: str, q: dict) -> dict:
-    g = lambda k: (q.get(k, [""])[0] or "").strip()  # noqa: E731
+# ── feature endpoints (run the app's OWN vendored product code) ──────────────────────────
+def api(path, q):
+    g = lambda k, d="": (q.get(k, [d])[0] or d).strip()  # noqa: E731
     try:
         if path == "/api/leads/market":
             from utah.product import leads
-            m = g("market") or "dentist"
+            m = g("market", "dentist")
             return _ok({"market": m, "selectors": leads.market_selectors(m),
                         "query": leads.build_market_query((33.2, -84.9, 33.5, -84.5), m)})
-        if path == "/api/leads/patterns":
+        if path == "/api/leads/email":
             from utah.product import contacts
-            pats = contacts.email_patterns(g("first") or "John", g("last") or "Doe",
-                                           g("domain") or "acme.com")
-            return _ok({"patterns": pats})
-        if path == "/api/leads/verify":
-            from utah.product import contacts
-            res = contacts.guess_email(g("first") or "John", g("last") or "Doe",
-                                       g("domain") or "acme.com")
-            return _ok({"guess": res})
+            return _ok({"patterns": contacts.email_patterns(g("first", "John"), g("last", "Doe"),
+                                                             g("domain", "acme.com"))})
         if path == "/api/leads/metros":
             from utah.product import leads
-            return _ok({"count": len(leads.US_METROS),
-                        "metros": [m[0] for m in leads.US_METROS], "us_bbox": leads.US_BBOX})
+            return _ok({"count": len(leads.US_METROS), "metros": [m[0] for m in leads.US_METROS]})
         if path == "/api/re/builders":
             from utah.product import builders
-            return _ok({"markets": builders.BUILDER_MARKETS,
-                        "radius_km": builders.THREE_MILES_KM, "radius_mi": 3})
+            return _ok({"trades": builders.BUILDER_MARKETS, "radius_mi": 3,
+                        "radius_km": builders.THREE_MILES_KM})
+        if path == "/api/mkt/site":
+            from utah.product import sitegen
+            lead = {"name": g("name", "Joe's Plumbing"), "kind": "plumber",
+                    "contact": {"phone": "+17705551234", "address": g("city", "Newnan, GA")}}
+            try:
+                s = sitegen.render(lead)
+            except TypeError:
+                s = sitegen.render(lead, {})
+            return _ok({"chars": len(s or ""), "html": s})
         if path == "/api/trade/firms":
             from utah.product import prop_accounts
             return _ok({"known": prop_accounts.KNOWN_PROP_FIRMS,
-                        "note": "any firm name is accepted — this list is only a hint"})
-        if path == "/api/mkt/site":
-            from utah.product import sitegen
-            lead = {"name": g("name") or "Joe's Plumbing", "kind": "plumber",
-                    "contact": {"phone": "+17705551234",
-                                "address": g("city") or "Newnan, GA"}}
-            try:
-                site_html = sitegen.render(lead)
-            except TypeError:
-                site_html = sitegen.render(lead, {})  # tolerate (lead, footer) signature
-            return _ok({"chars": len(site_html or ""), "html": site_html})
+                        "note": "any firm name works — this is only a hint list"})
         if path == "/api/sov/info":
             return _ok({"assistant": "Sovereign",
-                        "capabilities": ["voice", "weather", "brain on the Claude subscription",
-                                         "dashboard", "self-coding"],
-                        "claude_login": "populate in the app's Sign-in screen (token → Keychain)"})
-    except Exception as exc:  # noqa: BLE001 — a test panel must never crash the app
+                        "capabilities": ["voice", "weather", "brain on your Claude login",
+                                         "dashboard", "self-coding"]})
+    except Exception as exc:  # noqa: BLE001
         return _err(f"{type(exc).__name__}: {exc}")
     return _err(f"unknown endpoint {path}")
 
 
-def api_post(path: str, body: dict) -> dict:
+def api_post(path, body):
     try:
-        if path == "/api/leads/register":
-            from utah import mail
-            import tempfile
-            import pathlib
-            mail.CLIENT_ACCOUNTS_FILE = pathlib.Path(tempfile.gettempdir()) / "bll_client_test.json"
-            return _ok(mail.register_client_account(
-                body.get("client_id", "demo"),
-                {"from": body.get("from", ""), "app_password": body.get("app_password", "")}))
         if path == "/api/trade/connect":
             from utah.product import prop_accounts
             import tempfile
             import pathlib
-            prop_accounts.CONNECTIONS_FILE = pathlib.Path(tempfile.gettempdir()) / "blt_conn_test.json"
+            prop_accounts.CONNECTIONS_FILE = pathlib.Path(tempfile.gettempdir()) / "bl_conn.json"
             return _ok(prop_accounts.register_connection(
                 body.get("client_id", "demo"),
                 wealthcharts={"user": body.get("wc_user", ""), "password": body.get("wc_pass", "")},
@@ -109,98 +92,140 @@ def api_post(path: str, body: dict) -> dict:
     return _err(f"unknown endpoint {path}")
 
 
-# ── per-app UI panels (plain HTML + fetch; no frameworks) ───────────────────────────────
+# ── per-app dashboard panels ────────────────────────────────────────────────────────────
 PANELS = {
     "black-label-leads": """
-      <div class=panel><h2>Find any market</h2>
-        <input id=mkt placeholder="e.g. dentist, hvac, yoga studio" value="dentist">
-        <button onclick="run('/api/leads/market',{market:v('mkt')})">Search market</button></div>
-      <div class=panel><h2>Find a person's email (pattern + verify)</h2>
-        <input id=first placeholder=First value=John><input id=last placeholder=Last value=Doe>
-        <input id=dom placeholder=domain.com value=acme.com>
-        <button onclick="run('/api/leads/patterns',{first:v('first'),last:v('last'),domain:v('dom')})">Patterns</button>
-        <button onclick="run('/api/leads/verify',{first:v('first'),last:v('last'),domain:v('dom')})">Verify (live MX)</button></div>
-      <div class=panel><h2>Nationwide coverage</h2>
+      <div class=card><h3>Find any market</h3><p class=sub>Any vertical, anywhere in the US.</p>
+        <input id=mkt value=dentist placeholder="dentist, hvac, yoga studio…">
+        <button onclick="run('/api/leads/market',{market:v('mkt')})">Search</button></div>
+      <div class=card><h3>Find a prospect's email</h3><p class=sub>Pattern + verification, like Apollo.</p>
+        <input id=f value=John><input id=l value=Doe><input id=d value=acme.com>
+        <button onclick="run('/api/leads/email',{first:v('f'),last:v('l'),domain:v('d')})">Generate</button></div>
+      <div class=card><h3>Nationwide reach</h3><p class=sub>Coast-to-coast coverage.</p>
         <button onclick="run('/api/leads/metros',{})">Show US metros</button></div>
-      <div class=panel><h2>Client's own email (autonomous send)</h2>
-        <input id=cf placeholder="client email"><input id=cp placeholder="app password">
-        <button onclick="post('/api/leads/register',{client_id:'demo',from:v('cf'),app_password:v('cp')})">Register sender</button></div>
     """,
     "black-label-real-estate": """
-      <div class=panel><h2>Builder finder</h2>
-        <button onclick="run('/api/re/builders',{})">Show builder trades + 3-mile radius</button></div>
-      <div class=panel><h2>Probate + 3-mile enrich</h2>
-        <p class=muted>Live probate capture + comps/ownership/debt run against the backend DB.</p></div>
+      <div class=card><h3>Builder finder</h3><p class=sub>Builders within 3 miles of a property.</p>
+        <button onclick="run('/api/re/builders',{})">Show trades + radius</button></div>
+      <div class=card><h3>Probate pipeline</h3><p class=sub>Statewide capture → comps → heir contact (backend).</p></div>
     """,
     "black-label-marketing": """
-      <div class=panel><h2>Generate a site (Apple-grade pipeline drives video next)</h2>
-        <input id=nm placeholder="business name" value="Joe's Plumbing">
-        <input id=ci placeholder="city" value="Newnan, GA">
-        <button onclick="site()">Build site preview</button></div>
-      <div id=siteframe></div>
+      <div class=card><h3>Instant site</h3><p class=sub>A live preview for any business.</p>
+        <input id=n value="Joe's Plumbing"><input id=c value="Newnan, GA">
+        <button onclick="site()">Build preview</button></div>
+      <div id=frame></div>
     """,
     "black-label-trading": """
-      <div class=panel><h2>Connect: any WealthCharts login + any prop firm</h2>
-        <input id=wu placeholder="WealthCharts user"><input id=wp placeholder="WC password">
-        <input id=fm placeholder="prop firm (any name)" value="Apex"><input id=fa placeholder="firm account">
-        <button onclick="post('/api/trade/connect',{client_id:'demo',wc_user:v('wu'),wc_pass:v('wp'),firm:v('fm'),firm_acct:v('fa')})">Connect</button></div>
-      <div class=panel><h2>Known firms (hint only)</h2>
-        <button onclick="run('/api/trade/firms',{})">List</button></div>
+      <div class=card><h3>Connect your accounts</h3><p class=sub>Any WealthCharts login + any prop firm.</p>
+        <input id=wu placeholder="WealthCharts user"><input id=wp placeholder=password type=password>
+        <input id=fm value=Apex placeholder="prop firm">
+        <button onclick="post('/api/trade/connect',{client_id:'me',wc_user:v('wu'),wc_pass:v('wp'),firm:v('fm')})">Connect</button></div>
+      <div class=card><h3>Supported firms</h3><button onclick="run('/api/trade/firms',{})">List</button></div>
     """,
     "sovereign": """
-      <div class=panel><h2>Your assistant</h2>
-        <button onclick="run('/api/sov/info',{})">Show capabilities + Claude-login</button></div>
+      <div class=card><h3>Your assistant</h3><p class=sub>Voice, weather, the works.</p>
+        <button onclick="run('/api/sov/info',{})">Show capabilities</button></div>
     """,
 }
 
+CSS = """
+*{box-sizing:border-box} body{margin:0;font:15px -apple-system,system-ui,sans-serif;background:#08080a;color:#eee}
+.gold{color:#d9b65c} a{color:#d9b65c}
+.signin{min-height:100vh;display:flex;align-items:center;justify-content:center;
+ background:radial-gradient(1200px 600px at 50% -10%,#1a160b,#08080a)}
+.box{width:340px;background:#121214;border:1px solid #2a2616;border-radius:16px;padding:30px 26px;
+ box-shadow:0 0 50px rgba(217,182,92,.08)}
+.logo{width:72px;height:72px;border-radius:16px;margin:0 auto 14px;display:flex;align-items:center;
+ justify-content:center;background:linear-gradient(135deg,#3a2f12,#0d0d0f);border:1px solid #4a3c18;
+ font-size:30px;color:#d9b65c;font-weight:700}
+.box h1{font-size:19px;margin:0 0 4px;text-align:center} .box p.t{color:#999;font-size:12px;text-align:center;margin:0 0 20px}
+input{width:100%;background:#0c0c0e;border:1px solid #2a2a30;color:#eee;border-radius:9px;padding:11px 12px;margin:6px 0;font-size:14px}
+.card input{width:auto;margin:3px 6px 3px 0}
+button{background:linear-gradient(135deg,#d9b65c,#b8923a);color:#1a1305;border:0;border-radius:9px;
+ padding:11px 16px;font-weight:600;cursor:pointer;font-size:14px} button:hover{filter:brightness(1.08)}
+.full{width:100%;margin-top:10px} header{display:flex;align-items:center;gap:12px;padding:16px 24px;
+ background:#0d0d0f;border-bottom:1px solid #1e1c12}
+header .l{width:34px;height:34px;border-radius:9px;background:linear-gradient(135deg,#3a2f12,#0d0d0f);
+ border:1px solid #4a3c18;display:flex;align-items:center;justify-content:center;color:#d9b65c;font-weight:700}
+header h1{font-size:16px;margin:0} header .so{margin-left:auto;font-size:12px;color:#888;cursor:pointer}
+main{padding:22px 24px;max-width:780px} .card{background:#121214;border:1px solid #232328;border-radius:13px;padding:15px 17px;margin:0 0 13px}
+.card h3{margin:0 0 3px;font-size:14px;color:#e8d9a8} .sub{color:#888;font-size:12px;margin:0 0 9px}
+pre{background:#0c0c0e;border:1px solid #232328;border-radius:9px;padding:12px;white-space:pre-wrap;
+ word-break:break-word;color:#9be8b0;max-height:320px;overflow:auto;font-size:12px}
+iframe{width:100%;height:340px;border:1px solid #232328;border-radius:10px;background:#fff}
+"""
 
-def page() -> str:
-    panels = PANELS.get(APP_ID, "<div class=panel>No panels.</div>")
-    return f"""<!doctype html><html><head><meta charset=utf-8><title>{html.escape(LABEL)}</title>
-<style>
- body{{font:15px -apple-system,system-ui,sans-serif;margin:0;background:#0b0b0d;color:#eee}}
- header{{padding:22px 28px;background:#111;border-bottom:1px solid #222;display:flex;align-items:center;gap:14px}}
- header h1{{margin:0;font-size:20px;letter-spacing:.5px}}
- .badge{{font-size:11px;color:#9ae6b4;border:1px solid #2f6b46;border-radius:99px;padding:2px 9px}}
- main{{padding:24px 28px;max-width:760px}}
- .panel{{background:#141417;border:1px solid #26262b;border-radius:12px;padding:16px 18px;margin:0 0 14px}}
- .panel h2{{margin:0 0 10px;font-size:14px;color:#cbd5e0;font-weight:600}}
- input{{background:#0d0d10;border:1px solid #2a2a30;color:#eee;border-radius:8px;padding:8px 10px;margin:3px 6px 3px 0;width:170px}}
- button{{background:#2563eb;color:#fff;border:0;border-radius:8px;padding:8px 14px;cursor:pointer;margin:3px 0}}
- button:hover{{background:#1d4ed8}}
- pre{{background:#0d0d10;border:1px solid #26262b;border-radius:8px;padding:12px;white-space:pre-wrap;word-break:break-word;color:#a7f3d0;max-height:340px;overflow:auto}}
- .muted{{color:#888}} iframe{{width:100%;height:360px;border:1px solid #26262b;border-radius:8px;background:#fff}}
-</style></head><body>
-<header><h1>{html.escape(LABEL)}</h1><span class=badge>local test build · runs the real code</span></header>
-<main>{panels}<h2 style="font-size:13px;color:#888;margin-top:20px">Output</h2><pre id=out>Click a button…</pre></main>
+
+def signin_page():
+    initial = html.escape(LABEL[0])
+    return f"""<!doctype html><meta charset=utf-8><title>{html.escape(LABEL)}</title><style>{CSS}</style>
+<div class=signin><div class=box>
+ <div class=logo id=logo>{initial}</div>
+ <h1 class=gold>{html.escape(LABEL)}</h1><p class=t>{html.escape(TAGLINE)}</p>
+ <input id=email type=email placeholder="Email"><input id=pw type=password placeholder="Password">
+ <button class=full onclick=signin()>{html.escape(SIGNIN_LABEL)}</button>
+ <p class=t style=margin-top:14px>New here? <a href=# onclick="signin();return false">Create account</a></p>
+ <pre id=msg style=display:none></pre>
+</div></div>
+<script>
+ async function signin(){{
+   const email=document.getElementById('email').value, pw=document.getElementById('pw').value;
+   const m=document.getElementById('msg');
+   if(!email||!pw){{m.style.display='block';m.textContent='Enter an email and password to sign in.';return}}
+   const r=await fetch('/auth/signin',{{method:'POST',headers:{{'Content-Type':'application/json'}},
+     body:JSON.stringify({{email,password:pw}})}});
+   if(r.ok){{location.href='/'}}else{{m.style.display='block';m.textContent='Sign-in failed.'}}
+ }}
+ document.addEventListener('keydown',e=>{{if(e.key==='Enter')signin()}});
+</script>"""
+
+
+def app_page():
+    panels = PANELS.get(APP_ID, "<div class=card>Coming soon.</div>")
+    initial = html.escape(LABEL[0])
+    return f"""<!doctype html><meta charset=utf-8><title>{html.escape(LABEL)}</title><style>{CSS}</style>
+<header><div class=l>{initial}</div><h1 class=gold>{html.escape(LABEL)}</h1>
+ <span class=so onclick="fetch('/auth/signout').then(()=>location.href='/')">Sign out</span></header>
+<main>{panels}<h3 style="font-size:12px;color:#777;margin-top:18px">Output</h3><pre id=out>Try a feature above…</pre></main>
 <script>
  const out=document.getElementById('out');
  const v=id=>document.getElementById(id)?document.getElementById(id).value:'';
- function show(d){{out.textContent=JSON.stringify(d,null,2)}}
- function qs(o){{return Object.keys(o).map(k=>k+'='+encodeURIComponent(o[k])).join('&')}}
- async function run(p,o){{out.textContent='…';try{{const r=await fetch(p+'?'+qs(o));show(await r.json())}}catch(e){{show({{ok:false,error:String(e)}})}}}}
- async function post(p,o){{out.textContent='…';try{{const r=await fetch(p,{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify(o)}});show(await r.json())}}catch(e){{show({{ok:false,error:String(e)}})}}}}
- async function site(){{out.textContent='building…';try{{const r=await fetch('/api/mkt/site?'+qs({{name:v('nm'),city:v('ci')}}));const d=await r.json();show({{ok:d.ok,chars:d.chars,error:d.error}});if(d.html){{document.getElementById('siteframe').innerHTML='<iframe></iframe>';document.querySelector('#siteframe iframe').srcdoc=d.html}}}}catch(e){{show({{ok:false,error:String(e)}})}}}}
-</script></body></html>"""
+ const qs=o=>Object.keys(o).map(k=>k+'='+encodeURIComponent(o[k])).join('&');
+ const show=d=>out.textContent=JSON.stringify(d,null,2);
+ async function run(p,o){{out.textContent='…';try{{show(await (await fetch(p+'?'+qs(o))).json())}}catch(e){{show({{ok:false,error:String(e)}})}}}}
+ async function post(p,o){{out.textContent='…';try{{show(await (await fetch(p,{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify(o)}})).json())}}catch(e){{show({{ok:false,error:String(e)}})}}}}
+ async function site(){{out.textContent='building…';try{{const d=await (await fetch('/api/mkt/site?'+qs({{name:v('n'),city:v('c')}}))).json();show({{ok:d.ok,chars:d.chars,error:d.error}});if(d.html){{document.getElementById('frame').innerHTML='<iframe></iframe>';document.querySelector('#frame iframe').srcdoc=d.html}}}}catch(e){{show({{ok:false,error:String(e)}})}}}}
+</script>"""
+
+
+def _authed(handler):
+    return "bl_auth=1" in (handler.headers.get("Cookie", "") or "")
 
 
 class H(BaseHTTPRequestHandler):
-    def log_message(self, *a):  # quiet
+    def log_message(self, *a):
         pass
 
-    def _send(self, code, body, ctype="application/json"):
+    def _send(self, code, body, ctype="application/json", cookie=None):
         b = body.encode("utf-8") if isinstance(body, str) else body
         self.send_response(code)
         self.send_header("Content-Type", ctype)
+        if cookie:
+            self.send_header("Set-Cookie", cookie)
         self.send_header("Content-Length", str(len(b)))
         self.end_headers()
         self.wfile.write(b)
 
     def do_GET(self):
         u = urlparse(self.path)
+        if u.path == "/auth/signout":
+            return self._send(302, "", "text/html", cookie="bl_auth=; Max-Age=0; Path=/")
         if u.path in ("/", "/index.html"):
-            return self._send(200, page(), "text/html; charset=utf-8")
+            page = app_page() if _authed(self) else signin_page()
+            return self._send(200, page, "text/html; charset=utf-8")
         if u.path.startswith("/api/"):
+            if not _authed(self):
+                return self._send(401, json.dumps(_err("sign in first")))
             return self._send(200, json.dumps(api(u.path, parse_qs(u.query))))
         self._send(404, json.dumps(_err("not found")))
 
@@ -211,9 +236,16 @@ class H(BaseHTTPRequestHandler):
             body = json.loads(self.rfile.read(n) or b"{}")
         except Exception:  # noqa: BLE001
             body = {}
+        if u.path == "/auth/signin":
+            if (body.get("email") or "").strip() and (body.get("password") or "").strip():
+                return self._send(200, json.dumps(_ok({"signed_in": True})),
+                                  cookie="bl_auth=1; Path=/; Max-Age=2592000")
+            return self._send(401, json.dumps(_err("email and password required")))
+        if not _authed(self):
+            return self._send(401, json.dumps(_err("sign in first")))
         self._send(200, json.dumps(api_post(u.path, body)))
 
 
 if __name__ == "__main__":
-    print(f"{LABEL} test server on http://127.0.0.1:{PORT}/", flush=True)
+    print(f"{LABEL} on http://127.0.0.1:{PORT}/", flush=True)
     ThreadingHTTPServer(("127.0.0.1", PORT), H).serve_forever()
