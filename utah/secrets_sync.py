@@ -15,8 +15,10 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 import shutil
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -72,9 +74,37 @@ def _load_json(path: Path) -> dict:
 
 
 def _save_json(path: Path, data: dict) -> None:
+    """ATOMIC, non-destructive write of a secret file. Two protections against the
+    'creds keep getting overwritten/lost' failure: (1) a crash mid-write can never
+    truncate a live secret — content is written to a temp sibling, fsync'd, then
+    ``os.replace``d (atomic on POSIX); (2) an existing-but-UNPARSEABLE file is moved to
+    ``<name>.bad`` before being replaced, so a corrupt-but-recoverable original is kept
+    rather than silently clobbered by a partial merge."""
     path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-    path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
-    path.chmod(0o600)
+    if path.exists() and path.stat().st_size > 0:
+        try:
+            json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):          # JSONDecodeError is a ValueError
+            try:
+                path.replace(path.with_suffix(path.suffix + ".bad"))
+                log.warning("secrets_sync: kept corrupt %s as %s.bad before rewrite",
+                            path.name, path.name)
+            except OSError:
+                pass
+    fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix=f".{path.name}.", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(json.dumps(data, indent=2) + "\n")
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.chmod(tmp, 0o600)
+        os.replace(tmp, path)                  # atomic swap; readers see old-or-new, never partial
+    finally:
+        if os.path.exists(tmp):
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
 
 
 def _parse_yaml_kv(path: Path) -> dict[str, str]:
@@ -201,9 +231,8 @@ def sync_google(*, write: bool = True) -> dict[str, Any]:
     """Seed google.json OAuth client from Ace config when absent."""
     if GOOGLE.exists() and _load_json(GOOGLE).get("refresh_token"):
         return {"updated": [], "skipped": "google.json already has refresh_token"}
-    ace = _parse_yaml_kv(OAUTH_CFG) if OAUTH_CFG.is_file() else {}
     # config.yaml nests under google_oauth — parse crudely from raw file
-    client_id = client_secret = ""
+    client_id = client_secret = ""  # nosec B105 — empty init, not a credential
     try:
         raw = OAUTH_CFG.read_text(encoding="utf-8")
         m = re.search(r'client_id:\s*"?([^"\n]+)"?', raw)

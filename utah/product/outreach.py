@@ -107,6 +107,14 @@ def _subject_variant(name: str, has_name: bool) -> str:
     return templates[idx]
 
 
+def _lead_preview_url(lead: dict) -> str:
+    """The published preview URL that sitegen merged onto the lead (``contact.site``), or
+    '' when none/insecure. This is the personalized sample site we link the prospect to."""
+    site = (lead.get("contact") or {}).get("site") or {}
+    url = str(site.get("preview_url") or "").strip()
+    return url if url.startswith("https://") else ""
+
+
 def compose(lead: dict, campaign: str, footer: dict | None = None) -> dict:
     """Michael's real CAN-SPAM-compliant cold pitch for a no-website SMB. His copy,
     his price ($700 vs the ~$1,700 norm), his contact — personalized to the business
@@ -117,18 +125,38 @@ def compose(lead: dict, campaign: str, footer: dict | None = None) -> dict:
     name = (lead.get("name") or "there").strip()
     has_name = bool(name) and name != "there"
     greeting = f"Hello {name}," if has_name else "Hello,"
-    subject = _subject_variant(name, has_name)
     hook = _relevance_hook(lead.get("kind"))
+    # The conversion unlock: when the per-lead preview is published, lead with THEIR
+    # finished sample ("here's your site — make it yours from the page") instead of the
+    # weak "reply and I'll maybe build something". Gated on config.previews_live() so we
+    # never ship a dead link before the host is up (same honest doctrine as every paid lane).
+    preview = _lead_preview_url(lead) if config.previews_live() else ""
+    if preview:
+        subject = (f"I built {name} a website — take a look" if has_name
+                   else "I built you a website — take a look")
+        pitch = (
+            f"I went ahead and built {name if has_name else 'you'} a sample website already "
+            f"— here it is:\n{preview}\n\n"
+            "It's personalized to your business. If it's close, you can make it yours and get "
+            "it live right from that page — around $700, less than half the ~$1,700 norm. "
+            f"{hook}. Tell me any changes (calendar, Google Maps, pricing automations) and "
+            "it's done within a day.\n\n"
+        )
+    else:
+        subject = _subject_variant(name, has_name)
+        pitch = (
+            "An average website costs around $1,700, which is absurd. I aim for around $700. "
+            f"{hook}. It pays for itself quickly.\n\n"
+            "I'll show you what it will look like before you buy, so you know it's to your "
+            "standard. I could put a sample website together for you, and you could tell me "
+            "what customizations you'd like — calendar integrations, Google Maps, and pricing "
+            "automations are all easy, and this can be done within a day.\n\n"
+            f"You can see examples of my work at {BUSINESS_SITE}.\n\n"
+        )
     body = (
         f"{greeting}\n\n"
         "My name is Michael Barber — I build websites for small businesses.\n\n"
-        "An average website costs around $1,700, which is absurd. I aim for around $700. "
-        f"{hook}. It pays for itself quickly.\n\n"
-        "I'll show you what it will look like before you buy, so you know it's to your "
-        "standard. I could put a sample website together for you, and you could tell me "
-        "what customizations you'd like — calendar integrations, Google Maps, and pricing "
-        "automations are all easy, and this can be done within a day.\n\n"
-        f"You can see examples of my work at {BUSINESS_SITE}.\n\n"
+        f"{pitch}"
         "Let me know if you're interested.\n\n"
         "Best regards,\n"
         "Michael Barber\n"
@@ -302,7 +330,7 @@ def queue(ledger, campaign: str, leads: list[dict], footer: dict | None = None,
                 "blocked": 0, "sent": 0,
                 "gated": "probate leads use probate_motivated pipeline, not SMB outreach"}
     if campaign == SMB_OUTREACH_CAMPAIGN:
-        leads = [l for l in leads if _is_smb_lead(l)]
+        leads = [ld for ld in leads if _is_smb_lead(ld)]
     sender = send_fn or mail.send
     # Deliverability gate: only ever send to an address that can actually RECEIVE mail.
     # An unverified guess that hard-bounces is precisely what blacklists the sending domain,
@@ -517,7 +545,7 @@ def run_scheduled(campaign: str = DEFAULT_CAMPAIGN, limit: int = DAILY_OUTREACH,
 
     if ch == "sms":
         candidates = ledger.uncontacted_phone_leads(campaign, max(limit * 4, limit))
-        leads = [l for l in candidates if _is_phone_prospect(l)][:limit]
+        leads = [ld for ld in candidates if _is_phone_prospect(ld)][:limit]
         if not leads:
             return {"campaign": campaign, "channel": "sms", "sent": 0, "queued": 0,
                     "reason": "no phone SMB prospects (chains filtered)"}
@@ -526,7 +554,7 @@ def run_scheduled(campaign: str = DEFAULT_CAMPAIGN, limit: int = DAILY_OUTREACH,
         result["channel"] = "sms"
     elif ch == "email":
         candidates = ledger.uncontacted_email_leads(campaign, max(limit * 4, limit))
-        leads = [l for l in candidates if _is_emailable_prospect(l)][:limit]
+        leads = [ld for ld in candidates if _is_emailable_prospect(ld)][:limit]
         if not leads:
             # No early return: follow-ups below must still run — an exhausted cold
             # pool is exactly when the due day-3/day-7 nudges are the day's sends.
@@ -567,18 +595,18 @@ def _run_auto(ledger, campaign: str, limit: int, send_fn, *, verify_fn=None) -> 
     email_budget = 0 if mail_exhausted else min(limit, mail.sends_remaining())
 
     email_cand = ledger.uncontacted_email_leads(campaign, max(limit * 4, limit))
-    email_leads = [l for l in email_cand if _is_emailable_prospect(l)][:email_budget]
-    seen_ids = {l.get("id") for l in email_leads if l.get("id") is not None}
+    email_leads = [ld for ld in email_cand if _is_emailable_prospect(ld)][:email_budget]
+    seen_ids = {ld.get("id") for ld in email_leads if ld.get("id") is not None}
 
     remaining = limit - len(email_leads)
     phone_leads: list[dict] = []
     if remaining > 0:
         phone_cand = ledger.uncontacted_phone_leads(campaign, max(remaining * 4, remaining))
-        for l in phone_cand:
-            if l.get("id") is not None and l.get("id") in seen_ids:
+        for cand in phone_cand:
+            if cand.get("id") is not None and cand.get("id") in seen_ids:
                 continue
-            if _is_phone_prospect(l):
-                phone_leads.append(l)
+            if _is_phone_prospect(cand):
+                phone_leads.append(cand)
             if len(phone_leads) >= remaining:
                 break
 

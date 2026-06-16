@@ -411,20 +411,25 @@ def run_scheduled(limit: int = 50, *, ledger=None, lead_fetch=None, find_fn=None
         log.warning("enrich run_scheduled: lead fetch failed: %s", exc)
         return {"scanned": 0, "enriched": 0, "failed": 0,
                 "error": f"lead fetch failed: {exc}"}
-    enriched = scanned = failed = 0
+    enriched = scanned = failed = generated = 0
     for lead in leads:
         scanned += 1
         try:
-            result = enrich_lead(ledger, lead, find_fn=find_fn)
+            # enrich_and_generate (not enrich_lead): find the email AND build + record the
+            # personalized preview, so the lead row carries contact.site.preview_url that the
+            # outreach pitch links to. The site is built same-hour, ready for the send cron.
+            result = enrich_and_generate(ledger, lead, find_fn=find_fn)
         except Exception as exc:  # noqa: BLE001 — one bad lead must not kill the batch
             failed += 1
             log.warning("enrich failed for %r: %s", lead.get("name"), exc)
             continue
         if result.get("email"):
             enriched += 1
-    log.info("enrich run_scheduled: scanned=%d enriched=%d failed=%d",
-             scanned, enriched, failed)
-    return {"scanned": scanned, "enriched": enriched, "failed": failed}
+        if (result.get("site") or {}).get("written"):
+            generated += 1
+    log.info("enrich run_scheduled: scanned=%d enriched=%d generated=%d failed=%d",
+             scanned, enriched, generated, failed)
+    return {"scanned": scanned, "enriched": enriched, "generated": generated, "failed": failed}
 
 
 __all__ = ["extract_emails", "best_email", "domain_resolves", "domain_accepts_mail",

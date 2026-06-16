@@ -126,6 +126,17 @@ CREATE TABLE IF NOT EXISTS trade_lore (
   ts_recorded timestamptz NOT NULL DEFAULT now(),
   UNIQUE (engine, ts, kind)                    -- one-time migration is re-runnable
 );
+CREATE TABLE IF NOT EXISTS sales (
+  id bigserial PRIMARY KEY,
+  stripe_id text NOT NULL,                      -- Stripe charge/checkout-session id (source of truth)
+  product text NOT NULL DEFAULT '',             -- product/SKU name from Stripe, best-effort
+  customer text NOT NULL DEFAULT '',            -- buyer email / Stripe customer id
+  amount_cents bigint NOT NULL DEFAULT 0,       -- net amount captured, in the currency's minor unit
+  currency text NOT NULL DEFAULT 'usd',
+  status text NOT NULL DEFAULT 'paid',          -- paid | refunded
+  ts timestamptz NOT NULL DEFAULT now(),        -- sale COMPLETION time (Stripe's created) — the gate windows on this
+  UNIQUE (stripe_id)                            -- a Stripe sale is recorded once, ever — the never-twice money row
+);
 """
 
 
@@ -767,6 +778,27 @@ class Ledger:
             self._emit("marketer", {"channel": channel, "subject": subject, "id": row[0]})
         return bool(row)
 
+    def record_sale(self, stripe_id, *, product="", customer="", amount_cents=0,
+                    currency="usd", status="paid", completed_at=None) -> bool:
+        """Record one real Stripe sale; True if NEW (False = already mirrored on a prior
+        sync). Idempotent on ``stripe_id`` — the source of truth is Stripe, so re-syncing
+        the same charge is a no-op. This is THE money row: the first time one lands,
+        :func:`utah.revenue_heal.outcome_gate` flips green. ``completed_at`` preserves
+        Stripe's completion time (the gate windows on ``ts``); None -> now()."""
+        with self._conn() as c:
+            row = c.execute(
+                "INSERT INTO sales (stripe_id, product, customer, amount_cents, currency, "
+                "status, ts) VALUES (%s,%s,%s,%s,%s,%s, COALESCE(%s, now())) "
+                "ON CONFLICT (stripe_id) DO NOTHING RETURNING id",
+                (stripe_id, product, customer, int(amount_cents), currency, status,
+                 completed_at),
+            ).fetchone()
+        if row:
+            self._emit("sales", {"stripe_id": stripe_id, "product": product,
+                                 "amount_cents": int(amount_cents), "currency": currency,
+                                 "customer": customer, "id": row[0]})
+        return bool(row)
+
     def record_sync(self, source, kind="ingest", rows_in=0, cursor=None,
                     status="ok", detail=None) -> int:
         """Append one ingestion-run row (resumable cursor + counts). Returns the row id.
@@ -786,7 +818,7 @@ class Ledger:
             return {
                 t: c.execute(f"SELECT count(*) FROM {t}").fetchone()[0]
                 for t in ("leads", "probate", "outreach_ledger", "fires",
-                          "mail_ledger", "marketer_posts", "sync_log")
+                          "mail_ledger", "marketer_posts", "sync_log", "sales")
             }
 
     #: deck panel domain -> (table, explicit columns). Explicit columns keep the
@@ -811,6 +843,10 @@ class Ledger:
                      "id, channel, subject, status, post_id, to_char(ts,'YYYY-MM-DD HH24:MI') ts"),
         "sync": ("sync_log",
                  "id, source, kind, rows_in, status, to_char(ts,'YYYY-MM-DD HH24:MI') ts"),
+        "sales": ("sales",
+                  "id, stripe_id, product, customer, "
+                  "(amount_cents::float8/100) amount, currency, status, "
+                  "to_char(ts,'YYYY-MM-DD HH24:MI') ts"),
     }
 
     def recent(self, domain: str, limit: int = 50) -> list[dict]:

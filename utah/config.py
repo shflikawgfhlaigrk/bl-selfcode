@@ -98,6 +98,39 @@ def canspam_configured() -> bool:
     return _canspam_is_complete(canspam_address())
 
 
+def checkout_url() -> str:
+    """Stripe Payment Link (or storefront checkout) for the $700 site — ``UTAH_CHECKOUT_URL``
+    env, then ``business.json`` ``checkout_url``. Empty when unset: the preview then falls
+    back to the contact CTA (no fake 'Buy' button — honest gating, same as every paid lane).
+    The actual checkout/charge stays on Michael's Stripe; Utah only links to it."""
+    env = os.environ.get("UTAH_CHECKOUT_URL", "").strip()
+    if env.startswith("https://"):
+        return env
+    try:
+        data = json.loads(BUSINESS_CREDS.read_text(encoding="utf-8"))
+        url = (data.get("checkout_url") or "").strip()
+        if url.startswith("https://"):
+            return url
+    except (OSError, json.JSONDecodeError, TypeError, AttributeError):
+        pass
+    return ""
+
+
+def previews_live() -> bool:
+    """True only when per-lead site previews are actually published and reachable — the
+    cold email may then link the prospect straight to THEIR sample site. Gated so the pitch
+    never ships a dead preview link before the host (previews.blacklabelbots.com) is up:
+    ``UTAH_PREVIEWS_LIVE=1`` env, or ``previews_live: true`` in business.json. Flip this on
+    the moment the preview host is live (tonight) and every email starts carrying the link."""
+    if os.environ.get("UTAH_PREVIEWS_LIVE", "").strip().lower() in ("1", "true", "yes"):
+        return True
+    try:
+        data = json.loads(BUSINESS_CREDS.read_text(encoding="utf-8"))
+        return bool(data.get("previews_live"))
+    except (OSError, json.JSONDecodeError, TypeError, AttributeError):
+        return False
+
+
 # --- Outreach cadence doctrine (Michael, 2026-06-09) ------------------------
 #: Structural no-fabrication proof (audit TIER3): after the brain answers, verify each
 #: salient numeric claim traces to a span in the CONTEXT. ADVISORY by default (records an
