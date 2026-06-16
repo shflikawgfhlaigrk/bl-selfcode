@@ -201,5 +201,63 @@ def discover_contacts(company: str, website: str, *, fetch_html=None, verify_fn=
     return find_contacts(company, domain, people, verify_fn=verify_fn)
 
 
+# ── persistent contact DB (the owned, deduped asset — Apollo's real moat) ────────────────
+_CONTACT_SCHEMA = """
+CREATE TABLE IF NOT EXISTS contacts (
+  id BIGSERIAL PRIMARY KEY,
+  name TEXT NOT NULL,
+  title TEXT,
+  company TEXT,
+  domain TEXT NOT NULL,
+  email TEXT,
+  confidence TEXT,
+  source TEXT,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  UNIQUE (name, domain)
+);
+"""
+
+
+class ContactStore:
+    """The owned contact database: discovered + verified people persist here and dedupe on
+    ``(name, domain)``, so it compounds into an asset we own instead of a per-seat rental. The
+    connection factory is injectable so the logic is unit-tested without a live Postgres."""
+
+    def __init__(self, conn_factory=None):
+        self._cf = conn_factory
+
+    def _conn(self):
+        if self._cf is not None:
+            return self._cf()
+        import psycopg
+
+        from utah import config
+        return psycopg.connect(config.DB_DSN, autocommit=True, connect_timeout=8)
+
+    def ensure_schema(self) -> None:
+        with self._conn() as c:
+            c.execute(_CONTACT_SCHEMA)
+
+    def record_contact(self, contact: dict) -> bool:
+        """Insert one contact; True if new, False if ``(name, domain)`` already stored.
+        Never-twice — the same person at the same company is stored once."""
+        with self._conn() as c:
+            row = c.execute(
+                "INSERT INTO contacts (name,title,company,domain,email,confidence,source) "
+                "VALUES (%s,%s,%s,%s,%s,%s,%s) "
+                "ON CONFLICT (name,domain) DO NOTHING RETURNING id",
+                (contact.get("name"), contact.get("title"), contact.get("company"),
+                 contact.get("domain"), contact.get("email"), contact.get("confidence"),
+                 contact.get("source", "pattern")),
+            ).fetchone()
+        return bool(row)
+
+    def save_all(self, contacts: list[dict]) -> dict:
+        """Persist a batch; returns ``{saved, new}`` (new = how many weren't already stored)."""
+        new = sum(1 for c in contacts if self.record_contact(c))
+        return {"saved": len(contacts), "new": new}
+
+
 __all__ = ["email_patterns", "guess_email", "find_contacts",
-           "extract_people", "team_page_urls", "discover_people", "discover_contacts"]
+           "extract_people", "team_page_urls", "discover_people", "discover_contacts",
+           "ContactStore"]
