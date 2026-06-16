@@ -1,5 +1,8 @@
 # Trading  ·  branch-off app
 
+**Dashboard /goal label:** `Black Label Trading`  ·  **app id:** `black-label-trading`  ·  logo: one per app id
+
+
 > COPY for branch-off. Source of truth = `~/ProjectUtah/utah/product/` + `utah/`.
 
 ## Spec (what the app must do)

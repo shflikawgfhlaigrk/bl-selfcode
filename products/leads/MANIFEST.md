@@ -1,5 +1,8 @@
 # Leads — "Black Label Leads" (outreach)  ·  branch-off app
 
+**Dashboard /goal label:** `Black Label Leads`  ·  **app id:** `black-label-leads`  ·  logo: one per app id
+
+
 > COPY for branch-off. Source of truth = `~/ProjectUtah/utah/product/` + `utah/`. Editing here does not touch the live system.
 
 ## Spec (what the app must do)

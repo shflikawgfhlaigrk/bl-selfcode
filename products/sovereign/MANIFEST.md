@@ -1,5 +1,8 @@
 # Sovereign — the full assistant  ·  branch-off app
 
+**Dashboard /goal label:** `Sovereign`  ·  **app id:** `sovereign`  ·  logo: one per app id
+
+
 > COPY for branch-off. Source of truth = `~/ProjectUtah/utah/` (+ the separate `~/sovereign-live` build).
 
 ## Spec (what the app must do)

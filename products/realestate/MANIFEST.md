@@ -1,5 +1,8 @@
 # Real Estate  ·  branch-off app
 
+**Dashboard /goal label:** `Black Label Real Estate`  ·  **app id:** `black-label-real-estate`  ·  logo: one per app id
+
+
 > COPY for branch-off. Source of truth = `~/ProjectUtah/utah/product/` + `utah/`.
 
 ## Spec (what the app must do)

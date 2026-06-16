@@ -1,5 +1,8 @@
 # Marketing  ·  branch-off app
 
+**Dashboard /goal label:** `Black Label Marketing`  ·  **app id:** `black-label-marketing`  ·  logo: one per app id
+
+
 > COPY for branch-off. Source of truth = `~/ProjectUtah/utah/product/` + `utah/`.
 
 ## Spec (what the app must do)

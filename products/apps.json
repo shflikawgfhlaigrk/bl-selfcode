@@ -1,0 +1,53 @@
+{
+  "_comment": "Dashboard /goal labels for the 5 branch-off apps. Each app = a labeled product area backed by real, live Utah code. Logos: one per `id`.",
+  "generated_for": "Apple submission",
+  "source_of_truth": "~/ProjectUtah/utah/ (copies live in products/<area>/)",
+  "git_branch": "claude/product-areas",
+  "apps": [
+    {
+      "id": "black-label-leads",
+      "label": "Black Label Leads",
+      "area": "products/leads",
+      "tagline": "Outreach for any market — your email, sending for you.",
+      "files": 7,
+      "loc": 2474,
+      "status": "live-backed"
+    },
+    {
+      "id": "black-label-real-estate",
+      "label": "Black Label Real Estate",
+      "area": "products/realestate",
+      "tagline": "Probate + builders + 3-mile radius, all running.",
+      "files": 5,
+      "loc": 1754,
+      "status": "live-backed"
+    },
+    {
+      "id": "black-label-marketing",
+      "label": "Black Label Marketing",
+      "area": "products/marketing",
+      "tagline": "Apple-grade imagery and video for your brand.",
+      "files": 4,
+      "loc": 740,
+      "status": "live-backed"
+    },
+    {
+      "id": "black-label-trading",
+      "label": "Black Label Trading",
+      "area": "products/trading",
+      "tagline": "Any WealthCharts login, any prop firm — just the signals.",
+      "files": 10,
+      "loc": 2739,
+      "status": "live-backed"
+    },
+    {
+      "id": "sovereign",
+      "label": "Sovereign",
+      "area": "products/sovereign",
+      "tagline": "Your own assistant — voice, weather, you name it.",
+      "files": 26,
+      "loc": 5601,
+      "status": "live-backed"
+    }
+  ]
+}
