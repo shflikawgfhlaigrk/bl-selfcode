@@ -461,6 +461,15 @@ def run() -> None:
     # supervisor); it resets the moment real audio returns.
     _reopen_evt = threading.Event()
     reopen_state = {"count": 0}
+    # Post-speech mic rebuild: Ace's own TTS plays through the speakers via afplay, which
+    # reconfigures CoreAudio and WEDGES this loop's PortAudio input — the stream then
+    # delivers stale/garbage audio (non-zero, so the deaf-clock never trips) and the wake
+    # never fires again. That is the "works once, then stops" failure. After every spoken
+    # turn we set this so the main loop rebuilds the input stream (HAL terminate+initialize
+    # + fresh RawInputStream) — a clean re-bind to the live mic — WITHOUT counting against
+    # the wedge circuit-breaker (it is expected, not a fault).
+    _clean_reopen = threading.Event()
+    _spoke = {"v": False}
     vstate = {"status": "starting", "listening": False, "speaking": False,
               "segments": 0, "last_transcript": None, "last_wake": None}
     armed_until = 0.0
@@ -642,6 +651,7 @@ def run() -> None:
                     # very next loud frame from Michael can cut Ace off cleanly.
                     _barge_det.reset()
                     barge_evt.clear()
+                    _spoke["v"] = True   # this turn played TTS → rebuild the mic after it
                     vstate.update(status="speaking", speaking=True, listening=False)
                     state.write(**vstate)
 
@@ -720,6 +730,13 @@ def run() -> None:
                             pass
                         level["last_loud"] = time.monotonic()
                         processing.clear()
+                        if _spoke["v"]:
+                            # Ace just spoke (afplay) → the CoreAudio input is now likely
+                            # wedged. Rebuild the stream before the next turn so the wake
+                            # keeps firing. Expected recovery: do NOT count it as a wedge.
+                            _spoke["v"] = False
+                            reopen_state["count"] = 0
+                            _clean_reopen.set()
 
                 _collecting = False
                 _collect_frames: list[bytes] = []
@@ -734,6 +751,14 @@ def run() -> None:
                 if not _BARGE_AUTO:
                     log.info("voice loop: auto barge OFF — use deck BARGE button to interrupt")
                 while True:
+                    # Post-speech rebuild: Ace just spoke (afplay reconfigured CoreAudio).
+                    # Reopen the input stream so the wake keeps firing next turn — the core
+                    # fix for "works once, then stops". Not a fault, so no count/warn.
+                    if _clean_reopen.is_set():
+                        _clean_reopen.clear()
+                        log.info("voice: post-speech mic rebuild (afplay reconfigured "
+                                 "CoreAudio — re-binding the input stream)")
+                        break
                     # Self-heal: the monitor flagged sustained device-zeros — break out so
                     # the outer loop reopens a fresh RawInputStream (re-binds the live default
                     # device). Cheap recovery, no process restart, no model/brain cold-start.
