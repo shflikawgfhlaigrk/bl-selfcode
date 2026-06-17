@@ -47,6 +47,20 @@ MIC_SILENT_COOLDOWN_S = 1800.0  # 30 min
 MIC_INPUT_FLOOR = int(os.environ.get("UTAH_MIC_INPUT_FLOOR", "80"))
 MIC_INPUT_TARGET = int(os.environ.get("UTAH_MIC_INPUT_TARGET", "85"))
 
+# ── In-process mic-stream self-heal (the restart-storm fix) ───────────────────
+# A WEDGED CoreAudio handle (device switch on display sleep / BT connect, another
+# app grabbing the input, App-Nap starvation) keeps delivering zero-filled buffers —
+# PortAudio NEVER raises, so the ``with sd.RawInputStream`` block can't exit on its
+# own. The old design's only recovery was the supervisor killing+respawning the whole
+# app (~60-75 s deaf + a full oww/Whisper/Piper/brain cold-start EVERY episode). That
+# is what made voice feel broken. Instead the loop now REOPENS the stream in-process
+# when the device has been raw-zero this long — a fresh stream re-binds to the live
+# default device in ~100 ms with zero cold-start. The supervisor restart stays as the
+# last-resort recovery after MAX_INPROCESS_REOPENS attempts fail to bring audio back.
+# Set UTAH_VOICE_STREAM_REOPEN_S=0 to disable and fall back to restart-only behavior.
+STREAM_REOPEN_AFTER_S = float(os.environ.get("UTAH_VOICE_STREAM_REOPEN_S", "8.0"))
+MAX_INPROCESS_REOPENS = int(os.environ.get("UTAH_VOICE_MAX_REOPENS", "3"))
+
 # ── Gated AGC ───────────────────────────────────────────────────────────────
 # Measured on Michael's built-in mic: real commands arrive QUIET and erratic — most
 # frames score below the Silero speech cutoff, so only the loudest syllable registers
@@ -282,6 +296,79 @@ def _empty_wake_cooling(now: float, last_empty_at: float, cooldown: float) -> bo
     return cooldown > 0 and last_empty_at > 0 and (now - last_empty_at) < cooldown
 
 
+def _should_reopen_stream(quiet_for_s: float, reopen_after_s: float,
+                          reopen_count: int, max_reopens: int) -> bool:
+    """Decide whether to reopen the mic stream IN-PROCESS (pure, unit-tested).
+
+    True when the device has delivered raw zeros longer than *reopen_after_s* AND we
+    still have in-process attempts left. A wedged CoreAudio handle never raises, so the
+    loop can't detect this except by the silence clock; reopening re-binds to the live
+    default device cheaply. Once *reopen_count* hits *max_reopens* without recovery we
+    stop and let the deaf heartbeat reach the supervisor, whose kill+respawn is the
+    correct heavier recovery for a mic another process is holding. *reopen_after_s* <= 0
+    disables the in-process path entirely (restart-only fallback)."""
+    if reopen_after_s <= 0:
+        return False
+    if reopen_count >= max_reopens:
+        return False
+    return quiet_for_s > reopen_after_s
+
+
+#: The signed voice bundle's id — its user-defaults domain for the App Nap opt-out.
+_VOICE_BUNDLE_ID = "com.utah.voice"
+
+
+def _set_app_nap_default() -> bool:
+    """Disable App Nap for the voice bundle via its USER DEFAULTS (read at launch),
+    which needs NO change to the signed bundle. The bundle is adhoc-signed, so its TCC
+    designated requirement is cdhash-only; rebuilding it to add the Info.plist key would
+    change the cdhash and orphan the mic grant (deaf under launchd). Writing
+    ``NSAppSleepDisabled`` into the bundle's preference domain opts the process out of
+    App Nap with zero TCC risk. Best-effort and takes effect on the NEXT voice launch.
+    Returns True on a clean write."""
+    import subprocess
+
+    try:
+        r = subprocess.run(
+            ["defaults", "write", _VOICE_BUNDLE_ID, "NSAppSleepDisabled", "-bool", "true"],
+            capture_output=True, timeout=5,
+        )
+        return r.returncode == 0
+    except Exception as exc:  # noqa: BLE001 — App Nap mitigation must never block startup
+        log.debug("voice: could not set NSAppSleepDisabled default: %s", exc)
+        return False
+
+
+def _disable_app_nap():
+    """Keep macOS App Nap from throttling the backgrounded (LSUIElement) voice app and
+    starving the CoreAudio callback into delivering zeros — a cause of the mic_silent/
+    restart-storm class. Two best-effort layers, neither of which rebuilds the bundle:
+
+    1. A runtime ``NSProcessInfo`` activity assertion (immediate, this process) when
+       Foundation/pyobjc is importable — held for the loop's life via the returned token.
+    2. The ``NSAppSleepDisabled`` user default (persists for the next launch) — the
+       reliable path on this machine, where pyobjc is absent.
+
+    The in-process stream reopen is the cause-agnostic safety net if App Nap (or a device
+    switch) still zeroes the mic. Returns the activity token (keep referenced) or None."""
+    _USER_INITIATED = 0x00FFFFFF     # keeps the app out of App Nap
+    _LATENCY_CRITICAL = 0xFF00000000  # ask the scheduler to honor the realtime audio thread
+    token = None
+    try:
+        from Foundation import NSProcessInfo
+
+        token = NSProcessInfo.processInfo().beginActivityWithOptions_reason_(
+            _USER_INITIATED | _LATENCY_CRITICAL, "Utah always-on voice (no App Nap)")
+        log.info("voice: App Nap disabled via NSProcessInfo activity assertion")
+    except Exception as exc:  # noqa: BLE001 — the user-defaults path below is the fallback
+        log.debug("voice: runtime App Nap assertion unavailable (%s) — using user default",
+                  exc)
+    if _set_app_nap_default():
+        log.info("voice: NSAppSleepDisabled set for %s (App Nap off next launch)",
+                 _VOICE_BUNDLE_ID)
+    return token
+
+
 def _needs_input_bump(current: int, floor: int) -> bool:
     """True when the macOS mic input volume is below the floor and the floor is
     active. A failed read (current < 0) or a disabled floor (<= 0) never acts."""
@@ -329,6 +416,7 @@ def run() -> None:
     from utah import config, failures
 
     _ensure_input_volume()   # floor the mic input level before arming (signal-level fix)
+    _nap_token = _disable_app_nap()   # keep macOS from napping us deaf (held for loop life)
     wake_det = oww.get_oww()
     audio_wake_ok = wake_det is not None
     if audio_wake_ok:
@@ -354,6 +442,14 @@ def run() -> None:
     # healthy-but-quiet device from a dead one (2026-06-09 investigation).
     liveness = MicLiveness(threshold=TRUE_SILENCE, alert_after_s=SILENCE_ALERT_S,
                            cooldown_s=MIC_SILENT_COOLDOWN_S)
+    # In-process stream reopen (restart-storm fix): the monitor thread raises this event
+    # when the device has been raw-zero past STREAM_REOPEN_AFTER_S; the main loop breaks
+    # the RawInputStream so the outer loop reopens it — recovering a wedged CoreAudio
+    # handle in ~100 ms instead of via a full supervisor kill+respawn. ``count`` bounds
+    # the attempts (after MAX_INPROCESS_REOPENS the deaf heartbeat escalates to the
+    # supervisor); it resets the moment real audio returns.
+    _reopen_evt = threading.Event()
+    reopen_state = {"count": 0}
     vstate = {"status": "starting", "listening": False, "speaking": False,
               "segments": 0, "last_transcript": None, "last_wake": None}
     armed_until = 0.0
@@ -414,6 +510,14 @@ def run() -> None:
             vstate["deaf"] = quiet_for > SILENCE_ALERT_S
             vstate["mic_quiet_s"] = round(quiet_for, 1)
             state.write(**vstate)
+            # Self-heal FIRST: reopen the stream in-process well before the supervisor's
+            # 75 s restart fires. Real audio returning resets the attempt budget; an
+            # exhausted budget lets the deaf heartbeat above escalate to the supervisor.
+            if quiet_for <= STREAM_REOPEN_AFTER_S:
+                reopen_state["count"] = 0
+            elif _should_reopen_stream(quiet_for, STREAM_REOPEN_AFTER_S,
+                                       reopen_state["count"], MAX_INPROCESS_REOPENS):
+                _reopen_evt.set()
             for ev in liveness.poll():
                 if ev["event"] == "recovered":
                     # Episode DURATION is the diagnosis discriminator: seconds = playback/
@@ -603,7 +707,24 @@ def run() -> None:
                 if not _BARGE_AUTO:
                     log.info("voice loop: auto barge OFF — use deck BARGE button to interrupt")
                 while True:
-                    frame = q.get()
+                    # Self-heal: the monitor flagged sustained device-zeros — break out so
+                    # the outer loop reopens a fresh RawInputStream (re-binds the live default
+                    # device). Cheap recovery, no process restart, no model/brain cold-start.
+                    if _reopen_evt.is_set():
+                        _reopen_evt.clear()
+                        reopen_state["count"] += 1
+                        log.warning(
+                            "voice: mic deaf %.0fs — reopening audio stream in-process "
+                            "(attempt %d/%d, no process restart)",
+                            liveness.quiet_for_s, reopen_state["count"], MAX_INPROCESS_REOPENS,
+                        )
+                        break
+                    # Timeout so the reopen flag is honored even if the callback stops being
+                    # called entirely (a truly frozen handle delivers no frames, not zeros).
+                    try:
+                        frame = q.get(timeout=1.0)
+                    except queue.Empty:
+                        continue
                     if consume_button_barge():
                         barge_evt.set()
                         _button_barge_arm = True
