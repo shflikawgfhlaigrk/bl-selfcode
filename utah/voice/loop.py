@@ -14,6 +14,7 @@ Resilience: bad turns and transient mic errors are logged; the loop never fast-e
 """
 from __future__ import annotations
 
+import collections
 import logging
 import os
 import tempfile
@@ -96,7 +97,17 @@ _FORCE_CAPTURE = os.environ.get("UTAH_VOICE_FORCE_CAPTURE", "1") == "1"
 _FORCE_CAPTURE_S = float(os.environ.get("UTAH_VOICE_FORCE_CAPTURE_S", "5.5"))
 # Pause after the wake hit before recording the command — without this the 4s window
 # starts on "hey ace" itself and Whisper often sees only silence → transcript=''.
+# NOTE: ignored when pre-roll is on (the default) — see _FORCE_CAPTURE_PREROLL_S.
 _FORCE_CAPTURE_DELAY_S = float(os.environ.get("UTAH_VOICE_FORCE_CAPTURE_DELAY", "0.5"))
+# Pre-roll: ALWAYS keep the last N frames of mic audio and, on a wake hit, SEED the
+# command capture with them — so the question is kept whether Michael pauses after
+# "hey ace" or says "hey ace what time is it" in one breath. The old post-wake delay
+# only worked for the paused case: a one-breath question started (and often finished)
+# inside the discarded 0.5s window → Whisper saw silence → transcript='' ("stops at
+# ace, not the whole question"). Pre-roll captures from BEFORE the wake forward, so
+# either cadence works. 0 disables (falls back to the post-wake-delay behaviour).
+_FORCE_CAPTURE_PREROLL_S = float(os.environ.get("UTAH_VOICE_FORCE_CAPTURE_PREROLL", "1.2"))
+_PREROLL_FRAMES = max(0, round(_FORCE_CAPTURE_PREROLL_S * SAMPLE_RATE / FRAME))
 #: Wake-storm guard: a wake hit only counts within this window of genuinely LOUD
 #: audio. 2026-06-10: openWakeWord fired ~3×/s on near-silent frames (AGC-amplified
 #: hiss, rms ≈0.001) — 174 hits/min, each arming a capture + a Whisper pass, and the
@@ -704,6 +715,10 @@ def run() -> None:
                 _collect_deadline = 0.0
                 _last_loud_at = 0.0
                 _button_barge_arm = False
+                # Rolling pre-roll of the most recent frames (audio leading up to + during
+                # the wake word). Seeds the command capture so a one-breath question isn't
+                # lost to the post-wake delay. maxlen>=1 so deque() is always valid.
+                _preroll: collections.deque = collections.deque(maxlen=max(1, _PREROLL_FRAMES))
                 if not _BARGE_AUTO:
                     log.info("voice loop: auto barge OFF — use deck BARGE button to interrupt")
                 while True:
@@ -725,6 +740,7 @@ def run() -> None:
                         frame = q.get(timeout=1.0)
                     except queue.Empty:
                         continue
+                    _preroll.append(frame)   # keep the rolling pre-roll fresh every frame
                     if consume_button_barge():
                         barge_evt.set()
                         _button_barge_arm = True
@@ -768,14 +784,29 @@ def run() -> None:
                             _on_audio_wake(hit.confidence)
                             if _FORCE_CAPTURE and not _collecting:
                                 _collecting = True
-                                _collect_frames = []
-                                _collect_start = time.monotonic() + _FORCE_CAPTURE_DELAY_S
-                                _collect_deadline = _collect_start + _FORCE_CAPTURE_S
-                                log.info(
-                                    "voice: force-capture %.1fs after %.1fs pause (Whisper, VAD-bypass)",
-                                    _FORCE_CAPTURE_S,
-                                    _FORCE_CAPTURE_DELAY_S,
-                                )
+                                if _PREROLL_FRAMES > 0:
+                                    # Seed with the audio captured BEFORE/DURING "hey ace"
+                                    # and start collecting forward NOW — the question right
+                                    # after the wake is kept regardless of pause/cadence.
+                                    _collect_frames = list(_preroll)
+                                    _collect_start = time.monotonic()
+                                    _collect_deadline = _collect_start + _FORCE_CAPTURE_S
+                                    log.info(
+                                        "voice: force-capture %.1fs + %.1fs pre-roll "
+                                        "(Whisper, VAD-bypass)",
+                                        _FORCE_CAPTURE_S,
+                                        len(_collect_frames) * FRAME / SAMPLE_RATE,
+                                    )
+                                else:
+                                    _collect_frames = []
+                                    _collect_start = time.monotonic() + _FORCE_CAPTURE_DELAY_S
+                                    _collect_deadline = _collect_start + _FORCE_CAPTURE_S
+                                    log.info(
+                                        "voice: force-capture %.1fs after %.1fs pause "
+                                        "(Whisper, VAD-bypass)",
+                                        _FORCE_CAPTURE_S,
+                                        _FORCE_CAPTURE_DELAY_S,
+                                    )
 
                     if _FORCE_CAPTURE:
                         # VAD-bypass path: collect a fixed window after the wake, then
