@@ -332,6 +332,13 @@
   .micbtn.live{color:var(--ok);border-color:#1c3a28;box-shadow:0 0 12px var(--okglow)}
   .micbtn.barge{color:var(--err);border-color:#3a1714;background:#160a09;box-shadow:0 0 14px rgba(255,90,80,.25);cursor:pointer;font-size:8px;letter-spacing:1.5px;font-weight:700;font-family:inherit;line-height:1.1;text-align:center;padding:4px}
   .micbtn.barge:hover{background:#220c0a}
+  /* always-visible STOP — kill Ace's voice instantly (rambling / wrong answer) */
+  .stopvoice{flex:none;height:38px;padding:0 14px;border-radius:9px;border:1px solid #5a1b16;
+    background:#1c0c0a;color:#ff5a50;font-weight:800;font-size:11px;letter-spacing:2px;
+    font-family:inherit;cursor:pointer;box-shadow:0 0 12px rgba(255,90,80,.18)}
+  .stopvoice:hover{background:#2a1110;box-shadow:0 0 16px rgba(255,90,80,.35)}
+  .stopvoice:active{transform:scale(.96)}
+  .stopvoice.fired{background:#ff5a50;color:#1c0c0a}
   .cmd input{flex:1;background:var(--panel);border:1px solid var(--line);color:var(--txt);padding:11px 14px;border-radius:9px;font:inherit}
   .cmd input:focus{outline:0;border-color:var(--gold);box-shadow:0 0 0 1px var(--goldglow)}
   .cmd button.send{background:linear-gradient(180deg,var(--gold2),var(--gold));border:0;color:#1a1407;padding:0 24px;height:38px;border-radius:9px;font-weight:700;cursor:pointer;letter-spacing:1px}
@@ -661,6 +668,8 @@
     </div>
     <div class="cmd">
       <div class="micbtn" id="mic" title="voice loop">🎙</div>
+      <button class="stopvoice" id="stopvoice" title="STOP — kill Ace's voice this instant"
+              onclick="stopVoice()">STOP</button>
       <input id="q" placeholder="Issue a command to UTAH…  (real reasoning · streamed thinking · no fabrication)"/>
       <button class="send" onclick="ask()">SEND</button>
     </div>
@@ -838,6 +847,8 @@ async function poll(){
   mic.title = speaking ? "BARGE — stop Ace and listen (no wake word needed)" : "voice loop — say “ace” to wake";
   mic.style.cursor = speaking ? "pointer" : "default";
   mic.onclick = speaking ? ()=>fetch("/api/voice/barge",{method:"POST"}).catch(()=>{}) : null;
+  /* the dedicated STOP button glows brighter while Ace is actually talking */
+  const sv=$("stopvoice"); if(sv) sv.style.opacity = speaking ? "1" : ".72";
 
   if(!up){
     $("spine").innerHTML=emptyBox("CORE OFFLINE");
@@ -1286,6 +1297,13 @@ function termSend(q){
    suite-gated), /findings lists the browser-agent ideas, /do runs one, /ask the grounded
    brain. Output persists across the 2.5s background poll; the shell is built once. */
 let _conOut=[], _conInit=false, _conJobPoll=null, _conSeen=0; const CON_MAX=400;
+/* STOP — kill Ace's voice this instant (machine-wide), no wake word needed */
+async function stopVoice(){
+  const b=$("stopvoice");
+  if(b){ b.classList.add("fired"); b.textContent="STOPPED"; }
+  try{ await fetch("/api/speak/stop",{method:"POST"}); }catch(_){ }
+  setTimeout(()=>{ if(b){ b.classList.remove("fired"); b.textContent="STOP"; } }, 900);
+}
 function conScroll(){ const o=$("con-out"); if(o) o.scrollTop=o.scrollHeight; }
 function conLine(kind,text){ return `<div class="cl ${kind}">${esc(text)}</div>`; }
 function conPrint(kind,text){
