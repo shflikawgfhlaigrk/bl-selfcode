@@ -108,6 +108,18 @@ _FORCE_CAPTURE_DELAY_S = float(os.environ.get("UTAH_VOICE_FORCE_CAPTURE_DELAY", 
 # either cadence works. 0 disables (falls back to the post-wake-delay behaviour).
 _FORCE_CAPTURE_PREROLL_S = float(os.environ.get("UTAH_VOICE_FORCE_CAPTURE_PREROLL", "1.2"))
 _PREROLL_FRAMES = max(0, round(_FORCE_CAPTURE_PREROLL_S * SAMPLE_RATE / FRAME))
+# Dynamic capture end: a FIXED window chops a long or paused question ("do you have
+# any reac-" — cut mid-word). Instead, keep recording until Michael actually STOPS —
+# a sustained pause — bounded by a hard max so it can't run forever. Energy-based, not
+# Silero (the noisy built-in mic defeats Silero's spectral model; that is why force-
+# capture exists at all). A frame at/above _CAPTURE_SPEECH_RMS resets the silence
+# clock; once it has been quiet for _CAPTURE_END_SILENCE_S (and past _CAPTURE_MIN_S)
+# we stop — OR at _CAPTURE_MAX_S regardless. A mid-question pause shorter than
+# _CAPTURE_END_SILENCE_S never ends the turn, so thinking-pauses don't truncate it.
+_CAPTURE_MAX_S = float(os.environ.get("UTAH_VOICE_CAPTURE_MAX_S", "15.0"))
+_CAPTURE_END_SILENCE_S = float(os.environ.get("UTAH_VOICE_CAPTURE_END_SILENCE_S", "1.5"))
+_CAPTURE_MIN_S = float(os.environ.get("UTAH_VOICE_CAPTURE_MIN_S", "1.2"))
+_CAPTURE_SPEECH_RMS = float(os.environ.get("UTAH_VOICE_CAPTURE_SPEECH_RMS", "0.02"))
 #: Wake-storm guard: a wake hit only counts within this window of genuinely LOUD
 #: audio. 2026-06-10: openWakeWord fired ~3×/s on near-silent frames (AGC-amplified
 #: hiss, rms ≈0.001) — 174 hits/min, each arming a capture + a Whisper pass, and the
@@ -741,7 +753,8 @@ def run() -> None:
                 _collecting = False
                 _collect_frames: list[bytes] = []
                 _collect_start = 0.0
-                _collect_deadline = 0.0
+                _collect_deadline = 0.0     # hard max (end of capture no matter what)
+                _last_speech_at = 0.0       # last frame with speech-level energy
                 _last_loud_at = 0.0
                 _button_barge_arm = False
                 # Rolling pre-roll of the most recent frames (audio leading up to + during
@@ -755,6 +768,12 @@ def run() -> None:
                     # Reopen the input stream so the wake keeps firing next turn — the core
                     # fix for "works once, then stops". Not a fault, so no count/warn.
                     if _clean_reopen.is_set():
+                        # Wait for Ace's OWN playback to fully finish first — reopening the
+                        # input while afplay is still playing just re-wedges it (the cause
+                        # of the intermittent "broke after the 2nd question"). Bounded.
+                        _w0 = time.monotonic()
+                        while tts.is_anything_playing() and time.monotonic() - _w0 < 25.0:
+                            time.sleep(0.1)
                         _clean_reopen.clear()
                         log.info("voice: post-speech mic rebuild (afplay reconfigured "
                                  "CoreAudio — re-binding the input stream)")
@@ -795,9 +814,10 @@ def run() -> None:
                             _collecting = True
                             _collect_frames = []
                             _collect_start = time.monotonic()   # no delay: he is mid-word
-                            _collect_deadline = _collect_start + _BARGE_CAPTURE_S
-                            log.info("voice: barge capture %.1fs (Whisper, VAD-bypass)",
-                                     _BARGE_CAPTURE_S)
+                            _collect_deadline = _collect_start + _CAPTURE_MAX_S
+                            _last_speech_at = _collect_start
+                            log.info("voice: barge capture (dynamic end, max %.1fs)",
+                                     _CAPTURE_MAX_S)
                         elif _button_barge_arm:
                             log.info("voice: button barge — listening (say ace or speak command)")
                     if wake_det is not None:
@@ -827,34 +847,38 @@ def run() -> None:
                                     # after the wake is kept regardless of pause/cadence.
                                     _collect_frames = list(_preroll)
                                     _collect_start = time.monotonic()
-                                    _collect_deadline = _collect_start + _FORCE_CAPTURE_S
-                                    log.info(
-                                        "voice: force-capture %.1fs + %.1fs pre-roll "
-                                        "(Whisper, VAD-bypass)",
-                                        _FORCE_CAPTURE_S,
-                                        len(_collect_frames) * FRAME / SAMPLE_RATE,
-                                    )
                                 else:
                                     _collect_frames = []
                                     _collect_start = time.monotonic() + _FORCE_CAPTURE_DELAY_S
-                                    _collect_deadline = _collect_start + _FORCE_CAPTURE_S
-                                    log.info(
-                                        "voice: force-capture %.1fs after %.1fs pause "
-                                        "(Whisper, VAD-bypass)",
-                                        _FORCE_CAPTURE_S,
-                                        _FORCE_CAPTURE_DELAY_S,
-                                    )
+                                _collect_deadline = _collect_start + _CAPTURE_MAX_S
+                                _last_speech_at = _collect_start
+                                log.info(
+                                    "voice: capture armed (dynamic end on %.1fs pause, "
+                                    "max %.1fs, %.1fs pre-roll)",
+                                    _CAPTURE_END_SILENCE_S, _CAPTURE_MAX_S,
+                                    len(_collect_frames) * FRAME / SAMPLE_RATE,
+                                )
 
                     if _FORCE_CAPTURE:
-                        # VAD-bypass path: collect a fixed window after the wake, then
-                        # hand it straight to Whisper (robust to the noisy built-in mic).
+                        # VAD-bypass path: collect until Michael STOPS (sustained pause)
+                        # or the hard max — never a fixed window that chops a long/paused
+                        # question. Hand the whole thing to Whisper (noise-robust).
                         if _collecting:
-                            if time.monotonic() >= _collect_start:
+                            now = time.monotonic()
+                            if now >= _collect_start:
                                 _collect_frames.append(frame)
-                            if time.monotonic() >= _collect_deadline:
+                                if _rms(frame) >= _CAPTURE_SPEECH_RMS:
+                                    _last_speech_at = now      # still talking → keep going
+                            elapsed = now - _collect_start
+                            silence = now - _last_speech_at
+                            ended_on_pause = (elapsed >= _CAPTURE_MIN_S
+                                              and silence >= _CAPTURE_END_SILENCE_S)
+                            if ended_on_pause or now >= _collect_deadline:
                                 _collecting = False
                                 armed_until = 0.0
                                 _barge = _button_barge_arm
+                                log.info("voice: captured %.1fs (ended on %s)", elapsed,
+                                         "pause" if ended_on_pause else "max")
                                 _process_segment(
                                     b"".join(_collect_frames),
                                     segment_armed=True,
