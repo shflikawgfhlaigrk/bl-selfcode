@@ -120,6 +120,12 @@ _CAPTURE_MAX_S = float(os.environ.get("UTAH_VOICE_CAPTURE_MAX_S", "15.0"))
 _CAPTURE_END_SILENCE_S = float(os.environ.get("UTAH_VOICE_CAPTURE_END_SILENCE_S", "1.5"))
 _CAPTURE_MIN_S = float(os.environ.get("UTAH_VOICE_CAPTURE_MIN_S", "1.2"))
 _CAPTURE_SPEECH_RMS = float(os.environ.get("UTAH_VOICE_CAPTURE_SPEECH_RMS", "0.02"))
+# Stale-buffer wedge detector. A WEDGED CoreAudio handle (e.g. after Ace's TTS) keeps
+# delivering the SAME frozen buffer — non-zero, so the zero-based deaf clock misses it,
+# and the wake never fires ("works then stops"). A live mic NEVER repeats a frame
+# byte-for-byte (there is always dither/noise), so N identical non-silent frames in a
+# row is a reliable wedge signal → force a hard reopen. ~40 frames ≈ 1.3 s at 32 ms.
+_STALE_FRAMES = int(os.environ.get("UTAH_VOICE_STALE_FRAMES", "40"))
 #: Wake-storm guard: a wake hit only counts within this window of genuinely LOUD
 #: audio. 2026-06-10: openWakeWord fired ~3×/s on near-silent frames (AGC-amplified
 #: hiss, rms ≈0.001) — 174 hits/min, each arming a capture + a Whisper pass, and the
@@ -619,20 +625,23 @@ def run() -> None:
 
     detector = vad.get_vad()
     fail_n = 0
+    # HARD PortAudio reset (terminate+initialize) re-binds a WEDGED CoreAudio HAL, but it
+    # STRESSES coreaudiod — doing it on EVERY turn made macOS fail stream-start with
+    # PaError -9986 after ~5-10 reopens ("breaks by the 5th question"). So it is now
+    # CONDITIONAL: only when recovering from a real wedge (deaf clock). The routine
+    # post-speech reopen just closes+reopens the stream — the device is already settled
+    # (we waited for afplay to finish), so a fresh stream binds clean with no HAL reset.
+    _hard_reinit = {"v": True}   # first open does one clean reset; then only on a wedge
     while True:
         try:
-            # Rebuild PortAudio's CoreAudio HAL before (re)opening the input stream. A bare
-            # open INHERITS a wedged HAL: when another audio client reconfigures CoreAudio
-            # (afplay/output playback, Ace's own TTS, a device switch/hotplug), PortAudio's
-            # cached HAL keeps delivering silence/garbage to this loop while avfoundation
-            # clients still read the mic fine — the "hears nothing, deaf:false, mic_quiet_s:0"
-            # wedge that no restart fixed. terminate()+initialize() forces a clean re-bind to
-            # the live default device. Best-effort; must never crash the loop.
-            try:
-                sd._terminate()
-                sd._initialize()
-            except Exception as _pa_exc:  # noqa: BLE001 — recovery is best-effort
-                log.debug("voice: PortAudio HAL reinit skipped: %s", _pa_exc)
+            if _hard_reinit["v"]:
+                time.sleep(0.4)   # let coreaudiod settle before the heavy reset (avoids -9986)
+                try:
+                    sd._terminate()
+                    sd._initialize()
+                except Exception as _pa_exc:  # noqa: BLE001 — recovery is best-effort
+                    log.debug("voice: PortAudio HAL reinit skipped: %s", _pa_exc)
+                _hard_reinit["v"] = False
             with sd.RawInputStream(samplerate=SAMPLE_RATE, blocksize=FRAME,
                                    channels=CHANNELS, dtype="int16", callback=_cb):
                 fail_n = 0
@@ -757,6 +766,8 @@ def run() -> None:
                 _last_speech_at = 0.0       # last frame with speech-level energy
                 _last_loud_at = 0.0
                 _button_barge_arm = False
+                _prev_frame = b""           # for the stale-buffer (frozen mic) detector
+                _stale_count = 0
                 # Rolling pre-roll of the most recent frames (audio leading up to + during
                 # the wake word). Seeds the command capture so a one-breath question isn't
                 # lost to the post-wake delay. maxlen>=1 so deque() is always valid.
@@ -784,6 +795,7 @@ def run() -> None:
                     if _reopen_evt.is_set():
                         _reopen_evt.clear()
                         reopen_state["count"] += 1
+                        _hard_reinit["v"] = True   # a REAL wedge → do the heavy HAL reset
                         log.warning(
                             "voice: mic deaf %.0fs — reopening audio stream in-process "
                             "(attempt %d/%d, no process restart)",
@@ -797,6 +809,19 @@ def run() -> None:
                     except queue.Empty:
                         continue
                     _preroll.append(frame)   # keep the rolling pre-roll fresh every frame
+                    # Stale-buffer wedge: a frozen CoreAudio handle repeats one non-silent
+                    # buffer forever (deaf clock misses it). Identical frames in a row →
+                    # force a hard reopen so the next turn hears again.
+                    if frame == _prev_frame and _rms(frame) > TRUE_SILENCE * 8:
+                        _stale_count += 1
+                        if _stale_count >= _STALE_FRAMES:
+                            log.warning("voice: stale mic buffer (%d identical frames) — "
+                                        "forcing hard reopen", _stale_count)
+                            _stale_count = 0
+                            _reopen_evt.set()
+                    else:
+                        _stale_count = 0
+                    _prev_frame = frame
                     if consume_button_barge():
                         barge_evt.set()
                         _button_barge_arm = True
