@@ -600,6 +600,18 @@ def run() -> None:
     fail_n = 0
     while True:
         try:
+            # Rebuild PortAudio's CoreAudio HAL before (re)opening the input stream. A bare
+            # open INHERITS a wedged HAL: when another audio client reconfigures CoreAudio
+            # (afplay/output playback, Ace's own TTS, a device switch/hotplug), PortAudio's
+            # cached HAL keeps delivering silence/garbage to this loop while avfoundation
+            # clients still read the mic fine — the "hears nothing, deaf:false, mic_quiet_s:0"
+            # wedge that no restart fixed. terminate()+initialize() forces a clean re-bind to
+            # the live default device. Best-effort; must never crash the loop.
+            try:
+                sd._terminate()
+                sd._initialize()
+            except Exception as _pa_exc:  # noqa: BLE001 — recovery is best-effort
+                log.debug("voice: PortAudio HAL reinit skipped: %s", _pa_exc)
             with sd.RawInputStream(samplerate=SAMPLE_RATE, blocksize=FRAME,
                                    channels=CHANNELS, dtype="int16", callback=_cb):
                 fail_n = 0
