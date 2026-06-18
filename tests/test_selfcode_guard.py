@@ -88,6 +88,12 @@ def test_safety_core_set_is_the_documented_paths():
         "utah/daemon/lifecycle.py",
         "utah/daemon/governor.py",
         "tests/conftest.py",   # the shared autouse pollution guards (the gate's harness)
+        # the deck surface — off-limits to selfcode (a bad UI edit silently breaks the deck)
+        "utah/interface/web.py",
+        "utah/interface/static/live.html",
+        "utah/interface/static/terminal.html",
+        "utah/interface/static/truth.html",
+        "utah/interface/static/route.html",
     }
 
 
