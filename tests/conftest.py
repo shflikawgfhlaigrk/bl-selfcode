@@ -42,6 +42,27 @@ def _local_down(*_a, **_k):
     raise local_mod.LocalUnavailable("local lane disabled in tests")
 
 
+def pytest_terminal_summary(terminalreporter, exitstatus, config):
+    """Always emit a single, machine-greppable audit line of the green/red totals.
+
+    The suite runs with ``addopts = "-q"``; under ``-q`` in a non-TTY pipe pytest's own
+    ``N passed`` summary line is suppressed when more than one test file is collected,
+    which made green totals unauditable (you saw only dots). This hook restores an
+    unconditional, parser-friendly line — ``UTAH-TEST-SUMMARY passed=.. failed=..`` — so
+    CI logs and the proof ledger can read the count without depending on pytest's
+    verbosity/TTY heuristics. Counts come straight from the reporter's own tallies."""
+    stats = terminalreporter.stats
+    n = lambda k: len(stats.get(k, []))  # noqa: E731
+    passed, failed, error = n("passed"), n("failed"), n("error")
+    skipped, xfailed, xpassed = n("skipped"), n("xfailed"), n("xpassed")
+    line = (
+        f"UTAH-TEST-SUMMARY passed={passed} failed={failed} error={error} "
+        f"skipped={skipped} xfailed={xfailed} xpassed={xpassed} exit={exitstatus}"
+    )
+    # write_sep gives it a visible banner even amid -q dot output; it always prints.
+    terminalreporter.write_sep("=", line, green=(failed == 0 and error == 0))
+
+
 @pytest.fixture(autouse=True)
 def _restore_boundaries():
     """Restore all injectable boundaries after every test. Also pin a fake failure

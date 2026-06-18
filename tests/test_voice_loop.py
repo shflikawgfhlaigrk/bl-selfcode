@@ -3,7 +3,9 @@
 PCM->WAV writer (what STT consumes) and the RMS meter (deaf-mic detection)."""
 from __future__ import annotations
 
+import importlib.util
 import wave
+from pathlib import Path
 
 import numpy as np
 
@@ -80,6 +82,8 @@ def test_should_reopen_stream_decision_locks_the_restart_storm_fix():
                                       reopen_count=4, max_reopens=3) is False  # over the cap, never loop forever
     assert loop._should_reopen_stream(quiet_for_s=999.0, reopen_after_s=0.0,
                                       reopen_count=0, max_reopens=3) is False  # disabled → restart-only fallback
+    assert loop._should_reopen_stream(quiet_for_s=999.0, reopen_after_s=-1.0,
+                                      reopen_count=0, max_reopens=3) is False  # negative window also disables
     # boundary: exactly at the threshold is NOT yet a wedge (strictly greater)
     assert loop._should_reopen_stream(quiet_for_s=8.0, reopen_after_s=8.0,
                                       reopen_count=0, max_reopens=3) is False
@@ -122,3 +126,64 @@ def test_app_nap_optout_targets_the_voice_bundle_defaults_domain(monkeypatch):
 
     monkeypatch.setattr(subprocess, "run", _boom)
     assert loop._set_app_nap_default() is False       # never propagates an exception into startup
+
+
+# ---------------------------------------------------------------------------
+# LIVE IMPORT-PATH LOCK
+# ---------------------------------------------------------------------------
+# The "no reload needed / wake word can't silently regress" guarantee rests on a
+# single fact: the live UtahVoice.app is spawned as `<bundle-exec> -m utah.voice.loop`,
+# and `-m` resolves the module by import — i.e. it runs THIS repo's loop.py, never a
+# stale baked-in copy. The signed bundle wrapper only swaps the interpreter (to carry
+# the mic TCC grant); it does NOT vendor the source. So a source edit here IS the live
+# behavior on next process start. These tests pin that contract so a refactor that
+# vendored loop.py into the bundle, or changed the spawn argv, fails CI loudly.
+
+def test_loop_module_resolves_to_this_repo_not_a_vendored_copy():
+    """`-m utah.voice.loop` imports the module the interpreter's import machinery
+    finds. Pin that the resolved file is the in-repo source under utah/voice/, so the
+    live bundle (which launches with `-m utah.voice.loop`) runs edits made here."""
+    spec = importlib.util.find_spec("utah.voice.loop")
+    assert spec is not None and spec.origin is not None
+    resolved = Path(spec.origin).resolve()
+    # the imported module object and the spec must agree, and both must be the repo file
+    assert Path(loop.__file__).resolve() == resolved
+    repo_loop = (Path(__file__).resolve().parents[1] / "utah" / "voice" / "loop.py").resolve()
+    assert resolved == repo_loop, f"loop.py imported from {resolved}, not the repo {repo_loop}"
+
+
+def test_live_loop_is_the_wake_word_superset_not_a_pre_fix_stub():
+    """Regression-lock the 1044-line superset: the live loop must carry the two-stage
+    wake docstring AND all five hardened restart-storm/false-wake fixes by NAME, so a
+    branch checkout of a pre-fix loop.py (the 2026-06-17 regression: false-wakes, empty
+    commands, 22 restarts/day) can never silently become the imported module again."""
+    src = Path(loop.__file__).resolve().read_text()
+    # the permanent two-stage wake design (Stage A openWakeWord arms, Stage B STT gate)
+    assert "Two-stage wake (permanent)" in src
+    assert "openWakeWord" in src and "Silero VAD" in src
+    # the five fixes that were lost on the pre-fix branch — each must be present by its
+    # public surface, not just by comment:
+    for symbol in (
+        "_empty_wake_cooling",        # empty-wake cooldown (false-fire storm)
+        "_needs_input_bump",          # input-volume floor (sub-silence signal level)
+        "_should_reopen_stream",      # in-process stream reopen (mic-zeros wedge)
+        "_set_app_nap_default",       # App-Nap opt-out (callback starvation)
+        "MicLiveness",                # deaf-but-alive liveness self-heal
+    ):
+        assert symbol in src, f"live loop.py is missing the {symbol} fix — pre-fix stub?"
+
+
+def test_supervisor_voice_spec_launches_via_dash_m_module_import():
+    """The supervisor is the only spawner of the voice child. Pin that it launches with
+    `-m utah.voice.loop` (module import, resolves THIS repo) — whether via the signed
+    bundle exec or the sys.executable fallback. If a refactor pointed it at a vendored
+    script path instead, the no-reload/can't-regress guarantee would silently break."""
+    from utah.daemon import supervisor
+
+    spec = supervisor._voice_spec()
+    assert spec.name == "voice"
+    argv = list(spec.argv)
+    # `-m utah.voice.loop` must be the tail of argv (argv[0] is the interpreter/bundle exec)
+    assert argv[-2:] == ["-m", "utah.voice.loop"], f"voice argv is {argv} — not a -m import launch"
+    # and never a bare file path to a (potentially stale/vendored) loop.py
+    assert not any(str(a).endswith("loop.py") for a in argv), "voice launched from a file path, not -m import"
