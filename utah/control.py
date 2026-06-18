@@ -165,6 +165,40 @@ def workers_status() -> dict:
                           "total": len(jobs)})
 
 
+# --------------------------------------------------------------------------- SELF-DIAGNOSIS
+def diagnose() -> dict:
+    """"What is wrong with me right now" — Ace's real self-health, from LIVE state, not a
+    hardcoded model. Aggregates dead jobs, code/plist drift, down services, and recent
+    recorded failures, so when Michael asks "are you healthy / what's broken" Ace answers
+    from truth. Healthy => says so; problems => names each with its real detail."""
+    problems = []
+    w = workers_status()
+    for d in w["evidence"]["dead"]:
+        problems.append({"area": "job", "detail": f"{d['label']} dead (exit {d['exit']})"})
+    for name, code in (w["evidence"]["ports"] or {}).items():
+        if code != 200:
+            problems.append({"area": "service", "detail": f"{name} not serving (:{code or 'down'})"})
+    try:
+        from utah import drift
+        for s in list(drift.stale_runtime()) + list(drift.plist_drift()):
+            problems.append({"area": "drift", "detail": str(s)[:120]})
+    except Exception as exc:  # noqa: BLE001
+        problems.append({"area": "drift", "detail": f"drift probe failed: {exc}"})
+    # recent recorded failures (last 6h) from the failures store, if reachable
+    try:
+        from utah import failures
+        for f in (failures.recent(hours=6) or [])[:6]:
+            problems.append({"area": "failure", "detail": f"{f.get('source')}/{f.get('kind')}: {str(f.get('detail'))[:70]}"})
+    except Exception:  # noqa: BLE001
+        pass
+    ok = not problems
+    summary = ("I'm healthy — no dead jobs, no drift, services up, no recent failures."
+               if ok else f"{len(problems)} problem(s): "
+               + "; ".join(p["detail"] for p in problems[:5])
+               + (f" (+{len(problems)-5} more)" if len(problems) > 5 else ""))
+    return _log("diagnose", ok=ok, summary=summary, evidence={"problems": problems})
+
+
 # --------------------------------------------------------------------------- STRIPE
 def check_stripe() -> dict:
     """Read REAL Stripe sales — or say honestly that it can't. Michael: "do we have any
@@ -589,6 +623,9 @@ _INTENTS: list[tuple[re.Pattern[str], str]] = [
                 r"close the loop)\b|^\s*heal( now| up| the system| yourself)?\s*[.!]?$", re.I), "heal"),
     (re.compile(r"\bdeploy workers?\b|\b(improve|work on|harden|fix)\b[^.]*\bapps?\b|"
                 r"\b(improve|work on|fix|harden)\s+(the\s+)?(leads|real ?estate|marketing|trading|sovereign)\b", re.I), "improve"),
+    (re.compile(r"\b(what('?s| is) wrong|are you (ok|okay|healthy|good|broken|fine)|"
+                r"what('?s| is) broken|anything (wrong|broken)|diagnose( yourself)?|"
+                r"self[\s-]?diagnos|health check|how('?re| are) you (doing|feeling))\b", re.I), "diagnose"),
     (re.compile(r"\b(worker|workers)\b[^.]*\b(status|up|running|health|alive|down|state)\b|"
                 r"\b(are|all)\s+(the\s+)?workers\b|\bactivate (all )?workers\b|"
                 r"\b(system|daemon)\s+(status|health)\b|\bare you (up|running|alive)\b", re.I), "workers"),
@@ -634,6 +671,8 @@ def run(text: str) -> str:
             return improve_apps(app)["summary"]
         if intent == "workers":
             return workers_status()["summary"]
+        if intent == "diagnose":
+            return diagnose()["summary"]
     except Exception as exc:  # noqa: BLE001 — a failed actuator is REPORTED, never painted
         return f"I tried to {intent.replace('_', ' ')} and it failed: {exc}"
     return "I didn't catch which thing to do."
@@ -649,6 +688,8 @@ _CAPS = {
     "alarm": lambda a: set_alarm(a[0] if a else "10 min", " ".join(a[1:]) or "Ace alarm"),
     "record": lambda a: (record_stop() if a and a[0] == "stop" else record_start()),
     "heal": lambda a: heal(),
+    "diagnose": lambda a: diagnose(),
+    "health": lambda a: diagnose(),
     "improve": lambda a: improve_apps(a[0] if a else None),
     "feed": lambda a: {"feed": feed(int(a[0]) if a else 20)},
 }
