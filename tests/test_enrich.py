@@ -126,7 +126,11 @@ def test_run_scheduled_enriches_and_writes():
                              find_fn=fake_find, limit=10,
                              foundation_gate=lambda cap: None)   # substrate green (hermetic)
     assert r["enriched"] == 1
-    assert updated == [("A Co", "GA", {"email": "found@a.co"})]
+    assert r["generated"] == 2  # conversion-unlock: a personalized site preview per lead (91e1987)
+    # A Co's discovered email is written to the ledger ...
+    assert ("A Co", "GA", {"email": "found@a.co"}) in updated
+    # ... and each lead also gets a site preview recorded through the same ledger path.
+    assert sorted(c["site"]["slug"] for _, _, c in updated if "site" in c) == ["a-co", "b-co"]
 
 
 # --- deliverability gate: a domain must ACCEPT mail (MX), not just resolve ---

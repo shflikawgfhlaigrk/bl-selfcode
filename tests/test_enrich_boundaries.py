@@ -106,8 +106,10 @@ def test_run_scheduled_counts_a_failing_lead_and_finishes_the_batch():
     ledger = _FakeLedger()
     r = enrich.run_scheduled(ledger=ledger, lead_fetch=lambda limit: leads,
                              find_fn=find, foundation_gate=lambda cap: None)
-    assert r == {"scanned": 2, "enriched": 1, "failed": 1}
-    assert ledger.updated == [("Good Co", "GA", {"email": "owner@goodco.com"})]
+    assert r == {"scanned": 2, "enriched": 1, "generated": 1, "failed": 1}
+    # Good Co's email is written; the conversion-unlock site preview (91e1987) is also recorded.
+    assert ("Good Co", "GA", {"email": "owner@goodco.com"}) in ledger.updated
+    assert all(name == "Good Co" for name, _, _ in ledger.updated)  # Bad Co failed -> never written
 
 
 def test_run_scheduled_counts_a_failing_ledger_write_as_failed():
@@ -120,7 +122,7 @@ def test_run_scheduled_counts_a_failing_ledger_write_as_failed():
         lead_fetch=lambda limit: [{"name": "A", "region": "GA", "contact": {}}],
         find_fn=lambda lead, **kw: {"email": "a@a.com"},
         foundation_gate=lambda cap: None)
-    assert r == {"scanned": 1, "enriched": 0, "failed": 1}
+    assert r == {"scanned": 1, "enriched": 0, "generated": 0, "failed": 1}
 
 
 def test_run_scheduled_returns_the_gate_skip_untouched():
