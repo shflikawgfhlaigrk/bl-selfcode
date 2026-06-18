@@ -94,7 +94,6 @@ _HPF_HZ = float(os.environ.get("UTAH_VOICE_HPF_HZ", "120"))
 # wake itself is the gate; Whisper returning "" (noise/false-fire) is a harmless
 # no-op. Disable with UTAH_VOICE_FORCE_CAPTURE=0.
 _FORCE_CAPTURE = os.environ.get("UTAH_VOICE_FORCE_CAPTURE", "1") == "1"
-_FORCE_CAPTURE_S = float(os.environ.get("UTAH_VOICE_FORCE_CAPTURE_S", "5.5"))
 # Pause after the wake hit before recording the command — without this the 4s window
 # starts on "hey ace" itself and Whisper often sees only silence → transcript=''.
 # NOTE: ignored when pre-roll is on (the default) — see _FORCE_CAPTURE_PREROLL_S.
@@ -158,9 +157,6 @@ _BARGE_AUTO = (
 )
 _BARGE_RMS = float(os.environ.get("UTAH_VOICE_BARGE_RMS", "0.10"))
 _BARGE_MIN_FRAMES = int(os.environ.get("UTAH_VOICE_BARGE_MIN_FRAMES", "5"))  # ~160 ms @ 32 ms/frame
-# After a barge cut, record a fixed window of the interrupting utterance and hand it
-# straight to Whisper (same VAD-bypass path the wake uses on this noisy mic).
-_BARGE_CAPTURE_S = float(os.environ.get("UTAH_VOICE_BARGE_CAPTURE_S", "5.0"))
 
 
 def _on_playback_frame(rms: float, detector, stop_fn) -> bool:
@@ -477,20 +473,12 @@ def run() -> None:
     # handle in ~100 ms instead of via a full supervisor kill+respawn. ``count`` bounds
     # the attempts (after MAX_INPROCESS_REOPENS the deaf heartbeat escalates to the
     # supervisor); it resets the moment real audio returns.
-    _reopen_evt = threading.Event()
-    reopen_state = {"count": 0}
-    # Post-speech mic rebuild: Ace's own TTS plays through the speakers via afplay, which
-    # reconfigures CoreAudio and WEDGES this loop's PortAudio input — the stream then
-    # delivers stale/garbage audio (non-zero, so the deaf-clock never trips) and the wake
-    # never fires again. That is the "works once, then stops" failure. After every spoken
-    # turn we set this so the main loop rebuilds the input stream (HAL terminate+initialize
-    # + fresh RawInputStream) — a clean re-bind to the live mic — WITHOUT counting against
-    # the wedge circuit-breaker (it is expected, not a fault).
-    _clean_reopen = threading.Event()
-    _spoke = {"v": False}
+    _reopen_evt = threading.Event()   # set by the deaf clock or stale detector → hard reopen
+    reopen_state = {"count": 0}       # in-process reopen attempts before escalating to restart
     vstate = {"status": "starting", "listening": False, "speaking": False,
               "segments": 0, "last_transcript": None, "last_wake": None}
     armed_until = 0.0
+    wake_conf = 1.0          # peak openWakeWord confidence of the live arm window
     agc = GatedAGC() if _AGC_ON else None
     hpf = HighPass() if _HPF_ON else None
     if hpf is not None:
@@ -625,19 +613,88 @@ def run() -> None:
 
     detector = vad.get_vad()
     fail_n = 0
+
+    # Defined HERE (above the stream loop) so the outer loop can run them with the input
+    # stream CLOSED — see the _pending hand-off below.
+    def _on_speaking() -> None:
+        # Playback is starting: re-arm barge-in for THIS turn (clear the latch + any stale
+        # event) so the very next loud frame from Michael can cut Ace off cleanly.
+        _barge_det.reset()
+        barge_evt.clear()
+        vstate.update(status="speaking", speaking=True, listening=False)
+        state.write(**vstate)
+
+    def _process_segment(pcm: bytes, *, segment_armed: bool,
+                         button_barge: bool = False) -> None:
+        nonlocal _last_empty_wake_at
+        secs = len(pcm) / 2 / SAMPLE_RATE
+        seg_rms = _rms(pcm)
+        log.info("voice: speech segment %.1fs rms=%.4f → transcribing (audio_wake=%s)",
+                 secs, seg_rms, segment_armed)
+        processing.set()
+        vstate.update(status="thinking", listening=False, speaking=False)
+        state.write(**vstate)
+        try:
+            path = _write_wav(pcm)
+            try:
+                text = stt.transcribe(path)
+                log.info("voice: transcript=%r", text)
+                if text:
+                    vstate["last_transcript"] = text[:120]
+                if not text and not segment_armed:
+                    return
+                if not text and segment_armed and seg_rms < config.VOICE_SILENCE_RMS:
+                    log.info("voice: empty quiet segment after wake (rms=%.4f) — skip",
+                             seg_rms)
+                    _last_empty_wake_at = time.monotonic()   # arm empty-wake cooldown
+                    return
+                if text and not _ECHO.allow(text):
+                    log.info("voice: echo-dropped duplicate transcript")
+                    return
+                result = agent.handle_utterance(
+                    text or "",
+                    audio_wake=segment_armed,
+                    wake_confidence=(wake_conf if segment_armed else None),
+                    button_barge=button_barge,
+                    on_speaking=_on_speaking,
+                )
+                cmd = result.get("command") if result else None
+                log.info("voice: wake_fired=%s command=%r", result is not None, cmd)
+                if segment_armed and not cmd:
+                    # Wake fired but produced no command — ambient/echo false-fire.
+                    _last_empty_wake_at = time.monotonic()
+                if result is not None and not vstate.get("last_wake"):
+                    vstate["last_wake"] = cmd or "ace"
+                if result and result.get("command"):
+                    log.info("voice turn: %r → %r", result["command"],
+                             (result.get("answer") or "")[:60])
+            finally:
+                try:
+                    os.remove(path)
+                except OSError:
+                    pass
+        finally:
+            detector.reset()
+            vstate.update(status="listening", listening=True, speaking=False,
+                          segments=vstate["segments"] + 1)
+            state.write(**vstate)
+            try:
+                while True:
+                    q.get_nowait()
+            except queue.Empty:
+                pass
+            level["last_loud"] = time.monotonic()
+            processing.clear()
+            reopen_state["count"] = 0   # a clean turn → reset the wedge breaker
+
     # HARD PortAudio reset (terminate+initialize) re-binds a WEDGED CoreAudio HAL, but it
     # STRESSES coreaudiod — doing it on EVERY turn made macOS fail stream-start with
-    # PaError -9986 after ~5-10 reopens ("breaks by the 5th question"). So it is now
-    # CONDITIONAL: only when recovering from a real wedge (deaf clock). The routine
-    # post-speech reopen just closes+reopens the stream — the device is already settled
-    # (we waited for afplay to finish), so a fresh stream binds clean with no HAL reset.
+    # PaError -9986 after ~5-10 reopens. So it is CONDITIONAL: only when recovering from a
+    # real wedge (deaf clock or stale-buffer detector). Routine turns just close+reopen.
     _hard_reinit = {"v": True}   # first open does one clean reset; then only on a wedge
-    # ROOT-CAUSE FIX for "works then stops": the brain call + TTS for a captured command
-    # run HERE, with the input stream CLOSED (we broke out of the inner loop to get here).
-    # The mic and speaker are one shared device; afplay (Ace's voice) reconfigures it, and
-    # an input stream left OPEN during that reconfiguration gets a frozen/stale buffer —
-    # the wedge that killed every turn after the first. With the stream closed during
-    # playback there is nothing to wedge, so no per-turn HAL reset is needed either.
+    # When a command is captured the inner loop drops the PCM here and breaks, CLOSING the
+    # stream; the outer loop then runs _process_segment (STT + brain + afplay TTS) with the
+    # mic CLOSED so playback can't wedge it, and reopens after.
     _pending: dict = {"pcm": None, "armed": False, "barge": False}
     while True:
         try:
@@ -664,7 +721,6 @@ def run() -> None:
                 if wake_det is not None:
                     wake_det.reset()
                 armed_until = 0.0
-                wake_conf = 1.0          # peak oww confidence of the live arm window
                 vstate.update(status="listening", listening=True, speaking=False)
                 state.write(**vstate)
                 try:
@@ -677,16 +733,6 @@ def run() -> None:
                 log.info("voice loop: mic open — Silero VAD (speech threshold %.2f)",
                          vad.SPEECH_THRESHOLD)
 
-                def _on_speaking() -> None:
-                    # Playback is starting: re-arm barge-in for THIS turn (clear the
-                    # latch + any stale event + any half-run left from before) so the
-                    # very next loud frame from Michael can cut Ace off cleanly.
-                    _barge_det.reset()
-                    barge_evt.clear()
-                    _spoke["v"] = True   # this turn played TTS → rebuild the mic after it
-                    vstate.update(status="speaking", speaking=True, listening=False)
-                    state.write(**vstate)
-
                 def _on_audio_wake(confidence: float = 1.0) -> None:
                     nonlocal armed_until, wake_conf
                     armed_until = time.monotonic() + config.WAKE_ARM_S
@@ -696,74 +742,6 @@ def run() -> None:
                     seg.arm()
                     log.info("voice: audio wake armed (%.0fs window, conf=%.2f)",
                              config.WAKE_ARM_S, confidence)
-
-                def _process_segment(pcm: bytes, *, segment_armed: bool,
-                                     button_barge: bool = False) -> None:
-                    nonlocal _last_empty_wake_at
-                    secs = len(pcm) / 2 / SAMPLE_RATE
-                    seg_rms = _rms(pcm)
-                    log.info("voice: speech segment %.1fs rms=%.4f → transcribing (audio_wake=%s)",
-                             secs, seg_rms, segment_armed)
-                    processing.set()
-                    vstate.update(status="thinking", listening=False, speaking=False)
-                    state.write(**vstate)
-                    try:
-                        path = _write_wav(pcm)
-                        try:
-                            text = stt.transcribe(path)
-                            log.info("voice: transcript=%r", text)
-                            if text:
-                                vstate["last_transcript"] = text[:120]
-                            if not text and not segment_armed:
-                                return
-                            if not text and segment_armed and seg_rms < config.VOICE_SILENCE_RMS:
-                                log.info(
-                                    "voice: empty quiet segment after wake (rms=%.4f) — skip",
-                                    seg_rms,
-                                )
-                                _last_empty_wake_at = time.monotonic()   # arm empty-wake cooldown
-                                return
-                            if text and not _ECHO.allow(text):
-                                log.info("voice: echo-dropped duplicate transcript")
-                                return
-                            result = agent.handle_utterance(
-                                text or "",
-                                audio_wake=segment_armed,
-                                wake_confidence=(wake_conf if segment_armed else None),
-                                button_barge=button_barge,
-                                on_speaking=_on_speaking,
-                            )
-                            cmd = result.get("command") if result else None
-                            log.info("voice: wake_fired=%s command=%r",
-                                     result is not None, cmd)
-                            if segment_armed and not cmd:
-                                # Wake fired but produced no command — an ambient/echo
-                                # false-fire. Arm the cooldown so it can't re-churn at once.
-                                _last_empty_wake_at = time.monotonic()
-                            if result is not None and not vstate.get("last_wake"):
-                                vstate["last_wake"] = cmd or "ace"
-                            if result and result.get("command"):
-                                log.info("voice turn: %r → %r", result["command"],
-                                         (result.get("answer") or "")[:60])
-                        finally:
-                            try:
-                                os.remove(path)
-                            except OSError:
-                                pass
-                    finally:
-                        detector.reset()
-                        vstate.update(status="listening", listening=True, speaking=False,
-                                      segments=vstate["segments"] + 1)
-                        state.write(**vstate)
-                        try:
-                            while True:
-                                q.get_nowait()
-                        except queue.Empty:
-                            pass
-                        level["last_loud"] = time.monotonic()
-                        processing.clear()
-                        _spoke["v"] = False
-                        reopen_state["count"] = 0   # a clean turn → reset the wedge breaker
 
                 _collecting = False
                 _collect_frames: list[bytes] = []
