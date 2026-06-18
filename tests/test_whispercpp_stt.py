@@ -60,6 +60,70 @@ def test_junk_response_is_empty_not_a_crash(monkeypatch, tmp_path):
     assert s.transcribe(str(wav)) == ""
 
 
+def test_cold_start_retries_through_model_load_then_succeeds(monkeypatch, tmp_path):
+    """The 2026-06-18 race: whisper-server accepts the socket BEFORE the model loads, so
+    the first /inference POST after a spawn is refused. On a COLD server that's transient —
+    retry through it. The command must still transcribe, not come back '' + 20s deaf
+    (which read as 'voice didn't hear me')."""
+    import urllib.error
+
+    wav = tmp_path / "x.wav"; wav.write_bytes(b"RIFFfake")
+    monkeypatch.setattr(stt.time, "sleep", lambda s: None)        # no real backoff wait
+    monkeypatch.setattr(stt, "_WHISPERCPP_COLD_RETRIES", 4)
+    calls = {"n": 0}
+
+    def post(url, path, timeout):
+        calls["n"] += 1
+        if calls["n"] < 3:                                       # model still loading
+            raise urllib.error.URLError("[Errno 61] Connection refused")
+        return '{"text": "hey ace what time is it"}'
+
+    s = _mk(monkeypatch, post=post, ready=True)
+    monkeypatch.setattr(s, "_alive", lambda: False)              # COLD — just spawned
+    assert s.transcribe(str(wav)) == "hey ace what time is it"
+    assert calls["n"] == 3                                        # rode past the refusals
+    assert s._cooldown_until == 0.0                              # recovered, no dead-zone
+
+
+def test_warm_server_refusal_is_one_shot_not_retried(monkeypatch, tmp_path):
+    """A refusal from a WARM server is a real fault, not a cold-start race — one attempt,
+    then kill + cooldown. Retrying there would mask a genuine wedge."""
+    import urllib.error
+
+    wav = tmp_path / "x.wav"; wav.write_bytes(b"RIFFfake")
+    monkeypatch.setattr(stt.time, "sleep", lambda s: None)
+    monkeypatch.setattr(stt.config, "STT_RESPAWN_COOLDOWN_S", 20.0)
+    calls = {"n": 0}
+
+    def post(url, path, timeout):
+        calls["n"] += 1
+        raise urllib.error.URLError("refused")
+
+    s = _mk(monkeypatch, post=post, ready=True)                 # _alive=True → warm
+    assert s.transcribe(str(wav)) == ""
+    assert calls["n"] == 1                                        # warm = exactly one shot
+    assert s._cooldown_until > 0                                 # cooldown armed
+
+
+def test_cold_http_status_error_is_not_retried(monkeypatch, tmp_path):
+    """An HTTP *status* error means the server responded — real, not a load race — so it
+    is not retried even on a cold server (only connection-level refusals are)."""
+    import urllib.error
+
+    wav = tmp_path / "x.wav"; wav.write_bytes(b"RIFFfake")
+    monkeypatch.setattr(stt.time, "sleep", lambda s: None)
+    calls = {"n": 0}
+
+    def post(url, path, timeout):
+        calls["n"] += 1
+        raise urllib.error.HTTPError(url, 500, "boom", {}, None)
+
+    s = _mk(monkeypatch, post=post, ready=True)
+    monkeypatch.setattr(s, "_alive", lambda: False)             # cold
+    assert s.transcribe(str(wav)) == ""
+    assert calls["n"] == 1                                        # HTTPError not retried
+
+
 def test_default_engine_prefers_whispercpp_when_provisioned(monkeypatch, tmp_path):
     binp = tmp_path / "whisper-server"
     binp.write_text("#!/bin/sh\n")

@@ -33,6 +33,16 @@ os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
 
 log = logging.getLogger("utah.voice.stt")
 
+#: whisper.cpp cold-start race: whisper-server binds its TCP socket BEFORE the model
+#: finishes loading, so ``_ready`` (a socket-accept poll) returns True while the first
+#: ``/inference`` POST can still be refused/reset for ~1-2s. That refusal is TRANSIENT —
+#: on a freshly spawned server, retry it a few times with a short backoff instead of
+#: killing the server and dead-zoning for the whole respawn cooldown (the 2026-06-18
+#: "first 'hey ace' after the mlx→whisper.cpp switch comes back empty, then 20s deaf"
+#: race). A WARM server gets exactly one shot — a refusal there is a real fault.
+_WHISPERCPP_COLD_RETRIES = int(os.environ.get("UTAH_WHISPERCPP_COLD_RETRIES", "4"))
+_WHISPERCPP_COLD_BACKOFF_S = float(os.environ.get("UTAH_WHISPERCPP_COLD_BACKOFF_S", "0.5"))
+
 
 class STT(Protocol):
     def transcribe(self, wav_path: str) -> str: ...
@@ -316,6 +326,27 @@ class WhisperCppSTT:
         with urllib.request.urlopen(req, timeout=timeout) as r:
             return r.read().decode("utf-8", "replace")
 
+    def _post_resilient(self, url: str, wav_path: str, timeout: float, *, cold: bool) -> str:
+        """POST the wav, riding through the cold-start race. On a freshly spawned (``cold``)
+        server a connection refused/reset means the model is still loading — retry with a
+        short backoff rather than treating it as a wedge. A warm server gets one shot. An
+        HTTP *status* error is a real server response (not a race), so it never retries."""
+        import urllib.error
+
+        attempts = _WHISPERCPP_COLD_RETRIES if cold else 1
+        for i in range(attempts):
+            try:
+                return self._post(url, wav_path, timeout)
+            except urllib.error.HTTPError:
+                raise  # the server responded (with an error) — real, not a cold-start race
+            except (urllib.error.URLError, ConnectionError, OSError) as exc:
+                if i + 1 >= attempts:
+                    raise
+                log.debug("whisper.cpp cold-start POST retry %d/%d (%s) — model still loading",
+                          i + 1, attempts, exc)
+                time.sleep(_WHISPERCPP_COLD_BACKOFF_S)
+        return ""  # unreachable (loop either returns or raises) — satisfies the type checker
+
     def transcribe(self, wav_path: str) -> str:
         with self._lock:
             # In the post-failure cooldown: don't even try (a wedged server stays
@@ -323,13 +354,14 @@ class WhisperCppSTT:
             if time.monotonic() < self._cooldown_until:
                 return ""
             try:
-                if not self._alive():
+                cold = not self._alive()
+                if cold:
                     self._kill()
                     self._spawn()
                     if not self._ready():
                         raise TimeoutError("whisper-server failed to become ready")
-                raw = self._post(f"http://127.0.0.1:{self._port}/inference", wav_path,
-                                 config.STT_HANG_TIMEOUT_S)
+                raw = self._post_resilient(f"http://127.0.0.1:{self._port}/inference", wav_path,
+                                           config.STT_HANG_TIMEOUT_S, cold=cold)
                 try:
                     return clean_transcript((json.loads(raw).get("text") or "").strip())
                 except Exception:  # noqa: BLE001 — junk body = no transcript, not a crash
