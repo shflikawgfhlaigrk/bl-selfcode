@@ -200,6 +200,16 @@ def _capability_reply(text: str, route: Route, hits: list) -> Reply | None:
         from utah import actions
 
         return Reply(text=actions.run(text), source=ReplySource.CAPABILITY, hits=hits)
+    if route is Route.CONTROL:
+        # An OS/account ACTUATOR command — EXECUTES the real thing (read Stripe, read the
+        # inbox, set an alarm, start/stop a screen recording, self-heal the launchd roster,
+        # queue autonomous app improvement) and reports the REAL result, logging every
+        # action to the proof-of-execution ledger (~/.utah/activity/actions.jsonl). A
+        # missing prerequisite (no Stripe key, TCC-blocked) is reported honestly — NEVER
+        # faked. This is what makes "I did it" mean a function returned, not narration.
+        from utah import control
+
+        return Reply(text=control.run(text), source=ReplySource.CAPABILITY, hits=hits)
     if route is Route.LEADS:
         from utah.product import leads_status
 

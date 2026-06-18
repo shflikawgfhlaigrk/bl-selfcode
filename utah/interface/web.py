@@ -41,6 +41,26 @@ STATIC = pathlib.Path(__file__).resolve().parent / "static"
 LIVE = STATIC / "live.html"
 TERMINAL = STATIC / "terminal.html"
 ROUTE_PAGE = STATIC / "route.html"
+_DEBUG_LOG = pathlib.Path(__file__).resolve().parents[2] / ".cursor" / "debug-dd91e1.log"
+
+
+def _debug_log(location: str, message: str, data: dict, hypothesis_id: str) -> None:
+    # #region agent log
+    try:
+        import json as _json
+        _DEBUG_LOG.parent.mkdir(parents=True, exist_ok=True)
+        with _DEBUG_LOG.open("a", encoding="utf-8") as fh:
+            fh.write(_json.dumps({
+                "sessionId": "dd91e1",
+                "timestamp": int(time.time() * 1000),
+                "location": location,
+                "message": message,
+                "data": data,
+                "hypothesisId": hypothesis_id,
+            }) + "\n")
+    except OSError:
+        pass
+    # #endregion
 
 
 async def _daemon_status() -> dict | None:
@@ -68,14 +88,36 @@ _PWA_HEAD = (
 )
 
 
+def _prepare_deck_html(path: pathlib.Path) -> str:
+    """Read deck HTML and apply server-side injections (PWA head, Discord strip)."""
+    html = path.read_text(encoding="utf-8")
+    if "/manifest.webmanifest" not in html:
+        html = html.replace("<head>", "<head>" + _PWA_HEAD, 1)
+    if path.resolve() == LIVE.resolve():
+        invite = _discord_invite()
+        needle = 'class="discord-strip" id="dbtn" href="/discord"'
+        if invite and needle in html:
+            html = html.replace(
+                needle,
+                f'class="discord-strip on" id="dbtn" href="{invite}"',
+                1,
+            )
+        _debug_log(
+            "web.py:_prepare_deck_html",
+            "live deck prepared",
+            {"invite_configured": bool(invite),
+             "strip_server_on": bool(invite and 'class="discord-strip on"' in html)},
+            "H1",
+        )
+    return html
+
+
 def _serve_deck(path):
     """Serve a deck HTML file with the PWA <head> injected exactly once (manifest, apple
     meta, service worker) so it installs to the home screen. Keeps the source files clean.
     Honest fallback: if read/decode fails, serve the file bytes unchanged."""
     try:
-        html = path.read_text(encoding="utf-8")
-        if "/manifest.webmanifest" not in html:
-            html = html.replace("<head>", "<head>" + _PWA_HEAD, 1)
+        html = _prepare_deck_html(path)
         return HTMLResponse(
             html,
             headers={"Cache-Control": "no-store, must-revalidate", "Pragma": "no-cache"},
@@ -253,12 +295,9 @@ async def app_icon(request):
 
 
 async def hud(request):
-    """The ACE OS Black Gold Command Deck — the live operator HUD. Served same-origin so
-    its per-domain fetches (/status, /memory, /daemon, /voice, /engines, /agents, /risk,
-    /audit, /sync) resolve against THIS daemon's live feed — that's what turns it from the
-    static design mock into the real dash. The DEFAULT deck; the prior server-rendered deck
-    is preserved at /classic (and /live)."""
-    return _serve_deck(DASH / "index.html")
+    """Legacy Jun-6 React mockup — redirect to the canonical live deck (no stale shell)."""
+    _debug_log("web.py:hud", "legacy hud redirect", {"to": "/"}, "H4")
+    return RedirectResponse("/", status_code=302)
 
 
 async def favicon(request):
@@ -285,11 +324,20 @@ async def api_discord(request):
         plan = await run_in_threadpool(discord_mod.provision, dry_run=True)
     except Exception:  # noqa: BLE001 — panel must never crash the deck
         plan = {"totals": {}}
-    return JSONResponse({
-        "invite": _discord_invite(),
+    invite = _discord_invite()
+    payload = {
+        "invite": invite,
         "available": discord_mod.available(),
         "totals": plan.get("totals", {}),
-    })
+    }
+    _debug_log(
+        "web.py:api_discord",
+        "discord panel",
+        {"invite": bool(invite), "available": payload["available"],
+         "channels": (plan.get("totals") or {}).get("channels")},
+        "H1",
+    )
+    return JSONResponse(payload)
 
 
 async def api_status(request):
@@ -893,16 +941,76 @@ async def truth_page(request):
     return FileResponse(STATIC / "truth.html")
 
 
+_ACTIVITY_HTML = """<!doctype html><html lang=en><head><meta charset=utf-8>
+<meta name=viewport content="width=device-width,initial-scale=1">
+<title>Ace — Live Activity</title><style>
+:root{--bg:#08080c;--panel:#111119;--line:#1c1c26;--gold:#c9a24a;--txt:#e8e3d4;--mut:#7d7765;--ok:#33d17a;--err:#e2554b}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--txt);font:13px/1.5 ui-monospace,Menlo,monospace}
+header{padding:14px 18px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:center}
+h1{margin:0;font-size:14px;letter-spacing:2px;text-transform:uppercase;color:var(--gold)}
+#meta{color:var(--mut)}button{background:var(--err);color:#fff;border:0;padding:7px 12px;border-radius:6px;cursor:pointer;font:inherit}
+.row{padding:9px 18px;border-bottom:1px solid var(--line);display:grid;grid-template-columns:150px 150px 1fr;gap:12px;align-items:start}
+.at{color:var(--mut)}.act{color:var(--gold)}.ok{color:var(--ok)}.no{color:var(--err)}.sum{color:var(--txt)}
+.empty{padding:40px;text-align:center;color:var(--mut)}
+</style></head><body>
+<header><h1>● Ace — live proof of execution</h1>
+<div><span id=meta></span> &nbsp; <button onclick=stopRec()>Stop recording</button></div></header>
+<div id=feed class=empty>loading…</div>
+<script>
+async function tick(){
+ try{const r=await fetch('/api/activity');const d=await r.json();const f=d.feed||[];
+  const el=document.getElementById('feed');
+  document.getElementById('meta').textContent=f.length+' actions';
+  if(!f.length){el.className='empty';el.textContent='No actions logged yet.';return}
+  el.className='';el.innerHTML=f.slice().reverse().map(x=>
+   `<div class=row><span class=at>${x.at||''}</span><span class=act>${x.action||''}</span>`+
+   `<span class=sum><b class=${x.ok?'ok':'no'}>${x.ok?'✓':'✗'}</b> ${(x.summary||'').replace(/</g,'&lt;')}</span></div>`).join('');
+ }catch(e){}
+}
+async function stopRec(){try{await fetch('/api/activity/stop-recording',{method:'POST'});tick()}catch(e){}}
+tick();setInterval(tick,3000);
+</script></body></html>"""
+
+
+async def activity_page(request):
+    """Live proof-of-execution feed — receipts of every real action Ace took, newest first.
+    THIS is "something to see he's actually doing it": no row + no evidence = it didn't happen."""
+    return HTMLResponse(_ACTIVITY_HTML, headers={"Cache-Control": "no-store"})
+
+
+async def api_activity(request):
+    """JSON of the activity ledger (~/.utah/activity/actions.jsonl) for the live feed."""
+    try:
+        from utah import control
+
+        return JSONResponse({"feed": control.feed(80)})
+    except Exception as exc:  # noqa: BLE001
+        return JSONResponse({"error": str(exc), "feed": []}, status_code=503)
+
+
+async def api_stop_recording(request):
+    """The feed's Stop control — finalizes an active screen recording, returns the real size."""
+    try:
+        from utah import control
+
+        return JSONResponse(control.record_stop())
+    except Exception as exc:  # noqa: BLE001
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=503)
+
+
 def build_app() -> Starlette:
     routes = [
         Route("/", index),                # THE REAL DECK: live.html — actively maintained, full live
                                           # data (failures feed, PIPELINE, SYSTEM MAP, panels). The
                                           # Jun-6 React SPA shell lacks all of this; it's at /hud.
-        Route("/hud", hud),               # the Jun-6 React SPA design shell (stale build, reference only)
+        Route("/hud", hud),               # 302 → / (stale React mockup retired)
         Route("/deck", index),            # the real deck
-        Route("/sim", hud),               # legacy alias (was the static "design sim")
+        Route("/sim", hud),               # 302 → / (was stale design sim)
         Route("/classic", index),         # live.html (same as /)
         Route("/live", index),
+        Route("/activity", activity_page),          # live proof-of-execution feed (real receipts)
+        Route("/api/activity", api_activity),
+        Route("/api/activity/stop-recording", api_stop_recording, methods=["POST"]),
         Route("/terminal", terminal),
         Route("/terminal.html", terminal),
         Route("/route", route_page),

@@ -300,7 +300,9 @@ def run(
     permissions_fn = permissions_fn or permissions_status
     if revenue_fn is None:
         from utah import revenue_heal
-        revenue_fn = revenue_heal.scan
+        # 6h cooldown in production: a known-dark producer (e.g. saturated GA probate) is
+        # alerted once, not re-recorded every sweep — kills the per-minute audit-ledger spam.
+        revenue_fn = lambda: revenue_heal.scan(cooldown_h=6.0)  # noqa: E731
 
     _remember_owner_facts()
 

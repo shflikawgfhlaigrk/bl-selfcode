@@ -229,4 +229,19 @@ def run_scheduled(probes: dict | None = None) -> dict:
             )
         except Exception:  # noqa: BLE001 — paging is best-effort, recording is not
             log.warning("canary: alert dispatch failed", exc_info=True)
+    # DETECT -> ACT: bump the autonomous healer for fires it can actually close (drifted/
+    # uninstalled plists, daemon stale, Sovereign down, deck/daemon down). com.utah.heal
+    # WatchPaths this sentinel and runs control.heal() with NO human in the loop — this is
+    # what makes the canary close its own fires instead of only filing a repair forever.
+    if any(n in {"drift", "sovereign", "deck"} for n in failed):
+        try:
+            import time as _time
+
+            from utah import config as _cfg
+
+            trig = _cfg.UTAH_HOME / "run" / "heal.trigger"
+            trig.parent.mkdir(parents=True, exist_ok=True)
+            trig.write_text(str(_time.time()))
+        except Exception:  # noqa: BLE001 — trigger bump is best-effort
+            log.debug("canary: heal trigger bump failed", exc_info=True)
     return {"ok": not failed, "failed": failed, "results": results}

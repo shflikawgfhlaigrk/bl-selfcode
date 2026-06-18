@@ -27,6 +27,7 @@ class Route(enum.Enum):
     WEATHER = "weather"          # the weather capability (free API + cache)
     TIME = "time"                # the clock capability (time/date, grounded)
     ACTION = "action"            # a COMMAND to RUN a capability (rerun leads/outreach/etc.)
+    CONTROL = "control"          # an OS/account ACTUATOR (sales/email/alarm/record/heal/improve apps)
     LEADS = "leads"              # live lead/pipeline/probate counts (grounded Postgres)
     MAIL = "mail"                # live email/text send counts (grounded mail_ledger)
     JOBS = "jobs"                # live launchd roster + health — Ace's standing daily duties
@@ -229,6 +230,15 @@ def route(text: str) -> Route:
 
     if actions.is_action(t):
         return Route.ACTION
+    # An OS/account ACTUATOR command ("do we have sales", "read my email", "set an alarm",
+    # "record my screen", "heal yourself", "deploy workers / improve the apps", "worker
+    # status"). BEFORE _AGENTIC so the "deploy/fix/improve" verbs don't get swallowed into
+    # the brain, and BEFORE _FACTUAL_RECALL so "do we have any sales" triggers a REAL Stripe
+    # look (or an honest "no key wired") instead of the brain inventing a number.
+    from utah import control
+
+    if control.is_control(t):
+        return Route.CONTROL
     if _AGENTIC.search(t):
         return Route.BRAIN
     # Sensitive PII (SSN, social security) → brain, never the 3B local lane.

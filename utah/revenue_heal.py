@@ -159,10 +159,36 @@ def is_revenue_green() -> bool:
     return bool(outcome_gate().get("ok"))
 
 
+def _within_cooldown(name: str, window_h: float) -> bool:
+    """True if a stale_producer for *name* was already filed within *window_h*. Stops the
+    per-minute ledger spam for a producer dark for a KNOWN reason (e.g. GA probate is
+    source-saturated: it runs fine, finds 145+ notices, just 0 net-new) — the alert is real
+    once, not every 60s. Best-effort sentinel; a read/write failure just disables the gate."""
+    import json
+    import time as _t
+
+    f = config.UTAH_HOME / "run" / "revheal_cooldown.json"
+    try:
+        data = json.loads(f.read_text()) if f.exists() else {}
+    except Exception:  # noqa: BLE001
+        data = {}
+    if _t.time() - float(data.get(name, 0)) < window_h * 3600:
+        return True
+    data[name] = _t.time()
+    try:
+        f.parent.mkdir(parents=True, exist_ok=True)
+        f.write_text(json.dumps(data))
+    except Exception:  # noqa: BLE001
+        pass
+    return False
+
+
 def scan(*, age_fn: Callable[[str], float | None] | None = None,
-         file_fn=None, record_fn=None, producers=None) -> list[dict]:
+         file_fn=None, record_fn=None, producers=None, cooldown_h: float = 0.0) -> list[dict]:
     """One revenue self-heal sweep: for every producer gone dark, file a self-code repair
     task (deduped) so Ace fixes his own generator. Boundaries injected for unit-proof.
+    *cooldown_h* (production passes 6h) suppresses re-recording the same dark producer every
+    sweep — defaults to 0 (off) so unit tests see the raw, every-call behavior.
     Never raises. Returns the actions taken (empty when everything is healthy)."""
     age_of = age_fn or _hours_since_last
     file_task = file_fn or sica_discover.file_task
@@ -174,6 +200,8 @@ def scan(*, age_fn: Callable[[str], float | None] | None = None,
             idle = age_of(table)
             if idle is None or idle <= max_idle_h:
                 continue  # healthy or unassessable — never false-trigger a self-code run
+            if cooldown_h and _within_cooldown(name, cooldown_h):
+                continue  # already flagged within the cooldown — don't re-spam the audit ledger
             filed = file_task("revenue", _repair_task(name, module, idle))
             record(name, "stale_producer",
                    f"{name}: no new rows in {idle:.0f}h (>{max_idle_h:.0f}h) — "
