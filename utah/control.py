@@ -320,6 +320,53 @@ def diagnose() -> dict:
     return _log("diagnose", ok=ok, summary=summary, evidence={"problems": problems})
 
 
+# --------------------------------------------------------------------------- SHELL (deck terminal)
+SHELL_TIMEOUT_S = float(os.environ.get("UTAH_SHELL_TIMEOUT", "120"))
+
+
+def run_shell(cmd: str, cwd: str | None = None, timeout: float = SHELL_TIMEOUT_S) -> dict:
+    """Run a REAL shell command from Ace's deck terminal so Michael never opens Terminal.app.
+    Every command is a proof receipt (begin→end) — the live panel shows it running with its
+    timeout and the real exit code after. Bounded by *timeout* so a hung command can't wedge the
+    terminal. Runs as the user from *cwd* (default ~/ProjectUtah); a trailing pwd marker is
+    captured so ``cd`` follows across the session (the terminal tracks the returned ``cwd``).
+    Runs on the localhost, CSRF-guarded deck — the AceOS full-access context Michael authorized."""
+    cmd = (cmd or "").strip()
+    workdir = cwd or os.path.expanduser("~/ProjectUtah")
+    if not os.path.isdir(workdir):
+        workdir = os.path.expanduser("~")
+    if not cmd:
+        return {"ok": False, "rc": None, "out": "", "cmd": cmd, "cwd": workdir, "duration": 0.0}
+    rid = begin("shell", f"$ {cmd[:160]}", timeout=timeout, cwd=workdir)
+    # Append a sentinel that prints the FINAL working dir, so an interactive `cd` updates the
+    # terminal's cwd for the next command (each request is its own subprocess otherwise).
+    wrapped = f"{cmd}\n___rc=$?\nprintf '__CWD__:%s\\n' \"$(pwd)\"\nexit $___rc"
+    t0 = _now()
+    try:
+        p = subprocess.run(wrapped, shell=True, cwd=workdir, capture_output=True, text=True,
+                           timeout=timeout, executable="/bin/zsh")
+        out, rc = (p.stdout + p.stderr), p.returncode
+        new_cwd = workdir
+        lines = out.splitlines()
+        for i in range(len(lines) - 1, -1, -1):       # last __CWD__ line wins
+            if lines[i].startswith("__CWD__:"):
+                new_cwd = lines.pop(i)[len("__CWD__:"):].strip() or workdir
+                break
+        out = "\n".join(lines)
+        ok = rc == 0
+        summary = f"$ {cmd[:120]} → rc {rc}"
+    except subprocess.TimeoutExpired:
+        out, rc, ok, new_cwd = f"(timed out after {timeout:.0f}s)", 124, False, workdir
+        summary = f"$ {cmd[:120]} → TIMEOUT {timeout:.0f}s"
+    except Exception as exc:  # noqa: BLE001 — a failed exec is reported, never painted as ok
+        out, rc, ok, new_cwd = f"(failed to run: {exc})", 127, False, workdir
+        summary = f"$ {cmd[:120]} → error"
+    dur = round(_now() - t0, 2)
+    end(rid, ok=ok, summary=summary,
+        evidence={"cmd": cmd, "cwd": new_cwd, "rc": rc, "bytes": len(out)})
+    return {"ok": ok, "rc": rc, "out": out, "cmd": cmd, "cwd": new_cwd, "duration": dur}
+
+
 # --------------------------------------------------------------------------- WORKING ON
 def working_on() -> dict:
     """What Ace is doing RIGHT NOW — read from the LIVE activity ledger (open receipts), never

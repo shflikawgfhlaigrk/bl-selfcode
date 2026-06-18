@@ -1037,6 +1037,28 @@ async def api_activity(request):
                             status_code=503)
 
 
+async def api_exec(request):
+    """Ace's deck terminal — run a REAL shell command so Michael never opens Terminal.app.
+    Every command is proof-logged (begin→end → the /activity panel) and bounded by a timeout.
+    Localhost-bound + CSRF-guarded (OriginGuard); runs as the user from the posted cwd."""
+    try:
+        body = await request.json()
+    except Exception:  # noqa: BLE001
+        body = {}
+    cmd = str(body.get("cmd", body.get("text", ""))).strip()
+    cwd = body.get("cwd") or None
+    if not cmd:
+        return JSONResponse({"ok": False, "out": "", "rc": None, "cwd": cwd or ""})
+    try:
+        from utah import control
+
+        res = await run_in_threadpool(control.run_shell, cmd, cwd)
+        return JSONResponse(res)
+    except Exception as exc:  # noqa: BLE001
+        return JSONResponse({"ok": False, "out": f"(exec failed: {exc})", "rc": 127,
+                             "cwd": cwd or ""}, status_code=503)
+
+
 async def api_stop_recording(request):
     """The feed's Stop control — finalizes an active screen recording, returns the real size."""
     try:
@@ -1060,6 +1082,7 @@ def build_app() -> Starlette:
         Route("/activity", activity_page),          # live proof-of-execution feed (real receipts)
         Route("/api/activity", api_activity),
         Route("/api/activity/stop-recording", api_stop_recording, methods=["POST"]),
+        Route("/api/exec", api_exec, methods=["POST"]),   # Ace's deck terminal — real shell
         Route("/terminal", terminal),
         Route("/terminal.html", terminal),
         Route("/route", route_page),

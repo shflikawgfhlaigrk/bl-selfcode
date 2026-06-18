@@ -67,18 +67,19 @@
 <body>
 <div id="shell">
   <div class="banner">
-    <div class="top"><div class="mark"></div><span class="ttl">ACE TERMINAL</span><span class="tag">LOCAL · GROUNDED · NO-FAB</span></div>
+    <div class="top"><div class="mark"></div><span class="ttl">ACE TERMINAL</span><span class="tag">REAL SHELL · GROUNDED · NO-FAB</span></div>
     <pre id="ascii"></pre>
-    <div class="sub">A live terminal into <b>Ace</b> — type a line, press <b>ENTER</b>. Every answer is grounded on real data; nothing is faked.</div>
+    <div class="sub">A REAL shell on this machine — type a command, press <b>ENTER</b> (runs in zsh, proof-logged to <b>/activity</b>). Prefix a line with <b>?</b> to ask Ace instead. No need to open Terminal.app.</div>
   </div>
   <div class="out" id="out"></div>
-  <div class="inrow"><span class="pfx">ace&nbsp;&rsaquo;</span>
-    <input id="in" autocomplete="off" spellcheck="false" autofocus placeholder="ask Ace anything — e.g. what is my live system status right now?"/></div>
+  <div class="inrow"><span class="pfx" id="prompt">~ &rsaquo;</span>
+    <input id="in" autocomplete="off" spellcheck="false" autofocus placeholder="run a command — e.g. git status   ·   or  ? what is my live system status"/></div>
   <div class="status">
     <span class="s"><span class="sdot ok" id="dot"></span><span id="state">READY</span></span>
+    <span class="s">CWD <b id="cwd">~/ProjectUtah</b></span>
+    <span class="s">RC <b id="rc">—</b></span>
     <span class="s">SESSION <b id="turns">0</b></span>
-    <span class="s">ENGINE <b>ACE CORE</b></span>
-    <span class="s">LINK <b>/api/tell</b></span>
+    <span class="s">MODE <b id="mode">SHELL</b></span>
   </div>
 </div>
 <script>
@@ -94,12 +95,38 @@ const ASCII=
 $("ascii").textContent=ASCII;
 
 let _es=null;
+let CWD="~/ProjectUtah";
+const HIST=[]; let hi=-1;
+function shortcwd(p){ return (p||"").replace(/^\/Users\/[^/]+/,"~"); }
 function write(cls,text){ const out=$("out");
   const d=document.createElement("div"); d.className="ln l-"+cls; d.textContent=text;
   out.appendChild(d); out.scrollTop=out.scrollHeight; return d; }
 function setState(s,busy){ $("state").textContent=s; $("dot").className="sdot "+(busy?"busy":"ok"); }
 
-write("sys","Ace Terminal ready. Connected to the local core — answers stream live below.");
+write("sys","Ace Terminal — REAL shell ready. Commands run in zsh and are logged to /activity. Prefix with ? to ask Ace.");
+
+// ── REAL SHELL: a plain line runs as a command on this machine ──────────────
+async function runShell(cmd){
+  const out=$("out");
+  const line=document.createElement("div"); line.className="ln l-cmd";
+  line.innerHTML='<span class="pfx">'+esc(shortcwd(CWD))+' &rsaquo; </span>'+esc(cmd);
+  out.appendChild(line);
+  setState("RUNNING…",true); $("mode").textContent="SHELL";
+  const tn=$("turns"); tn.textContent=String((+tn.textContent||0)+1);
+  const t0=performance.now();
+  try{
+    const r=await fetch("/api/exec",{method:"POST",headers:{"content-type":"application/json"},
+      body:JSON.stringify({cmd:cmd,cwd:CWD})});
+    const d=await r.json();
+    if(d.cwd){ CWD=d.cwd; $("cwd").textContent=shortcwd(CWD); $("prompt").innerHTML=esc(shortcwd(CWD))+" &rsaquo;"; }
+    if(d.out&&d.out.length){ write(d.ok?"ans":"err", d.out.replace(/\s+$/,"")); }
+    const rcEl=$("rc"); rcEl.textContent=(d.rc==null?"—":d.rc);
+    rcEl.style.color=(d.rc===0?"var(--ok)":(d.rc==null?"var(--mut)":"var(--err)"));
+    const tot=((performance.now()-t0)/1000).toFixed(2);
+    write("meta","— rc "+(d.rc==null?"?":d.rc)+" · "+tot+"s");
+  }catch(e){ write("err","[exec failed — link error]"); }
+  setState("READY",false); $("in").focus();
+}
 
 function send(q){
   const out=$("out"); if(_es){_es.close();_es=null;}
@@ -128,8 +155,21 @@ function send(q){
   _es.onerror=()=>{ if(_es){_es.close();_es=null;}
     if(!ansLn) write("err","[core unreachable — link error]"); finish("error"); };
 }
-$("in").addEventListener("keydown",e=>{ if(e.key==="Enter"){ e.preventDefault();
-  const q=$("in").value.trim(); if(q){ $("in").value=""; send(q); } }});
+function submit(raw){
+  const line=raw.trim(); if(!line) return;
+  HIST.push(line); hi=HIST.length;
+  if(line==="clear"||line==="cls"){ $("out").innerHTML=""; return; }
+  // ? or "ace " prefix → ask Ace (the grounded brain); everything else → real shell.
+  const m=line.match(/^(\?|ace\s+)(.*)$/i);
+  if(m){ $("mode").textContent="ASK"; send(m[2].trim()||"hi"); }
+  else { runShell(line); }
+}
+$("in").addEventListener("keydown",e=>{
+  if(e.key==="Enter"){ e.preventDefault(); const v=$("in").value; $("in").value=""; submit(v); }
+  else if(e.key==="ArrowUp"){ e.preventDefault(); if(hi>0){ hi--; $("in").value=HIST[hi]||""; } }
+  else if(e.key==="ArrowDown"){ e.preventDefault();
+    if(hi<HIST.length-1){ hi++; $("in").value=HIST[hi]||""; } else { hi=HIST.length; $("in").value=""; } }
+});
 $("in").focus();
 </script>
 </body>
