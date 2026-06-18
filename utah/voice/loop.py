@@ -632,8 +632,19 @@ def run() -> None:
     # post-speech reopen just closes+reopens the stream — the device is already settled
     # (we waited for afplay to finish), so a fresh stream binds clean with no HAL reset.
     _hard_reinit = {"v": True}   # first open does one clean reset; then only on a wedge
+    # ROOT-CAUSE FIX for "works then stops": the brain call + TTS for a captured command
+    # run HERE, with the input stream CLOSED (we broke out of the inner loop to get here).
+    # The mic and speaker are one shared device; afplay (Ace's voice) reconfigures it, and
+    # an input stream left OPEN during that reconfiguration gets a frozen/stale buffer —
+    # the wedge that killed every turn after the first. With the stream closed during
+    # playback there is nothing to wedge, so no per-turn HAL reset is needed either.
+    _pending: dict = {"pcm": None, "armed": False, "barge": False}
     while True:
         try:
+            if _pending["pcm"] is not None:
+                _pcm, _armed, _bg = _pending["pcm"], _pending["armed"], _pending["barge"]
+                _pending["pcm"] = None
+                _process_segment(_pcm, segment_armed=_armed, button_barge=_bg)
             if _hard_reinit["v"]:
                 time.sleep(0.4)   # let coreaudiod settle before the heavy reset (avoids -9986)
                 try:
@@ -751,13 +762,8 @@ def run() -> None:
                             pass
                         level["last_loud"] = time.monotonic()
                         processing.clear()
-                        if _spoke["v"]:
-                            # Ace just spoke (afplay) → the CoreAudio input is now likely
-                            # wedged. Rebuild the stream before the next turn so the wake
-                            # keeps firing. Expected recovery: do NOT count it as a wedge.
-                            _spoke["v"] = False
-                            reopen_state["count"] = 0
-                            _clean_reopen.set()
+                        _spoke["v"] = False
+                        reopen_state["count"] = 0   # a clean turn → reset the wedge breaker
 
                 _collecting = False
                 _collect_frames: list[bytes] = []
@@ -775,20 +781,6 @@ def run() -> None:
                 if not _BARGE_AUTO:
                     log.info("voice loop: auto barge OFF — use deck BARGE button to interrupt")
                 while True:
-                    # Post-speech rebuild: Ace just spoke (afplay reconfigured CoreAudio).
-                    # Reopen the input stream so the wake keeps firing next turn — the core
-                    # fix for "works once, then stops". Not a fault, so no count/warn.
-                    if _clean_reopen.is_set():
-                        # Wait for Ace's OWN playback to fully finish first — reopening the
-                        # input while afplay is still playing just re-wedges it (the cause
-                        # of the intermittent "broke after the 2nd question"). Bounded.
-                        _w0 = time.monotonic()
-                        while tts.is_anything_playing() and time.monotonic() - _w0 < 25.0:
-                            time.sleep(0.1)
-                        _clean_reopen.clear()
-                        log.info("voice: post-speech mic rebuild (afplay reconfigured "
-                                 "CoreAudio — re-binding the input stream)")
-                        break
                     # Self-heal: the monitor flagged sustained device-zeros — break out so
                     # the outer loop reopens a fresh RawInputStream (re-binds the live default
                     # device). Cheap recovery, no process restart, no model/brain cold-start.
@@ -902,15 +894,15 @@ def run() -> None:
                                 _collecting = False
                                 armed_until = 0.0
                                 _barge = _button_barge_arm
-                                log.info("voice: captured %.1fs (ended on %s)", elapsed,
-                                         "pause" if ended_on_pause else "max")
-                                _process_segment(
-                                    b"".join(_collect_frames),
-                                    segment_armed=True,
-                                    button_barge=_barge,
-                                )
-                                if _barge:
-                                    _button_barge_arm = False
+                                _button_barge_arm = False
+                                log.info("voice: captured %.1fs (ended on %s) — closing mic "
+                                         "to answer", elapsed, "pause" if ended_on_pause else "max")
+                                # Hand off to the outer loop, which answers with the mic
+                                # CLOSED so afplay can't wedge it. Break exits the stream.
+                                _pending["pcm"] = b"".join(_collect_frames)
+                                _pending["armed"] = True
+                                _pending["barge"] = _barge
+                                break
                         continue
 
                     # ── Silero two-stage path (force-capture disabled) ──
@@ -925,9 +917,12 @@ def run() -> None:
                     segment_armed = audio_wake_ok and time.monotonic() < armed_until
                     _barge = _button_barge_arm
                     armed_until = 0.0  # one segment per arm window
-                    _process_segment(pcm, segment_armed=segment_armed, button_barge=_barge)
-                    if _barge:
-                        _button_barge_arm = False
+                    _button_barge_arm = False
+                    # Answer with the mic CLOSED (outer loop) — break exits the stream.
+                    _pending["pcm"] = pcm
+                    _pending["armed"] = segment_armed
+                    _pending["barge"] = _barge
+                    break
         except Exception as exc:  # noqa: BLE001
             fail_n += 1
             if fail_n == 1:
