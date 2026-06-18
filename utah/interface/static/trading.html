@@ -1,0 +1,151 @@
+<!doctype html><html lang=en><head><meta charset=utf-8>
+<meta name=viewport content="width=device-width,initial-scale=1">
+<title>Trading Engines · Ace</title>
+<style>
+  :root{
+    --bg:#08080c;--panel:#111119;--panel2:#0d0d14;--line:#1c1c26;
+    --gold:#c9a24a;--gold2:#ecd08a;--goldglow:rgba(201,162,74,.35);
+    --txt:#d6d6e0;--mut:#7a7a8c;--dim:#3a3a48;
+    --ok:#3fb950;--okglow:rgba(63,185,80,.45);--err:#e5534b;--up:#3fb950;--down:#e5534b;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:
+      radial-gradient(1200px 620px at 50% -12%,#15130c 0%,transparent 60%),
+      radial-gradient(900px 520px at 100% 115%,#0e0d16 0%,transparent 60%),var(--bg);
+    color:var(--txt);font:12.5px/1.45 ui-monospace,"JetBrains Mono",Menlo,monospace;letter-spacing:.2px;min-height:100vh}
+  ::-webkit-scrollbar{width:7px;height:7px}::-webkit-scrollbar-thumb{background:#23222c;border-radius:4px}
+  a{color:var(--gold2);text-decoration:none}
+  header{display:flex;align-items:center;gap:16px;padding:16px 22px;border-bottom:1px solid var(--line);
+    background:linear-gradient(180deg,#0d0c08,transparent);position:sticky;top:0;backdrop-filter:blur(6px);z-index:5}
+  .logo{display:flex;align-items:center;gap:10px}
+  .logo .mark{width:20px;height:20px;border:1.5px solid var(--gold);border-radius:5px;transform:rotate(45deg);box-shadow:0 0 14px var(--goldglow)}
+  .logo b{color:var(--gold2);letter-spacing:3px;font-size:14px}
+  .logo span{color:var(--mut);font-size:10px;letter-spacing:3px}
+  .spacer{flex:1}
+  .chip{display:flex;align-items:center;gap:7px;padding:4px 11px;border:1px solid var(--line);border-radius:20px;color:var(--mut);font-size:10px;letter-spacing:1.2px}
+  .led{width:7px;height:7px;border-radius:50%;background:var(--dim);flex:none}
+  .led.ok{background:var(--ok);box-shadow:0 0 9px var(--okglow)}
+  .led.err{background:var(--err)}
+  .back{padding:4px 11px;border:1px solid var(--line);border-radius:20px;color:var(--mut);font-size:10px;letter-spacing:1.2px}
+  .back:hover{border-color:var(--gold);color:var(--gold2)}
+  .totals{display:flex;gap:22px;padding:12px 22px;border-bottom:1px solid var(--line);color:var(--mut);font-size:11px;flex-wrap:wrap}
+  .totals b{color:var(--gold2);font-size:15px;letter-spacing:.5px}
+  .totals .t{display:flex;flex-direction:column;gap:1px}
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(360px,1fr));gap:14px;padding:18px 22px 60px}
+  .card{background:linear-gradient(180deg,var(--panel),var(--panel2));border:1px solid var(--line);border-radius:12px;padding:14px 15px;display:flex;flex-direction:column;gap:9px}
+  .card.dorm{opacity:.66}
+  .ch{display:flex;align-items:baseline;gap:9px}
+  .ch b{color:var(--gold2);font-size:14px;letter-spacing:1px}
+  .ch .desc{color:var(--mut);font-size:10px}
+  .badge{margin-left:auto;font-size:9.5px;letter-spacing:1px;padding:3px 9px;border-radius:20px;border:1px solid var(--line);color:var(--mut);white-space:nowrap}
+  .badge.producing{color:var(--ok);border-color:#1d3a23;background:#0c1a10}
+  .badge.idle{color:var(--gold);border-color:#3a3014;background:#1a160b}
+  .badge.none{color:var(--mut)}
+  .stats{display:flex;gap:18px;font-size:11px}
+  .stats .s{display:flex;flex-direction:column;gap:1px}
+  .stats .s span{color:var(--mut);font-size:9.5px;letter-spacing:1px}
+  .stats .s b{font-size:14px;letter-spacing:.5px}
+  .pos{color:var(--up)} .neg{color:var(--down)} .flat{color:var(--txt)}
+  .edge{font-size:10px;color:var(--gold);border:1px solid #3a3014;background:#15110a;border-radius:7px;padding:5px 8px}
+  .chart{width:100%;height:96px;background:#0a0a10;border:1px solid var(--line);border-radius:8px}
+  .empty{height:96px;display:flex;align-items:center;justify-content:center;color:var(--mut);font-size:10.5px;
+    background:#0a0a10;border:1px dashed var(--line);border-radius:8px;text-align:center;padding:0 12px}
+  .trades{display:flex;flex-wrap:wrap;gap:5px}
+  .trade{font-size:9.5px;color:var(--mut);border:1px solid var(--line);border-radius:6px;padding:2px 7px}
+  .trade .L{color:var(--up)} .trade .S{color:var(--down)}
+  .foot{color:var(--dim);font-size:9.5px;text-align:center;padding:6px}
+  .warn{color:var(--gold);font-size:11px;padding:10px 22px;background:#15110a;border-bottom:1px solid #3a3014}
+</style></head>
+<body>
+<header>
+  <div class="logo"><div class="mark"></div><b>TRADING ENGINES</b><span>· ACE</span></div>
+  <div class="spacer"></div>
+  <div class="chip"><span class="led" id="feedled"></span><span id="feedtxt">checking feed…</span></div>
+  <a class="back" href="/">‹ DECK</a>
+</header>
+<div class="warn" id="warn" style="display:none"></div>
+<div class="totals" id="totals"></div>
+<div class="grid" id="grid"></div>
+<div class="foot" id="foot">—</div>
+<script>
+const $=id=>document.getElementById(id);
+const esc=s=>String(s==null?"":s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const money=v=>{v=Number(v||0);const s=v>0?"+":"";return s+v.toFixed(2);};
+const cls=v=>v>0?"pos":(v<0?"neg":"flat");
+const ago=ts=>{if(!ts)return"—";const s=Math.max(0,Date.now()/1000-ts);if(s<90)return Math.round(s)+"s ago";if(s<5400)return Math.round(s/60)+"m ago";return Math.round(s/3600)+"h ago";};
+
+// hand-rolled SVG P&L curve — no external chart lib (offline, own-it). Real points only.
+function curve(series){
+  if(!series||series.length<2) return null;
+  const W=330,H=96,pad=8;
+  const ys=series.map(p=>Number(p.pnl||0));
+  let lo=Math.min(0,...ys),hi=Math.max(0,...ys); if(hi===lo){hi+=1;lo-=1;}
+  const xs=series.map((p,i)=>pad+(W-2*pad)*(series.length<2?0:i/(series.length-1)));
+  const yat=v=>H-pad-(H-2*pad)*((v-lo)/(hi-lo));
+  const pts=series.map((p,i)=>`${xs[i].toFixed(1)},${yat(Number(p.pnl||0)).toFixed(1)}`).join(" ");
+  const last=ys[ys.length-1], up=last>=0;
+  const zero=yat(0).toFixed(1);
+  const area=`${xs[0].toFixed(1)},${zero} ${pts} ${xs[xs.length-1].toFixed(1)},${zero}`;
+  const col=up?"#3fb950":"#e5534b";
+  return `<svg class="chart" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">
+    <line x1="${pad}" y1="${zero}" x2="${W-pad}" y2="${zero}" stroke="#23222c" stroke-width="1" stroke-dasharray="3 3"/>
+    <polygon points="${area}" fill="${col}" opacity="0.10"/>
+    <polyline points="${pts}" fill="none" stroke="${col}" stroke-width="1.6"/>
+    <circle cx="${xs[xs.length-1].toFixed(1)}" cy="${yat(last).toFixed(1)}" r="2.6" fill="${col}"/>
+  </svg>`;
+}
+
+function tradesStrip(trades){
+  if(!trades||!trades.length) return "";
+  return `<div class="trades">`+trades.slice(-8).map(t=>{
+    const d=(t.direction||"").toUpperCase().startsWith("L")?"L":((t.direction||"").toUpperCase().startsWith("S")?"S":"·");
+    const e=t.entry!=null?Number(t.entry).toFixed(2):"—";
+    return `<span class="trade"><span class="${d}">${d}</span> ${esc(e)}</span>`;
+  }).join("")+`</div>`;
+}
+
+function card(e){
+  const st=e.state||"";
+  const badge=st==="producing"?"producing":(e.fired?"idle":"none");
+  const blabel=st==="producing"?"● PRODUCING":(e.fired?"◦ "+st.toUpperCase():"○ NO FIRES YET");
+  const chart=curve(e.pnl_series)|| `<div class="empty">${e.fired?"only one P&amp;L point so far — curve needs ≥2 fires":"no fires logged — engine hasn't traded"}</div>`;
+  const edge=e.edge?`<div class="edge">proven edge · ${esc(e.edge.symbol)} · ${esc(e.edge.win_rate)}% win · ${esc(e.edge.net_pts)}pt OOS</div>`:"";
+  return `<div class="card${e.fired?"":" dorm"}">
+    <div class="ch"><b>${esc(e.name)}</b><span class="desc">${esc(e.desc||"")}</span><span class="badge ${badge}">${blabel}</span></div>
+    <div class="stats">
+      <div class="s"><span>SESSION P&amp;L</span><b class="${cls(e.session_pnl)}">${esc(money(e.session_pnl))}</b></div>
+      <div class="s"><span>TRADES TODAY</span><b>${esc(e.trades_today||0)}</b></div>
+      <div class="s"><span>OPEN</span><b>${esc((e.open_positions||[]).length)}</b></div>
+      <div class="s"><span>LAST FIRE</span><b style="font-size:11px">${esc(ago(e.last_ts))}</b></div>
+    </div>
+    ${edge}
+    ${chart}
+    ${tradesStrip(e.trades)}
+  </div>`;
+}
+
+async function load(){
+  try{
+    const r=await fetch('/api/trading',{cache:'no-store'});
+    const d=await r.json();
+    const feed=d.feed||{};
+    $('feedled').className="led "+(feed.feed_live?"ok":"err");
+    $('feedtxt').textContent=feed.feed_live?"WC FEED LIVE":(feed.freshest_tick_ms==null?"FEED DOWN · no ticks":"FEED STALE · "+Math.round(feed.freshest_tick_ms/60000)+"m old");
+    if(!feed.feed_live){
+      $('warn').style.display="block";
+      $('warn').textContent="⚠ WealthCharts feed is "+(feed.freshest_tick_ms==null?"logged out / down":"stale")+" — engines can't fire until it returns. P&L below is the real last-known session, not live.";
+    }else{$('warn').style.display="none";}
+    const t=d.totals||{};
+    $('totals').innerHTML=
+      `<div class="t"><span>ENGINES PRODUCING</span><b>${esc(t.engines_fired||0)} / ${esc(t.engines_total||0)}</b></div>`+
+      `<div class="t"><span>TOTAL FIRES</span><b>${esc(t.fires||0)}</b></div>`+
+      `<div class="t"><span>TOTAL SESSION P&amp;L</span><b class="${cls(t.session_pnl)}">${esc(money(t.session_pnl))}</b></div>`;
+    $('grid').innerHTML=(d.engines||[]).map(card).join("")||`<div class="empty">no engines configured</div>`;
+    $('foot').textContent="live from ~/.utah/cache/engine_fires.jsonl · refreshed "+new Date().toLocaleTimeString();
+  }catch(e){
+    $('foot').textContent="failed to load /api/trading: "+e;
+  }
+}
+load(); setInterval(load,5000);
+</script>
+</body></html>

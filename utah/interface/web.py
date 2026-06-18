@@ -41,6 +41,7 @@ STATIC = pathlib.Path(__file__).resolve().parent / "static"
 LIVE = STATIC / "live.html"
 TERMINAL = STATIC / "terminal.html"
 ROUTE_PAGE = STATIC / "route.html"
+TRADING_PAGE = STATIC / "trading.html"
 _DEBUG_LOG = pathlib.Path(__file__).resolve().parents[2] / ".cursor" / "debug-dd91e1.log"
 
 
@@ -143,6 +144,27 @@ async def route_page(request):
     shortest drive order + miles saved + a Google Maps link. The two sellable products
     (Canvasser / Fleet) ride the one engine in ``utah.product.route``."""
     return FileResponse(ROUTE_PAGE)
+
+
+async def trading_page(request):
+    """Trading Engines page — every engine on its own page (off the deck, inside Ace's
+    system), each with a live cumulative-P&L graph + its trades. Data from /api/trading;
+    real-or-empty, never a painted line. See utah.product.engine_graph."""
+    return FileResponse(TRADING_PAGE)
+
+
+async def api_trading(request):
+    """Per-engine graph data: cumulative session-P&L series, paired trades, today's count,
+    open positions, proven OOS edge, and WealthCharts feed liveness. Real fire log only
+    (``~/.utah/cache/engine_fires.jsonl``); empty-but-honest when an engine hasn't fired or
+    the feed is down — never fabricated. Degrades, never 500s."""
+    from utah.product import engine_graph
+    try:
+        return JSONResponse(await run_in_threadpool(engine_graph.snapshot))
+    except Exception as exc:  # noqa: BLE001 — the page must render even if enrichment dies
+        log.warning("api_trading degraded: %s", exc)
+        return JSONResponse({"engines": [], "totals": {}, "feed": {"feed_live": False},
+                             "degraded": str(exc)})
 
 
 #: Hard ceiling on stops per request — keeps geocoding (1 req/sec) and the O(n²) 2-opt
@@ -1090,6 +1112,8 @@ def build_app() -> Starlette:
         Route("/terminal.html", terminal),
         Route("/route", route_page),
         Route("/api/route", api_route, methods=["POST"]),
+        Route("/trading", trading_page),            # dedicated trading-engines page (graphs)
+        Route("/api/trading", api_trading),
         Route("/favicon.svg", favicon),
         Route("/discord", discord_redirect),
         Route("/api/discord", api_discord),
