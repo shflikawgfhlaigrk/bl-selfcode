@@ -106,6 +106,38 @@ def _self_model_facts(self_model=None) -> str:
     ])
 
 
+#: A source-file path token *with a directory component* cited inside a recalled fact
+#: (e.g. ``utah/voice/loop.py``, ``~/BlackLabelLeads/Sources/Auth.swift``). A bare filename
+#: (no ``/``) is too ambiguous to treat as a path assertion, so it is intentionally not matched.
+_SRC_PATH_RE = re.compile(
+    r"(?:~/|/)?[\w.-]+/[\w./-]*\.(?:py|swift|ts|tsx|js|jsx|go|rs|sh|md|ya?ml|json|toml|html)\b"
+)
+
+
+def _recall_hit_stale(content: str) -> bool:
+    """True iff *content* cites source-file path(s) and NONE of them resolve. A durable fact
+    written weeks ago that only references since-moved/deleted files (e.g. a dead ``~/.ace/...``
+    path) otherwise grounds the brain on a stale path — decay-protected facts never age out.
+    Conservative on purpose: a fact with no cited path, or with at least one live path, is kept."""
+    import os
+    from pathlib import Path
+
+    paths = _SRC_PATH_RE.findall(content or "")
+    if not paths:
+        return False
+    repo_root = Path(__file__).resolve().parent.parent
+    home = Path.home()
+
+    def _resolves(tok: str) -> bool:
+        if tok.startswith("~"):
+            return os.path.exists(os.path.expanduser(tok))
+        if tok.startswith("/"):
+            return os.path.exists(tok)
+        return os.path.exists(repo_root / tok) or os.path.exists(home / tok)
+
+    return not any(_resolves(p) for p in paths)
+
+
 def _build_context(hits: list, web: str = "", *, text: str = "") -> str:
     """Brain context = core identity facts + (for a self/project question) the live
     introspection self-model + conversation thread + freshly fetched web text + recalled
@@ -134,6 +166,10 @@ def _build_context(hits: list, web: str = "", *, text: str = "") -> str:
         # own files/functions ("oauth.py isn't in my context") even with the code in hand.
         code_hits = [h for h in hits if getattr(h, "source", "") == "code"]
         other_hits = [h for h in hits if getattr(h, "source", "") != "code"]
+        # Drop recalled facts whose only cited source paths no longer resolve — a decay-
+        # protected fact naming a since-moved/deleted file otherwise grounds the brain on a
+        # stale path. Conservative: only drops when the content cites path(s) AND all are dead.
+        other_hits = [h for h in other_hits if not _recall_hit_stale(getattr(h, "content", ""))]
         if code_hits:
             parts.append(
                 "YOUR OWN SOURCE CODE (committed + indexed — authoritative; you MAY name "
