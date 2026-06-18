@@ -147,7 +147,7 @@ def plist_drift(*, repo: pathlib.Path = REPO, agents: pathlib.Path = AGENTS) -> 
 
 
 def stale_runtime(
-    pidfile_age_grace_s: float = 0.0,
+    pidfile_age_grace_s: float = 90.0,
     *,
     run_dir: pathlib.Path = RUN_DIR,
     repo: pathlib.Path = REPO,
@@ -159,6 +159,13 @@ def stale_runtime(
     the supervisor's start via its pid file age proxy — the run dir's pid files
     are recreated on every boot. *pidfile_age_grace_s* suppresses the marginal
     case of a file written seconds after boot (deploy scripts touch both).
+
+    Grace defaults to 90s because the voice subsystem rewrites utah/voice/loop.py
+    ~4-5s AFTER every daemon boot (its self-rebuild) — with grace 0 that bumped the
+    newest-source mtime just past the boot mtime on every single boot, so this probe
+    reported a permanent false 'restart pending' and the autonomous healer reload-
+    looped the daemon every cooldown. A real deploy is minutes-to-hours newer than the
+    last boot, so 90s cleanly separates the post-boot self-touch from genuine drift.
     """
     try:
         pids = list(run_dir.glob("*.pid"))
