@@ -16,7 +16,7 @@ import subprocess
 import sys
 import threading
 import time
-from typing import Protocol
+from typing import Callable, Protocol
 
 from utah import config
 
@@ -385,22 +385,113 @@ def _best_whispercpp_model() -> str | None:
     return None
 
 
-def _build_default_stt() -> STT:
-    """Default = MLX Whisper small.en (accurate) run in a KILLABLE worker process so
-    a Metal-GPU deadlock can't deafen the mic (:class:`SubprocessSTT`). The bare
-    framework-CPU Moonshine (``STT_ENGINE=moonshine``) is the no-Metal fallback —
-    it never hangs but mis-hears real speech ("What's going on?" -> "Blun.")."""
-    if config.STT_ENGINE == "apple":
+# ── Dead-engine self-heal ───────────────────────────────────────────────────
+# STT engine selection used to happen ONCE at boot (memoized in ``_stt``) and was
+# never re-evaluated. That is exactly how voice went silently deaf on 2026-06-18:
+# the loop booted, picked an engine whose deps were healthy AT BOOT (mlx_whisper
+# imported + warmed fine at 03:47), then mlx_whisper became unimportable later in
+# the run — and every transcribe quietly returned "" forever (the worker swallows
+# ImportError → "", the loop swallows "" → no command). Wake fired, mic heard, and
+# the transcript was always empty, with no error surfaced and no recovery.
+#
+# Fix: when the loop sees the current engine return "" on real, loud, post-wake
+# audio repeatedly, it calls :func:`flag_dead`. That marks the engine dead for a
+# cooldown and clears the cache so the NEXT :func:`get_stt` rebuilds — and
+# :func:`_build_default_stt` SKIPS engines that are flagged dead, falling through to
+# the next one that is actually present on disk. A transient wedge recovers after the
+# cooldown; a structural death (uninstalled model, missing binary) keeps falling
+# through to the working engine each window. Voice can no longer get stuck on a dead
+# transcriber.
+_dead_until: dict[str, float] = {}
+_DEAD_COOLDOWN_S = float(os.environ.get("UTAH_STT_DEAD_COOLDOWN_S", "120"))
+
+
+def flag_dead(engine_name: str) -> None:
+    """Mark *engine_name* dead for a cooldown and force re-selection (clears the cache).
+    Called by the voice loop when the current engine transcribes loud post-wake speech
+    to "" repeatedly — the engine, not the speaker, is the fault."""
+    _dead_until[engine_name] = time.monotonic() + _DEAD_COOLDOWN_S
+    log.error("STT engine %s flagged DEAD for %.0fs — will re-select a working engine",
+              engine_name, _DEAD_COOLDOWN_S)
+    set_stt(None)
+
+
+def _is_dead(engine_name: str) -> bool:
+    return time.monotonic() < _dead_until.get(engine_name, 0.0)
+
+
+def _ordered_factories() -> list[tuple[str, "Callable[[], STT | None]"]]:
+    """(name, factory) pairs best-first, honoring ``STT_ENGINE`` as the primary then
+    the rest as fallbacks. Each factory returns ``None`` when that engine is not
+    available on this box (binary/model/package absent), so selection skips it."""
+    def mk_apple() -> "STT | None":
         return AppleSTT()
-    if config.STT_ENGINE == "moonshine":
-        return MoonshineSTT()
-    if config.STT_ENGINE in ("whisper", "whispercpp") and os.path.exists(config.WHISPERCPP_BIN):
-        model = _best_whispercpp_model()
-        if model:
-            return WhisperCppSTT(model=model)
-    if importlib.util.find_spec("mlx_whisper") is not None:
-        return SubprocessSTT()
-    log.warning("MLX Whisper not installed — falling back to Moonshine STT")
+
+    def mk_whispercpp() -> "STT | None":
+        if os.path.exists(config.WHISPERCPP_BIN):
+            model = _best_whispercpp_model()
+            if model:
+                return WhisperCppSTT(model=model)
+        return None
+
+    def mk_mlx() -> "STT | None":
+        # find_spec is a cheap presence check; a present-but-broken mlx that passes
+        # here but fails to import is caught at runtime by the loop's dead-flagging
+        # (which then skips it on the next rebuild) rather than importing heavy MLX/
+        # Metal into the mic process just to probe it.
+        return SubprocessSTT() if importlib.util.find_spec("mlx_whisper") is not None else None
+
+    def mk_moonshine() -> "STT | None":
+        return MoonshineSTT() if importlib.util.find_spec("moonshine_onnx") is not None else None
+
+    base = [("whispercpp", mk_whispercpp), ("mlx", mk_mlx), ("moonshine", mk_moonshine)]
+    primary = {
+        "apple": ("apple", mk_apple),
+        "moonshine": ("moonshine", mk_moonshine),
+        "mlx": ("mlx", mk_mlx),
+        "whisper": ("whispercpp", mk_whispercpp),
+        "whispercpp": ("whispercpp", mk_whispercpp),
+    }.get(config.STT_ENGINE)
+    order: list[tuple[str, "Callable[[], STT | None]"]] = []
+    if primary:
+        order.append(primary)
+    for item in base:
+        if item[0] not in {n for n, _ in order}:
+            order.append(item)
+    return order
+
+
+def _build_default_stt() -> STT:
+    """Pick the best AVAILABLE STT engine that is not currently flagged dead. Default
+    primary is whisper.cpp small.en (``STT_ENGINE=whisper``, Metal C++ server, owned +
+    killable). MLX Whisper (:class:`SubprocessSTT`) and framework-CPU Moonshine are
+    fallbacks. A dead-flagged engine (see :func:`flag_dead`) is skipped so a runtime
+    engine death can never trap voice on a silent transcriber."""
+    first_available: STT | None = None
+    tried: list[str] = []
+    for name, make in _ordered_factories():
+        eng = make()
+        if eng is None:
+            continue
+        # Key dead-flagging on the CLASS name: that is what the loop has cheaply on hand
+        # (``type(get_stt()).__name__``) when an engine misbehaves, and each factory
+        # yields a distinct class, so it identifies the engine unambiguously. (The factory
+        # ``name`` is only the human-readable ordering label.)
+        cls = type(eng).__name__
+        tried.append(f"{name}/{cls}")
+        if first_available is None:
+            first_available = eng  # last resort if every available engine is flagged dead
+        if _is_dead(cls):
+            log.warning("STT engine %s (%s) is flagged dead (cooldown active) — skipping",
+                        name, cls)
+            continue
+        log.info("STT engine selected: %s (%s)", name, cls)
+        return eng
+    if first_available is not None:
+        log.warning("all available STT engines (%s) are flagged dead — using %s anyway",
+                    tried, type(first_available).__name__)
+        return first_available
+    log.critical("no STT engine available on this host — voice cannot transcribe")
     return MoonshineSTT()
 
 
@@ -426,4 +517,4 @@ def transcribe(wav_path: str) -> str:
 
 
 __all__ = ["STT", "MoonshineSTT", "MLXWhisperSTT", "SubprocessSTT", "WhisperCppSTT",
-           "clean_transcript", "get_stt", "set_stt", "transcribe"]
+           "clean_transcript", "get_stt", "set_stt", "transcribe", "flag_dead"]

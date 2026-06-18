@@ -146,6 +146,20 @@ _WAKE_LOUD_WINDOW_S = float(os.environ.get("UTAH_VOICE_WAKE_LOUD_WINDOW_S", "2.0
 #: only briefly.
 _EMPTY_WAKE_COOLDOWN_S = float(os.environ.get("UTAH_VOICE_EMPTY_WAKE_COOLDOWN", "12.0"))
 
+#: Dead-STT self-heal: how many consecutive LOUD (rms ≥ VOICE_SILENCE_RMS), post-wake
+#: segments may transcribe to "" before we conclude the STT ENGINE is dead — not the
+#: speaker — and rebuild it (:func:`utah.voice.stt.flag_dead`). Loud-but-empty means
+#: real audio reached a transcriber that produced nothing: a vanished model, an
+#: uninstalled package, a wedged server. This is the safety net for the 2026-06-18
+#: silent-deaf bug: the engine was chosen once at boot, its deps died mid-run, and the
+#: loop returned "" for every command forever with no recovery. 2 in a row (not 1) so a
+#: single cough/bang after a wake doesn't needlessly rebuild. Quiet empty segments are
+#: handled separately (the speaker, not the engine) and never count here.
+_STT_DEAD_STREAK = int(os.environ.get("UTAH_VOICE_STT_DEAD_STREAK", "2"))
+#: Don't rebuild the STT engine more than once per this window (rebuild re-spawns a
+#: model/server — cheap but not free; this damps thrash if nothing can transcribe).
+_STT_HEAL_COOLDOWN_S = float(os.environ.get("UTAH_VOICE_STT_HEAL_COOLDOWN", "30.0"))
+
 # ── Barge-in ("no time to stop") ─────────────────────────────────────────────
 # While Ace is SPEAKING, the mic callback normally drops every frame (the echo guard:
 # Ace's replies say "Ace", so an open mic re-fires the wake word on his own voice). That
@@ -498,6 +512,9 @@ def run() -> None:
     # supervisor); it resets the moment real audio returns.
     _reopen_evt = threading.Event()   # set by the deaf clock or stale detector → hard reopen
     reopen_state = {"count": 0}       # in-process reopen attempts before escalating to restart
+    # Dead-STT self-heal counters: a streak of LOUD post-wake segments that transcribe to
+    # "" means the engine is dead, not the speaker → rebuild it (see _STT_DEAD_STREAK).
+    stt_health = {"empty_loud_streak": 0, "last_heal": 0.0}
     # Monotonic ts of the last mic-callback invocation — the heartbeat thread reads it to tell a
     # live loop (callback firing, even on silence/zeros) from a frozen handle (callback stopped).
     _alive = {"t": time.monotonic()}
@@ -695,6 +712,7 @@ def run() -> None:
                 log.info("voice: transcript=%r", text)
                 if text:
                     vstate["last_transcript"] = text[:120]
+                    stt_health["empty_loud_streak"] = 0   # engine is transcribing — healthy
                 if not text and not segment_armed:
                     return
                 if not text and segment_armed and seg_rms < config.VOICE_SILENCE_RMS:
@@ -702,6 +720,27 @@ def run() -> None:
                              seg_rms)
                     _last_empty_wake_at = time.monotonic()   # arm empty-wake cooldown
                     return
+                if not text and segment_armed:
+                    # Loud (rms ≥ VOICE_SILENCE_RMS), post-wake audio that transcribed to
+                    # NOTHING — real speech reached the engine and it produced "". A streak
+                    # of these means the ENGINE is dead (vanished model / uninstalled
+                    # package / wedged server), not the speaker. Rebuild onto a working
+                    # engine so voice can't stay stuck on a silent transcriber forever
+                    # (the 2026-06-18 silent-deaf bug: engine chosen at boot, deps died
+                    # mid-run, every command returned "" with no recovery).
+                    stt_health["empty_loud_streak"] += 1
+                    now = time.monotonic()
+                    if (stt_health["empty_loud_streak"] >= _STT_DEAD_STREAK
+                            and now - stt_health["last_heal"] > _STT_HEAL_COOLDOWN_S):
+                        dead = type(stt.get_stt()).__name__
+                        log.error("voice: %d loud post-wake segments → EMPTY (rms=%.4f) — "
+                                  "STT engine %s looks dead; rebuilding a working one",
+                                  stt_health["empty_loud_streak"], seg_rms, dead)
+                        stt.flag_dead(dead)            # next transcribe re-selects, skipping it
+                        stt_health["last_heal"] = now
+                        stt_health["empty_loud_streak"] = 0
+                        vstate["stt_heals"] = vstate.get("stt_heals", 0) + 1
+                        state.write(**vstate)
                 if text and not _ECHO.allow(text):
                     log.info("voice: echo-dropped duplicate transcript")
                     return

@@ -114,6 +114,64 @@ def test_whisper_drops_silence_hallucination_keeps_speech(monkeypatch):
     assert stt.MLXWhisperSTT("m").transcribe("/x.wav") == "What's going on?"  # speech kept
 
 
+def test_flag_dead_skips_engine_then_recovers_after_cooldown(monkeypatch):
+    """The 2026-06-18 silent-deaf root cause: the STT engine is chosen ONCE at boot and
+    never re-evaluated, so when its deps die mid-run (mlx_whisper went unimportable after
+    a healthy boot) every command transcribes to "" forever with no recovery. flag_dead
+    must (a) clear the memoized engine so get_stt rebuilds, (b) make re-selection SKIP the
+    dead engine and fall through to the next AVAILABLE one, and (c) let it recover once the
+    cooldown lapses (a transient wedge, not a structural death)."""
+    import importlib.util as iu
+
+    import utah.voice.stt as stt
+    from utah import config
+
+    # Both whisper.cpp AND mlx "available" so there is a real fallback to fall to.
+    monkeypatch.setattr(config, "STT_ENGINE", "whisper")
+    monkeypatch.setattr(stt.os.path, "exists", lambda p: True)
+    monkeypatch.setattr(stt, "_best_whispercpp_model", lambda: "/m/ggml-small.en.bin")
+    monkeypatch.setattr(iu, "find_spec",
+                        lambda name: object() if name == "mlx_whisper" else None)
+    now = {"t": 1000.0}
+    monkeypatch.setattr(stt.time, "monotonic", lambda: now["t"])
+    stt._dead_until.clear()
+    stt.set_stt(None)
+
+    assert isinstance(stt._build_default_stt(), stt.WhisperCppSTT)  # primary wins
+
+    stt.set_stt(stt.WhisperCppSTT(model="/m"))   # pretend this is the live engine
+    stt.flag_dead("WhisperCppSTT")   # the loop flags by class name (type(engine).__name__)                  # the loop saw loud speech -> "" repeatedly
+    assert stt._stt is None                       # cache cleared → next get_stt rebuilds
+
+    # re-selection SKIPS the dead whisper.cpp and lands on the next available engine
+    assert isinstance(stt._build_default_stt(), stt.SubprocessSTT)
+
+    now["t"] += stt._DEAD_COOLDOWN_S + 1           # cooldown lapses
+    assert isinstance(stt._build_default_stt(), stt.WhisperCppSTT)  # eligible again
+    stt._dead_until.clear()
+
+
+def test_all_engines_dead_still_returns_one_never_silent(monkeypatch):
+    """If every available engine is flagged dead we still return the first constructible
+    one (best effort) and log loudly — the loop keeps trying, never silently returns
+    None/crashes the mic thread."""
+    import importlib.util as iu
+
+    import utah.voice.stt as stt
+    from utah import config
+
+    monkeypatch.setattr(config, "STT_ENGINE", "whisper")
+    monkeypatch.setattr(stt.os.path, "exists", lambda p: True)
+    monkeypatch.setattr(stt, "_best_whispercpp_model", lambda: "/m/ggml.bin")
+    monkeypatch.setattr(iu, "find_spec", lambda name: None)  # only whisper.cpp available
+    monkeypatch.setattr(stt.time, "monotonic", lambda: 5000.0)
+    stt._dead_until.clear()
+
+    stt.flag_dead("WhisperCppSTT")   # the loop flags by class name (type(engine).__name__)
+    assert isinstance(stt._build_default_stt(), stt.WhisperCppSTT)  # returned anyway
+    stt._dead_until.clear()
+
+
 def test_apple_stt_resolution(monkeypatch):
     import utah.voice.stt as stt
     from utah import config
