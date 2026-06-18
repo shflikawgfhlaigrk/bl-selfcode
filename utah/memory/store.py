@@ -314,7 +314,14 @@ class PostgresStore:
             live = conn.execute(
                 "SELECT count(*) FROM memory WHERE superseded_by IS NULL AND NOT archived"
             ).fetchone()[0]
-            entities = conn.execute("SELECT count(*) FROM entity").fetchone()[0]
+            # Count only entities that still link to a LIVE memory. Superseded/archived
+            # memories previously left their entity rows counted in the raw entity table — a
+            # ~5.4x overstatement on the deck gauge. An entity with no live link is dead.
+            entities = conn.execute(
+                "SELECT count(DISTINCT me.ent_id) FROM mem_entity me "
+                "JOIN memory m ON m.id = me.mem_id "
+                "WHERE m.superseded_by IS NULL AND NOT m.archived"
+            ).fetchone()[0]
         return {"total": int(total), "live": int(live), "entities": int(entities)}
 
     def list_memories(self, limit: int = 50, offset: int = 0) -> list[dict]:
@@ -345,9 +352,14 @@ class PostgresStore:
         ``limit`` is clamped to ``[0, _LIST_MAX]`` (same defense as :meth:`list_memories`)."""
         limit = max(0, min(int(limit), _LIST_MAX))
         with self._tx() as conn:
+            # Count only links to LIVE memory (matches this method's documented "live-link
+            # count"). The old LEFT JOIN counted archived/superseded links and surfaced dead
+            # code-chunk entities at the top of the deck drill-down.
             rows = conn.execute(
                 "SELECT e.name, count(me.mem_id) FROM entity e "
-                "LEFT JOIN mem_entity me ON me.ent_id = e.id "
+                "JOIN mem_entity me ON me.ent_id = e.id "
+                "JOIN memory m ON m.id = me.mem_id "
+                "WHERE m.superseded_by IS NULL AND NOT m.archived "
                 "GROUP BY e.id, e.name ORDER BY count(me.mem_id) DESC, e.name LIMIT %s",
                 (limit,),
             ).fetchall()
