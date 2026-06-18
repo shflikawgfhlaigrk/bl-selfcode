@@ -339,6 +339,11 @@
   .stopvoice:hover{background:#2a1110;box-shadow:0 0 16px rgba(255,90,80,.35)}
   .stopvoice:active{transform:scale(.96)}
   .stopvoice.fired{background:#ff5a50;color:#1c0c0a}
+  /* prominent header link to the dedicated Trading page (its own page, not a menu item) */
+  .navbtn{display:inline-flex;align-items:center;gap:5px;padding:6px 13px;border:1px solid var(--gold);
+    border-radius:9px;background:linear-gradient(180deg,#1a160b,#0f0c06);color:var(--gold2);font-size:11px;
+    letter-spacing:1.5px;text-decoration:none;white-space:nowrap;box-shadow:0 0 14px var(--goldglow);flex:none}
+  .navbtn:hover{background:#221d0e;border-color:var(--gold2)}
   /* live voice caption — auto-populates "what Ace HEARD" + the answer off the /events bus,
      so a spoken turn is VISIBLE and you can verify the transcript was accurate. */
   .vcap{position:fixed;left:50%;bottom:22px;transform:translateX(-50%) translateY(16px);
@@ -600,6 +605,7 @@
     </a>
     <div class="header-row">
       <button type="button" class="hamb" id="hamb" title="labs & consoles" aria-label="Open menu">☰</button>
+      <a class="navbtn" href="/trading" title="Trading Engines — its own page · live P&amp;L graphs per engine">📈 TRADING</a>
       <div class="logo"><div class="mark"></div><b>UTAH</b><span>LOCAL COMMAND DECK</span></div>
       <div class="chips">
         <span class="chip"><span class="led" id="led-core"></span>LOCAL CORE</span>
