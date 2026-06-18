@@ -320,6 +320,31 @@ def diagnose() -> dict:
     return _log("diagnose", ok=ok, summary=summary, evidence={"problems": problems})
 
 
+# --------------------------------------------------------------------------- WORKING ON
+def working_on() -> dict:
+    """What Ace is doing RIGHT NOW — read from the LIVE activity ledger (open receipts), never
+    guessed. Reports each running action and how long it's been going; when nothing is running
+    it says so honestly and names the last finished action. This is the self-knowledge answer to
+    "what are you working on / what are you doing right now" (diagnose() covers health,
+    introspect.self_model() covers "who/what are you")."""
+    act = activity(n=5)
+    live = act["active"]
+
+    def _dur(e: float) -> str:
+        return f"{e:.0f}s" if e < 90 else f"{e/60:.1f}m"
+
+    if not live:
+        recent = act["recent"][:1]
+        tail = (f" Last finished: {recent[0].get('action')} — "
+                f"{(recent[0].get('summary') or '')[:90]}." if recent else "")
+        return _log("working_on", ok=True, summary="Nothing running right now — idle." + tail,
+                    evidence={"active": [], "recent_count": len(act["recent"])})
+    parts = [f"{a.get('action')} ({_dur(a.get('elapsed', 0))}"
+             f"{', STALLED' if a.get('stalled') else ''})" for a in live]
+    summary = f"Working on {len(live)} thing(s) right now: " + "; ".join(parts) + "."
+    return _log("working_on", ok=True, summary=summary, evidence={"active": live})
+
+
 # --------------------------------------------------------------------------- STRIPE
 def check_stripe() -> dict:
     """Read REAL Stripe sales — or say honestly that it can't. Michael: "do we have any
@@ -750,6 +775,10 @@ _INTENTS: list[tuple[re.Pattern[str], str]] = [
                 r"close the loop)\b|^\s*heal( now| up| the system| yourself)?\s*[.!]?$", re.I), "heal"),
     (re.compile(r"\bdeploy workers?\b|\b(improve|work on|harden|fix)\b[^.]*\bapps?\b|"
                 r"\b(improve|work on|fix|harden)\s+(the\s+)?(leads|real ?estate|marketing|trading|sovereign)\b", re.I), "improve"),
+    (re.compile(r"\bwhat (are|r) you (doing|working on|up to|busy with)\b|"
+                r"\bwhat'?s ace (doing|working on)\b|"
+                r"\bare you (doing|working on) (anything|something)\b|"
+                r"\bwhat are you currently\b", re.I), "working_on"),
     (re.compile(r"\b(what('?s| is) wrong|are you (ok|okay|healthy|good|broken|fine)|"
                 r"what('?s| is) broken|anything (wrong|broken)|diagnose( yourself)?|"
                 r"self[\s-]?diagnos|health check|how('?re| are) you (doing|feeling))\b", re.I), "diagnose"),
@@ -800,6 +829,8 @@ def run(text: str) -> str:
             return workers_status()["summary"]
         if intent == "diagnose":
             return diagnose()["summary"]
+        if intent == "working_on":
+            return working_on()["summary"]
     except Exception as exc:  # noqa: BLE001 — a failed actuator is REPORTED, never painted
         return f"I tried to {intent.replace('_', ' ')} and it failed: {exc}"
     return "I didn't catch which thing to do."
@@ -817,6 +848,8 @@ _CAPS = {
     "heal": lambda a: heal(),
     "diagnose": lambda a: diagnose(),
     "health": lambda a: diagnose(),
+    "working_on": lambda a: working_on(),
+    "doing": lambda a: working_on(),
     "improve": lambda a: improve_apps(a[0] if a else None),
     "feed": lambda a: {"feed": feed(int(a[0]) if a else 20)},
 }
