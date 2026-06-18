@@ -60,6 +60,30 @@ def test_junk_response_is_empty_not_a_crash(monkeypatch, tmp_path):
     assert s.transcribe(str(wav)) == ""
 
 
+def test_ready_waits_for_inference_to_answer_not_just_socket(monkeypatch):
+    """_ready returns True only when /inference actually ANSWERS (model loaded), polling
+    through the load window — not on mere socket-accept, which raced the ~7.6s model load
+    and dead-zoned the first command + armed a 20s cooldown (live 2026-06-18). See
+    WhisperCppSTT._ready."""
+    import urllib.error
+
+    s = stt.WhisperCppSTT(bin_path="/fake", model="/fake", port=18092)
+    monkeypatch.setattr(stt.time, "sleep", lambda *_: None)        # no real backoff wait
+    seen = {"n": 0, "url": ""}
+
+    def post(url, path, timeout):
+        seen["n"] += 1
+        seen["url"] = url
+        if seen["n"] < 3:
+            raise urllib.error.URLError("model still loading")     # not ready yet
+        return '{"text":""}'                                        # loaded → answers
+
+    s._post = post
+    assert s._ready(timeout=5.0) is True
+    assert seen["n"] == 3                                            # polled THROUGH the load
+    assert seen["url"].endswith("/inference")                       # probed the REAL endpoint
+
+
 def test_cold_start_retries_through_model_load_then_succeeds(monkeypatch, tmp_path):
     """The 2026-06-18 race: whisper-server accepts the socket BEFORE the model loads, so
     the first /inference POST after a spawn is refused. On a COLD server that's transient —

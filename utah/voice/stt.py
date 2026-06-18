@@ -290,17 +290,39 @@ class WhisperCppSTT:
             self._proc = None
 
     def _ready(self, timeout: float | None = None) -> bool:
-        """Poll until the server accepts TCP (model loaded) — bounded by boot budget."""
-        import socket
+        """Ready = the model is LOADED and ``/inference`` actually answers — NOT just that
+        the socket accepts. whisper-server binds its port in ~0.1s but takes SECONDS to
+        load the model (measured ~7.6s for small.en), so a socket-accept check returns True
+        far too early and the first real POST races the load → refused/empty → the
+        cold-start deafness + 20s cooldown that left commands empty after every (re)boot
+        (live 2026-06-18). Probe the REAL endpoint with a tiny silent clip until it
+        answers, bounded by the boot budget. Only paid on a cold spawn (a warm server skips
+        this), so the model-load cost lands here at boot, not on Michael's first command."""
+        import tempfile
+        import wave
 
         deadline = time.monotonic() + (timeout or config.STT_WORKER_BOOT_S)
-        while time.monotonic() < deadline:
+        fd, probe = tempfile.mkstemp(suffix=".wav", prefix="utah_wcpp_ready_")
+        os.close(fd)
+        try:
+            with wave.open(probe, "wb") as wf:
+                wf.setnchannels(1)
+                wf.setsampwidth(2)
+                wf.setframerate(16000)
+                wf.writeframes(b"\x00\x00" * 1600)   # 0.1s of silence — a cheap load probe
+            url = f"http://127.0.0.1:{self._port}/inference"
+            while time.monotonic() < deadline:
+                try:
+                    self._post(url, probe, 5.0)
+                    return True          # /inference answered → model loaded → truly ready
+                except Exception:        # noqa: BLE001 — refused/loading; keep polling
+                    time.sleep(0.3)
+            return False
+        finally:
             try:
-                with socket.create_connection(("127.0.0.1", self._port), timeout=1):
-                    return True
+                os.remove(probe)
             except OSError:
-                time.sleep(0.3)
-        return False
+                pass
 
     @staticmethod
     def _post(url: str, wav_path: str, timeout: float) -> str:
