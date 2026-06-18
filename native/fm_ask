@@ -1,0 +1,74 @@
+#!/usr/bin/env python3
+"""fm_ask — Apple Foundation Models bridge for Project Utah's local (free) brain.
+
+This is the missing on-device-inference binary that ``utah/local_brain.py`` and
+``utah/fm_local.py`` already shell out to. It calls Apple Intelligence's on-device
+model through the official Python SDK (``apple-fm-sdk``, WWDC 2026) — zero API cost,
+no network, runs on the Neural Engine.
+
+CONTRACT (matches utah/local_brain.py._default_runner AND utah/fm_local.py.generate):
+  stdin            = the prompt text
+  --system "..."   = optional system instructions (LanguageModelSession instructions)
+  stdout           = the model's answer            (exit 0 = success)
+  exit 2           = model unavailable (Apple Intelligence off / unsupported / SDK missing)
+  exit 3           = generation error (guardrail, context-window, empty prompt, etc.)
+
+A non-zero exit makes local_brain.ask_or_none() return None, so the caller falls
+back to the Claude CLI automatically — honest degrade, never a fabricated answer.
+
+REQUIRES: pip install apple-fm-sdk   (macOS 26.0+, Apple Silicon, Apple Intelligence ON,
+          Xcode 26.0+). The shebang must point at a Python that has apple_fm_sdk
+          installed — the setup script rewrites it to ~/.utah/venv/bin/python3.
+"""
+from __future__ import annotations
+
+import argparse
+import asyncio
+import sys
+
+
+async def _run(prompt: str, system: str | None) -> int:
+    try:
+        import apple_fm_sdk as fm
+    except ImportError as exc:
+        sys.stderr.write(f"apple_fm_sdk not installed: {exc}\n")
+        return 2
+
+    model = fm.SystemLanguageModel()
+    ok, reason = model.is_available()
+    if not ok:
+        sys.stderr.write(f"Foundation Models unavailable: {reason}\n")
+        return 2
+
+    session = (
+        fm.LanguageModelSession(instructions=system, model=model)
+        if system else
+        fm.LanguageModelSession(model=model)
+    )
+    try:
+        resp = await session.respond(prompt)
+    except Exception as exc:  # GenerationError / GuardrailViolationError / ExceededContextWindowSizeError / AssetsUnavailableError
+        sys.stderr.write(f"generation error: {type(exc).__name__}: {exc}\n")
+        return 3
+
+    text = str(resp).strip()
+    if not text:
+        sys.stderr.write("empty response\n")
+        return 3
+    sys.stdout.write(text)
+    return 0
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(description="Apple Foundation Models bridge (stdin->stdout)")
+    ap.add_argument("--system", default=None, help="optional system instructions")
+    args = ap.parse_args()
+    prompt = sys.stdin.read().strip()
+    if not prompt:
+        sys.stderr.write("empty prompt\n")
+        return 3
+    return asyncio.run(_run(prompt, args.system))
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

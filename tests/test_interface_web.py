@@ -286,3 +286,21 @@ def test_post_endpoints_reject_oversized_input():
                                                          "Host": "testserver"})
         assert r.status_code == 413, f"{path} accepted oversized input ({r.status_code})"
         assert "too large" in r.json().get("error", "").lower()
+
+
+def test_hud_and_sim_redirect_to_canonical_deck():
+    """Stale React mockup URLs must not trap operators — one live deck only."""
+    from starlette.testclient import TestClient
+
+    client = TestClient(web.build_app())
+    for path in ("/hud", "/sim"):
+        r = client.get(path, follow_redirects=False)
+        assert r.status_code == 302
+        assert r.headers["location"] == "/"
+
+
+def test_prepare_live_deck_injects_discord_strip_when_configured(monkeypatch):
+    monkeypatch.setattr(web, "_discord_invite", lambda: "https://discord.gg/TestInvite")
+    html = web._prepare_deck_html(web.LIVE)
+    assert 'class="discord-strip on"' in html
+    assert "https://discord.gg/TestInvite" in html

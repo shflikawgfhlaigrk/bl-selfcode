@@ -99,6 +99,13 @@ SAFETY_PATHS: tuple[str, ...] = (
     "utah/daemon/lifecycle.py",
     "utah/daemon/governor.py",
     "tests/conftest.py",   # the shared autouse pollution guards — the gate's harness
+    # Operator deck — stable UI; autonomous self-code kept rewriting live.html (SICA
+    # frontend domain). Tier-D: propose-only human review, never auto-merge churn.
+    "utah/interface/web.py",
+    "utah/interface/static/live.html",
+    "utah/interface/static/terminal.html",
+    "utah/interface/static/truth.html",
+    "utah/interface/static/route.html",
 )
 
 #: The tier of a change = the STRICTEST tier among the files it touches; the tier

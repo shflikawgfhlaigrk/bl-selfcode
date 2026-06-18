@@ -1,0 +1,29 @@
+{
+    "git.allowForcePush": false,
+    "git.allowNoVerifyCommit": false,
+    "java.help.collectErrorLog": true,
+    "emmet.showSuggestionsAsSnippets": true,
+    "emmet.triggerExpansionOnTab": true,
+    "gitlens.defaultCurrentUserNameStyle": "nameAndYou",
+    "gitlens.defaultGravatarsStyle": "wavatar",
+    "gitlens.currentLine.dateFormat": "",
+    "gitlens.launchpad.indicator.useColors": true,
+    "gitlens.views.scm.grouped.views": {
+        "fileHistory": true,
+        "launchpad": true,
+        "searchAndCompare": true
+    },
+    "gitlens.views.showContributorsStatistics": true,
+    "gitlens.views.repositories.showIncomingActivity": true,
+    "cursor.composer.cmdPFilePicker2": true,
+    "cursor.cpp.disabledLanguages": [],
+    "cursor.cpp.enablePartialAccepts": true,
+    "cursor.general.disableHttp1SSE": true,
+    "cursor.general.glassShowWarningNotifications": true,
+    "cursor.semanticSearch.includeCommitsWithFiles": true,
+    "cursor.terminal.usePreviewBox": true,
+    "cursor.windowSwitcher.sidebarHoverCollapsed": true,
+    "editor.accessibilityPageSize": 50000,
+    "editor.autoClosingBrackets": "never",
+    "typescript.tsserver.watchOptions": "vscode"
+}

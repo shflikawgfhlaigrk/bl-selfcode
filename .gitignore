@@ -30,8 +30,24 @@ venv/
 
 # compiled on-device LLM bridge (rebuild: xcrun swiftc -O native/fm_cli.swift -o native/fm_cli)
 native/fm_cli
+# compiled STT bridge (Mach-O; rebuild from native/stt_cli.swift)
+native/stt_cli
 
 # pytest coverage artifacts
 .coverage
 .coverage.*
 htmlcov/
+
+# runtime memory store (SQLite — churns every run, holds private facts; not source)
+/data/memory.db
+
+# Flutter generated/ephemeral platform scaffolding (regenerated on build; conflict-prone)
+/ios/Flutter/ephemeral/
+/ios/Flutter/Generated.xcconfig
+/ios/Flutter/flutter_export_environment.sh
+/ios/Runner/GeneratedPluginRegistrant.*
+/ios/**/xcuserdata/
+/macos/Flutter/ephemeral/
+
+# Obsidian vault UI state (workspace.json churns constantly; not project source)
+/.obsidian/

@@ -1,0 +1,14 @@
+{
+  "ts": "2026-06-14T15:04:03.870095+00:00",
+  "blocked": "linear_free_tier_issue_limit",
+  "last_applied_seq": 335,
+  "resume_from_seq": 203,
+  "mapped": 335,
+  "pending_count": 0,
+  "issues": [],
+  "resume_commands": {
+    "api_apply": "LINEAR_API_KEY=lin_api_... bash ops/agent_pipeline.sh ingest-resume --apply --limit 50",
+    "mcp_batch": "bash ops/agent_pipeline.sh ingest-mcp-batch 15 0",
+    "state_update": "python3 ops/linear_mcp_state_update.py /tmp/batch_results.json"
+  }
+}

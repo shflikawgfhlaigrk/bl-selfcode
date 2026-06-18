@@ -28,6 +28,7 @@ MODULES: tuple[str, ...] = (
     "contacts",
     "discord",
     "discord_feed",
+    "engine_bridge",
     "external",
     "imessage",
     "macos",

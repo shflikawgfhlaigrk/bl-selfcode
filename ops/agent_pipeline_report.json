@@ -1,0 +1,219 @@
+{
+  "ts": "2026-06-14T14:38:36.124116+00:00",
+  "repo": "/Users/michaelbarber/ProjectUtah",
+  "phase": "all",
+  "inventory": {
+    "queue_lines": 330,
+    "issues_in_queue": 323,
+    "mapped": 197,
+    "pending": 128,
+    "last_applied_seq": 202,
+    "blocked": "linear_free_tier_issue_limit",
+    "resume_from_seq": 203,
+    "deck_pipeline": {
+      "panel": "pipeline",
+      "smb": [
+        {
+          "key": "discovered",
+          "label": "Discovered",
+          "n": 14927,
+          "of": 14927,
+          "note": "Local no-website SMBs scouted from OpenStreetMap + Google Maps (free)."
+        },
+        {
+          "key": "reachable",
+          "label": "Reachable",
+          "n": 5538,
+          "of": 14927,
+          "note": "Has a phone or email on file (5,490 phone \u00b7 1,082 email)."
+        },
+        {
+          "key": "email",
+          "label": "Email-deliverable",
+          "n": 1082,
+          "of": 14927,
+          "note": "Has a verified email \u2014 the only channel that can be cold-sent at scale."
+        },
+        {
+          "key": "contacted",
+          "label": "Prospects contacted",
+          "n": 351,
+          "of": 14927,
+          "note": "Leads marked contacted at least once (deduped \u2014 never messaged twice)."
+        },
+        {
+          "key": "sent",
+          "label": "Messages sent",
+          "n": 474,
+          "of": 14927,
+          "note": "Cold outreach events sent (314 email \u00b7 160 SMS/iMessage)."
+        },
+        {
+          "key": "delivered",
+          "label": "Email delivered",
+          "n": 256,
+          "of": 14927,
+          "note": "Accepted by the recipient mailserver (13 bounced)."
+        },
+        {
+          "key": "replied",
+          "label": "Replied",
+          "n": 20,
+          "of": 14927,
+          "note": "Real inbound replies detected on the mailbox."
+        },
+        {
+          "key": "won",
+          "label": "Won (paid)",
+          "n": 0,
+          "of": 14927,
+          "note": "Closed paying customers. Honest 0 \u2014 no sale has landed yet."
+        }
+      ],
+      "probate": [
+        {
+          "key": "cases",
+          "label": "Estate cases",
+          "n": 230,
+          "of": 230,
+          "note": "Probate/estate filings scraped from county notices (free)."
+        },
+        {
+          "key": "valued",
+          "label": "Property-valued",
+          "n": 47,
+          "of": 230,
+          "note": "Enriched with an assessed/ARV value \u2014 the ones worth a letter."
+        },
+        {
+          "key": "contacted",
+          "label": "Heirs contacted",
+          "n": 0,
+          "of": 230,
+          "note": "Estate cases where an heir letter has gone out."
+        },
+        {
+          "key": "sent",
+          "label": "Letters sent",
+          "n": 0,
+          "of": 230,
+          "note": "Probate-motivated outreach events (separate track from SMB)."
+        }
+      ],
+      "splits": {
+        "email": 1082,
+        "phone": 5490,
+        "website": 4624,
+        "sent_email": 314,
+        "sent_sms": 160
+      },
+      "diagnosis": {
+        "mouth": 14927,
+        "email_rate": 7.2,
+        "reachable_rate": 37.1,
+        "headline": "Only 7.2% of discovered leads have an email \u2014 that's the funnel's tightest pinch. Both fixes below are free.",
+        "leaks": [
+          {
+            "title": "Email harvest is under-running",
+            "detail": "3,680 discovered SMBs have a website but no email yet. Their own contact page is a free email source \u2014 the enrich cron (scrape \u2192 extract \u2192 MX-verify) already does this but only sips ~50/run. Drain this backlog and the deliverable pool multiplies.",
+            "free": true,
+            "n": 3680
+          },
+          {
+            "title": "Phone lane is under-used",
+            "detail": "4,456 leads have a phone but no email. They're reachable RIGHT NOW over the SMS/iMessage auto-channel with no enrichment \u2014 yet only 160 texts have gone out.",
+            "free": true,
+            "n": 4456
+          }
+        ]
+      }
+    }
+  },
+  "ingest_resume": {
+    "pending": 129,
+    "export_stdout": "exported 129 pending -> /Users/michaelbarber/ProjectUtah/ops/linear-pending-export.json",
+    "export_path": "/Users/michaelbarber/ProjectUtah/ops/linear-pending-export.json"
+  },
+  "verify": {
+    "verify_stack_rc": 0,
+    "verify_py_rc": 1,
+    "pytest_rc": 1,
+    "verify_stack_tail": [
+      "",
+      "\u001b[1m===== Summary =====\u001b[0m",
+      "  \u001b[32mOK\u001b[0m  all checks passed"
+    ],
+    "verify_json": {
+      "ok": false,
+      "state": "red",
+      "exit_code": 1,
+      "duration_s": 132.2,
+      "pyfiles": 468,
+      "failures": [
+        "FAILED tests/test_interface_web.py::test_api_alias_serves_same_feed_and_unknown_routes_404",
+        "FAILED tests/test_proof_skeleton.py::test_skeleton_seeds_every_department_all_red"
+      ],
+      "ts": 1781448065.151513
+    },
+    "pytest_tail": [
+      "    from starlette.testclient import TestClient",
+      "",
+      "-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html",
+      "=========================== short test summary info ============================",
+      "FAILED tests/test_proof_skeleton.py::test_skeleton_seeds_every_department_all_red"
+    ]
+  },
+  "models": {
+    "light": {
+      "status": "ok",
+      "text": "I don't know. Can I help you find the information?"
+    },
+    "heavy": {
+      "status": "ok",
+      "text": "MODEL_OK"
+    }
+  },
+  "stress": {
+    "panels": {
+      "/live": {
+        "http": 200,
+        "bytes": 148056
+      },
+      "/panel/health": {
+        "http": 200,
+        "bytes": 28
+      },
+      "/panel/failures": {
+        "http": 200,
+        "bytes": 30
+      },
+      "/panel/proof": {
+        "http": 200,
+        "bytes": 27
+      },
+      "/panel/selfcode": {
+        "http": 200,
+        "bytes": 888
+      },
+      "/memory": {
+        "http": 200,
+        "bytes": 42
+      },
+      "/panel/revenue": {
+        "http": 200,
+        "bytes": 29
+      },
+      "/panel/pipeline": {
+        "http": 200,
+        "bytes": 2431
+      },
+      "/state": {
+        "http": 200,
+        "bytes": 16873
+      }
+    },
+    "parallel_pipeline_ok": 5,
+    "foundation_rc": 0,
+    "foundation_head": "{\"ok\": true, \"state\": \"green\", \"checks\": {\"postgres\": true, \"supervisor\": true, \"daemon\": true}, \"anomalies\": [], \"secrets\": {\"business\": {\"updated\": [], \"missing\": [], \"configured\": true}, \"google\": "
+  }
+}

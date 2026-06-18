@@ -166,12 +166,30 @@ def workers_status() -> dict:
 
 
 # --------------------------------------------------------------------------- SELF-DIAGNOSIS
+def _git_state() -> dict:
+    """Which code is actually live: branch + short SHA + dirty count of the repo the daemon
+    imports from. The daemon runs WHATEVER branch is checked out (PYTHONPATH), so a stranded
+    feature branch or an uncommitted edit = Ace silently running code that isn't on main."""
+    repo = os.path.expanduser("~/ProjectUtah")
+    rc, branch = _sh(["git", "-C", repo, "rev-parse", "--abbrev-ref", "HEAD"])
+    _, sha = _sh(["git", "-C", repo, "rev-parse", "--short", "HEAD"])
+    _, dirty = _sh(["git", "-C", repo, "status", "--porcelain"])
+    return {"branch": branch.strip() if rc == 0 else "?",
+            "sha": sha.strip(), "dirty": len([l for l in dirty.splitlines() if l.strip()])}
+
+
 def diagnose() -> dict:
     """"What is wrong with me right now" — Ace's real self-health, from LIVE state, not a
-    hardcoded model. Aggregates dead jobs, code/plist drift, down services, and recent
-    recorded failures, so when Michael asks "are you healthy / what's broken" Ace answers
-    from truth. Healthy => says so; problems => names each with its real detail."""
+    hardcoded model. Aggregates dead jobs, code/plist drift, down services, recent recorded
+    failures, and which git branch/SHA is actually live, so when Michael asks "are you
+    healthy / what's broken / what code are you running" Ace answers from truth."""
     problems = []
+    git = _git_state()
+    if git["dirty"] > 0:
+        problems.append({"area": "code", "detail": f"{git['dirty']} uncommitted file(s) on "
+                         f"{git['branch']} ({git['sha']}) — live code may differ from git"})
+    if git["branch"] in ("HEAD", "?"):
+        problems.append({"area": "code", "detail": f"detached HEAD ({git['sha']}) — not on a branch"})
     w = workers_status()
     for d in w["evidence"]["dead"]:
         problems.append({"area": "job", "detail": f"{d['label']} dead (exit {d['exit']})"})
