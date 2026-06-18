@@ -53,6 +53,33 @@ def test_wake_runs_brain_speaks_and_publishes():
     assert any(ev.get("q") == "what is utah" for ch, ev in published)  # shown on deck
 
 
+def test_heard_transcript_is_published_before_the_answer():
+    """The deck auto-populates WHAT ACE HEARD the instant the transcript lands — before
+    the (slow) brain turn — so Michael can verify the STT was accurate, then see the
+    answer. The RAW transcript (not just the wake-gated command) goes on the "voice" bus
+    channel, and the heard event precedes the answer event."""
+    published = []
+
+    def fake_tell(cmd):
+        return Reply(text="It's sunny.", source=ReplySource.BRAIN)
+
+    agent.handle_utterance(
+        "ace what's the weather",
+        tell=fake_tell, tell_stream=_boom,                 # instant answer → no stream
+        speak_stream=lambda chunks, on_start=None: "".join(chunks),
+        publish=lambda ch, ev: published.append((ch, ev)),
+    )
+    voice = [ev for ch, ev in published if ch == "voice"]
+    kinds = [ev.get("kind") for ev in voice]
+    heard = next(ev for ev in voice if ev.get("kind") == "heard")
+    answer = next(ev for ev in voice if ev.get("kind") == "answer")
+
+    assert heard["transcript"] == "ace what's the weather"   # the RAW transcript, verifiable
+    assert heard["command"] == "what's the weather"          # ...vs the wake-gated command
+    assert answer["answer"] == "It's sunny."
+    assert kinds.index("heard") < kinds.index("answer")      # heard shown FIRST, then answer
+
+
 def test_nonempty_brain_answer_is_spoken_without_a_second_brain_call():
     """LATENCY: when tell() already produced a full BRAIN answer, voice must SPEAK that
     answer — not throw it away and run tell_stream(), a SECOND full brain round-trip

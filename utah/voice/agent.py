@@ -196,6 +196,14 @@ def handle_utterance(transcript, *, audio_wake: bool = False, wake_confidence=No
     # 14s later when the answer lands. Never let a publish hiccup crash the loop.
     _publish_safe(publish, "wake", {"command": command})
 
+    # Auto-populate WHAT ACE HEARD on the deck the instant the transcript exists — before
+    # the (slow) brain turn — so Michael can SEE it heard him and verify the STT was
+    # accurate, then watch the answer fill in. The RAW transcript (not just the wake-gated
+    # command) is what proves accuracy. Empty transcripts (noise/echo) publish nothing.
+    heard = (transcript or "").strip()
+    if heard:
+        _publish_safe(publish, "voice", {"kind": "heard", "transcript": heard, "command": command})
+
     if not command:
         return _ack_bare_wake(transcript, speak_stream, publish, on_speaking)
 
@@ -253,7 +261,7 @@ def handle_utterance(transcript, *, audio_wake: bool = False, wake_confidence=No
             answer = instant.text.strip()
             captured["source"] = instant.source.value
     _publish_safe(publish, "voice",
-                  {"q": command, "answer": answer, "source": captured["source"]})
+                  {"kind": "answer", "q": command, "answer": answer, "source": captured["source"]})
 
     return {"wake": True, "command": command, "answer": answer, "source": captured["source"]}
 
