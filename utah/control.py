@@ -234,47 +234,43 @@ def check_stripe() -> dict:
 
 
 # --------------------------------------------------------------------------- EMAIL
-def read_email(n: int = 5) -> dict:
-    """Read REAL recent inbox messages and report findings. Honest on auth failure."""
+def read_email(n: int = 5, mailbox: str | None = None) -> dict:
+    """Read REAL recent inbox messages via the canonical account pool (utah.mail.accounts():
+    email_accounts.json / gmail.json — `from` + `app_password` + `smtp_host`) and the IMAP
+    host derived by mail_replies.imap_host_for. *mailbox* picks one of the pool's `from`
+    addresses; default is the first. Honest on auth failure — never faked."""
     try:
-        import imaplib
         import email as _email
-        accounts = []
-        biz = HOME / "secrets" / "business.json"
-        if biz.exists():
-            d = json.loads(biz.read_text())
-            if d.get("email") and d.get("email_password"):
-                accounts.append(d)
-        gj = HOME / "secrets" / "gmail.json"
-        if gj.exists():
-            d = json.loads(gj.read_text())
-            if d.get("user") and d.get("app_password"):
-                accounts.append({"email": d["user"], "email_password": d["app_password"],
-                                 "imap_host": "imap.gmail.com"})
-        if not accounts:
+        import imaplib
+
+        from utah import mail
+        from utah.mail_replies import imap_host_for
+
+        accts = mail.accounts()
+        if not accts:
             return _log("read_email", ok=False,
-                        summary="Can't read email — no mailbox creds wired "
-                                "(~/.utah/secrets/business.json or gmail.json). Not faking it.",
+                        summary="Can't read email — no mailbox creds in the account pool "
+                                "(~/.utah/secrets/email_accounts.json or gmail.json). Not faking it.",
                         evidence={"creds": "absent"})
-        acct = accounts[0]
-        host = acct.get("imap_host") or "imap.gmail.com"
+        acct = next((a for a in accts if mailbox and mailbox.lower() in (a.get("from") or "").lower()), accts[0])
+        host = imap_host_for(acct)
         conn = imaplib.IMAP4_SSL(host, timeout=30)
-        conn.login(acct["email"], acct["email_password"])
+        conn.login(acct["from"], acct["app_password"])
         conn.select("INBOX")
-        typ, data = conn.search(None, "ALL")
+        _typ, data = conn.search(None, "ALL")
         ids = data[0].split()[-n:]
         msgs = []
         for i in reversed(ids):
-            typ, raw = conn.fetch(i, "(BODY.PEEK[HEADER.FIELDS (FROM SUBJECT DATE)])")
+            _t, raw = conn.fetch(i, "(BODY.PEEK[HEADER.FIELDS (FROM SUBJECT DATE)])")
             hdr = _email.message_from_bytes(raw[0][1])
             msgs.append({"from": str(hdr.get("From", ""))[:80],
                          "subject": str(hdr.get("Subject", ""))[:120],
                          "date": str(hdr.get("Date", ""))[:40]})
         conn.logout()
-        summary = f"Read {len(msgs)} most-recent in {acct['email']}: " + \
-                  "; ".join(f"\"{m['subject']}\" from {m['from']}" for m in msgs[:3])
+        summary = (f"Read {len(msgs)} most-recent in {acct['from']}: "
+                   + "; ".join(f"\"{m['subject']}\" from {m['from']}" for m in msgs[:3]))
         return _log("read_email", ok=True, summary=summary,
-                    evidence={"mailbox": acct["email"], "messages": msgs})
+                    evidence={"mailbox": acct["from"], "host": host, "messages": msgs})
     except Exception as exc:  # noqa: BLE001
         return _log("read_email", ok=False,
                     summary=f"Tried to read email and it failed: {exc}",
