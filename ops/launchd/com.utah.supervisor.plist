@@ -53,8 +53,16 @@
     <string>0.5</string>
     <key>UTAH_VOICE_FORCE_CAPTURE_S</key>
     <string>5.5</string>
+    <!-- STT engine = whisper.cpp (C++ Metal server), NOT mlx. MLX Whisper runs Whisper
+         on the Metal GPU IN-PROCESS via Python and DEADLOCKS under host load: the worker
+         hangs, SubprocessSTT returns '' for every command, and voice goes silently deaf
+         while the deck still shows 'listening' — the recurring "fired once then dead"
+         (live 2026-06-18: wake fired at 0.97, 15.5s of loud speech rms=0.078 transcribed
+         to '' in 0.5s = a wedged worker, not a transcribe). whisper.cpp is the
+         deadlock-immune replacement the codebase was built to use (owned killable server,
+         ~0.4s/clip, config.py default is already "whisper"). Do NOT set this back to mlx. -->
     <key>UTAH_STT_ENGINE</key>
-    <string>mlx</string>
+    <string>whisper</string>
   </dict>
 
   <key>HardResourceLimits</key>
