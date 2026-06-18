@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  com.utah.watch — the unifying self-watch loop (Michael, 2026-06-18: "loop and work issues
+  anytime something's wrong"). Every 10 min it runs control.watch():
+
+    diagnose() -> auto-heal the deterministic cases -> page Michael for what needs a human ->
+    write a proof receipt to ~/.utah/activity/actions.jsonl ONLY when something was wrong.
+
+  This is the COMPREHENSIVE layer on top of com.utah.heal: heal is edge-triggered by the
+  canary for the few healable fires; watch periodically runs the full diagnose() (dead jobs,
+  drift, uncommitted-code drift, recent failures, wrong branch, down services) so nothing
+  slips through. SAFE shape: NO autonomous code edits — it heals the mechanical things and
+  SURFACES everything else (the brain is never let loose to "fix" novel issues).
+
+  ONE bounded cycle per launch (no KeepAlive). Visible live at :8766/activity.
+  Pause: touch ~/.utah/run/heal.disabled (watch's heal step honors it).
+  Force now: launchctl kickstart -k gui/$(id -u)/com.utah.watch
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.utah.watch</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/michaelbarber/.utah/venv/bin/python</string>
+    <string>-m</string>
+    <string>utah.control</string>
+    <string>watch</string>
+  </array>
+  <key>WorkingDirectory</key>
+  <string>/Users/michaelbarber/.utah</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PYTHONPATH</key>
+    <string>/Users/michaelbarber/ProjectUtah</string>
+    <key>PYTHONUNBUFFERED</key>
+    <string>1</string>
+    <key>PATH</key>
+    <string>/Users/michaelbarber/.utah/venv/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+  </dict>
+  <key>StartInterval</key>
+  <integer>600</integer>
+  <key>RunAtLoad</key>
+  <false/>
+  <key>ThrottleInterval</key>
+  <integer>120</integer>
+  <key>ProcessType</key>
+  <string>Background</string>
+  <key>StandardOutPath</key>
+  <string>/Users/michaelbarber/.utah/logs/watch.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/michaelbarber/.utah/logs/watch.err</string>
+</dict>
+</plist>

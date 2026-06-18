@@ -281,7 +281,7 @@ def _git_state() -> dict:
             "sha": sha.strip(), "dirty": len([l for l in dirty.splitlines() if l.strip()])}
 
 
-def diagnose() -> dict:
+def diagnose(*, log: bool = True) -> dict:
     """"What is wrong with me right now" — Ace's real self-health, from LIVE state, not a
     hardcoded model. Aggregates dead jobs, code/plist drift, down services, recent recorded
     failures, and which git branch/SHA is actually live, so when Michael asks "are you
@@ -317,6 +317,8 @@ def diagnose() -> dict:
                if ok else f"{len(problems)} problem(s): "
                + "; ".join(p["detail"] for p in problems[:5])
                + (f" (+{len(problems)-5} more)" if len(problems) > 5 else ""))
+    if not log:  # watch() calls diagnose quietly and emits ONE consolidated receipt
+        return {"ok": ok, "summary": summary, "evidence": {"problems": problems}}
     return _log("diagnose", ok=ok, summary=summary, evidence={"problems": problems})
 
 
@@ -390,6 +392,57 @@ def working_on() -> dict:
              f"{', STALLED' if a.get('stalled') else ''})" for a in live]
     summary = f"Working on {len(live)} thing(s) right now: " + "; ".join(parts) + "."
     return _log("working_on", ok=True, summary=summary, evidence={"active": live})
+
+
+# --------------------------------------------------------------------------- WATCH (self-loop)
+def _watch_page(message: str, *, key: str) -> None:
+    """Page Michael via the deduped alert lane (same one the canary uses, so a recurring issue
+    can't storm). Best-effort — a dead pager never breaks the watch loop."""
+    from utah import alerts
+
+    alerts.critical_async("watch", message, key=key)
+
+
+def watch(*, diagnose_fn=None, heal_fn=None, notify_fn=None) -> dict:
+    """The unifying self-watch loop — runs on a cadence (com.utah.watch) + safe on demand:
+
+        diagnose() → auto-heal the deterministic cases → page Michael for what needs a human →
+        log proof ONLY when something was actually wrong (no all-clear spam in /activity).
+
+    NO autonomous code edits — the safe shape Michael chose: it fixes the verified, mechanical
+    things itself (dead jobs, drift, sovereign) and SURFACES everything else rather than letting
+    the brain blindly "fix" novel issues (which is where degeneracy/churn live). Fns are
+    injectable for tests; defaults call the real diagnose/heal quietly + the deduped pager."""
+    dg = diagnose_fn or (lambda: diagnose(log=False))
+    hl = heal_fn or (lambda: heal(log=False))
+    notify = notify_fn or _watch_page
+
+    problems = (dg().get("evidence") or {}).get("problems") or []
+    if not problems:
+        return {"ok": True, "summary": "All clear — nothing wrong.",
+                "evidence": {"detected": [], "healed": [], "remaining": []}}
+    rid = begin("watch", f"{len(problems)} issue(s) detected — healing + triaging", timeout=180)
+    healed = (hl().get("evidence") or {}).get("actions") or []
+    remaining = (dg().get("evidence") or {}).get("problems") or []   # what heal could NOT fix
+    # Page only for things that NEED a human now (dead jobs, down services, dead brain, drift,
+    # recorded failures). "code" drift (uncommitted/detached HEAD) is normal during dev — it's
+    # surfaced in /activity but never paged, so the loop can't become alert-fatigue noise.
+    paged = 0
+    for p in remaining:
+        if p.get("area") == "code":
+            continue
+        try:
+            notify(f"{p.get('area')} — {p.get('detail')}",
+                   key=f"watch:{p.get('area')}:{(p.get('detail') or '')[:40]}")
+            paged += 1
+        except Exception:  # noqa: BLE001 — paging is best-effort
+            pass
+    summary = (f"Detected {len(problems)} issue(s); auto-healed {len(healed)}; "
+               f"{len(remaining)} still need attention"
+               + (f" — paged you on {paged}" if paged else "") + ".")
+    return end(rid, ok=not remaining, summary=summary,
+               evidence={"detected": problems, "healed": healed, "remaining": remaining,
+                         "paged": paged})
 
 
 # --------------------------------------------------------------------------- STRIPE
@@ -599,7 +652,7 @@ def _brain_health() -> list[dict]:
                     f"could not auto-repair. Reinstall/relink the Claude CLI.", "verified": False}]
 
 
-def heal() -> dict:
+def heal(*, log: bool = True) -> dict:
     """Close the detect->ACT loop the canary leaves open. Real repairs, each verified:
       1. install any ops/launchd plist that's in-repo but NOT installed (drift);
       2. kickstart KeepAlive jobs that are dead (nonzero last exit, no pid).
@@ -654,6 +707,8 @@ def heal() -> dict:
     summary = ("Healed {}/{} target(s): ".format(fixed, len(actions))
                + "; ".join(f"{a['target']} -> {a['fix']}{' ✓' if a['verified'] else ''}"
                            for a in actions))
+    if not log:  # watch() heals quietly and rolls the result into its own receipt
+        return {"ok": True, "summary": summary, "evidence": {"actions": actions}}
     return _log("heal", ok=True, summary=summary, evidence={"actions": actions})
 
 
@@ -822,6 +877,10 @@ _INTENTS: list[tuple[re.Pattern[str], str]] = [
                 r"close the loop)\b|^\s*heal( now| up| the system| yourself)?\s*[.!]?$", re.I), "heal"),
     (re.compile(r"\bdeploy workers?\b|\b(improve|work on|harden|fix)\b[^.]*\bapps?\b|"
                 r"\b(improve|work on|fix|harden)\s+(the\s+)?(leads|real ?estate|marketing|trading|sovereign)\b", re.I), "improve"),
+    (re.compile(r"\b(scan|sweep)\b[^.]*\b(issues?|problems?|everything|and (fix|heal))\b|"
+                r"\bfix (anything|whatever('?s| is)?|everything)\s+(wrong|broken)\b|"
+                r"\b(keep (an eye|watch)|self[\s-]?watch|watch (for issues|over (the )?system))\b|"
+                r"\bcheck everything and (fix|heal)\b", re.I), "watch"),
     (re.compile(r"\bwhat (are|r) you (doing|working on|up to|busy with)\b|"
                 r"\bwhat'?s ace (doing|working on)\b|"
                 r"\bare you (doing|working on) (anything|something)\b|"
@@ -878,6 +937,8 @@ def run(text: str) -> str:
             return diagnose()["summary"]
         if intent == "working_on":
             return working_on()["summary"]
+        if intent == "watch":
+            return watch()["summary"]
     except Exception as exc:  # noqa: BLE001 — a failed actuator is REPORTED, never painted
         return f"I tried to {intent.replace('_', ' ')} and it failed: {exc}"
     return "I didn't catch which thing to do."
@@ -897,6 +958,7 @@ _CAPS = {
     "health": lambda a: diagnose(),
     "working_on": lambda a: working_on(),
     "doing": lambda a: working_on(),
+    "watch": lambda a: watch(),
     "improve": lambda a: improve_apps(a[0] if a else None),
     "feed": lambda a: {"feed": feed(int(a[0]) if a else 20)},
 }
