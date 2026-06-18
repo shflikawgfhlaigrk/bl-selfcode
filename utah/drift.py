@@ -143,6 +143,16 @@ def plist_drift(*, repo: pathlib.Path = REPO, agents: pathlib.Path = AGENTS) -> 
             continue
         if not plists_semantically_equal(installed_raw, repo_raw, repo=repo):
             out.append(f"{repo_plist.name}: installed copy differs from repo")
+    # Bidirectional: an installed com.utah.* job with NO repo copy is UNMANAGED — drift was
+    # previously blind to it, so the healer itself (com.utah.heal) could be booted out, or a
+    # crash-looping orphan could run, and nothing would notice. Every running job belongs in
+    # the repo; an installed-but-unmanaged one is real drift to canonicalize.
+    try:
+        for inst in sorted(agents.glob("com.utah.*.plist")):
+            if not (repo / "ops" / "launchd" / inst.name).exists():
+                out.append(f"{inst.name}: installed but UNMANAGED (no repo copy in ops/launchd)")
+    except OSError as exc:
+        out.append(f"installed-plist scan failed ({exc.__class__.__name__}) — cannot verify unmanaged jobs")
     return out
 
 

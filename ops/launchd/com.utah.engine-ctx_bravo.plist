@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>Label</key><string>com.utah.engine-ctx_bravo</string>
+  <key>ProgramArguments</key><array>
+    <string>/Users/michaelbarber/debt/Ace_Context_Bravo_Engine/.venv/bin/python</string>
+    <string>-m</string><string>engine.main</string>
+  </array>
+  <key>WorkingDirectory</key><string>/Users/michaelbarber/debt/Ace_Context_Bravo_Engine</string>
+  <key>EnvironmentVariables</key><dict>
+    <key>DATA_FEED</key><string>chrome</string>
+    <key>CHROME_DEBUG_URL</key><string>http://127.0.0.1:9223/json</string>
+    <key>CHROME_CDP_LEVEL</key><string>browser</string>
+    <key>CHROME_PAGE_FILTER</key><string>wealth</string>
+    <key>DASHBOARD_PORT</key><string>8700</string>
+    <key>TICK_PORT</key><string>8701</string>
+    <key>BROKER</key><string>null</string>
+    <key>AUTO_EXECUTE</key><string>false</string>
+    <key>ENGINE_KEY</key><string>ctx_bravo</string>
+  </dict>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>ThrottleInterval</key><integer>15</integer>
+  <key>StandardOutPath</key><string>/Users/michaelbarber/.utah/logs/engine-ctx_bravo.log</string>
+  <key>StandardErrorPath</key><string>/Users/michaelbarber/.utah/logs/engine-ctx_bravo.log</string>
+</dict></plist>

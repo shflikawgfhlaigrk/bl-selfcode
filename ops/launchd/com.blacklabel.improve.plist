@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  com.blacklabel.improve — autonomous Black Label app improvement, EDGE-TRIGGERED +
+  sparse heartbeat, ONE bounded cycle per launch (no KeepAlive, no infinite loop).
+  Modeled on com.utah.selfcode. One app per cycle (serial build, never a fleet race).
+
+  * WatchPaths: bumping ~/.blacklabel/run/app_improve.trigger (what control.improve_apps
+    does on "deploy workers / improve the apps") fires exactly one cycle to drain the queue.
+  * Heartbeat: a few business-hours ticks/day so it keeps hardening the apps unprompted.
+  * Kill switch:  touch ~/.blacklabel/run/improve.disabled
+  * Deploy ARM:   touch ~/.blacklabel/run/improve.deploy   (disarmed = fix+build+commit,
+                  stage; armed = also install the green build into /Applications)
+
+  Install:
+    launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.blacklabel.improve.plist
+  Force one cycle now:
+    launchctl kickstart -k gui/$(id -u)/com.blacklabel.improve
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.blacklabel.improve</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>/Users/michaelbarber/.blacklabel/improve.sh</string>
+  </array>
+  <key>WorkingDirectory</key>
+  <string>/Users/michaelbarber/.blacklabel</string>
+  <key>WatchPaths</key>
+  <array>
+    <string>/Users/michaelbarber/.blacklabel/run/app_improve.trigger</string>
+  </array>
+  <key>StartCalendarInterval</key>
+  <array>
+    <dict><key>Hour</key><integer>10</integer><key>Minute</key><integer>40</integer></dict>
+    <dict><key>Hour</key><integer>15</integer><key>Minute</key><integer>40</integer></dict>
+    <dict><key>Hour</key><integer>20</integer><key>Minute</key><integer>40</integer></dict>
+  </array>
+  <key>RunAtLoad</key>
+  <false/>
+  <key>ThrottleInterval</key>
+  <integer>300</integer>
+  <key>ProcessType</key>
+  <string>Background</string>
+  <key>StandardOutPath</key>
+  <string>/Users/michaelbarber/.blacklabel/logs/improve.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/michaelbarber/.blacklabel/logs/improve.err</string>
+</dict>
+</plist>

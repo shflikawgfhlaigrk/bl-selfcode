@@ -29,6 +29,7 @@ import os
 import re
 import signal
 import subprocess
+import sys
 import time
 from pathlib import Path
 
@@ -334,6 +335,41 @@ def _alive(pid: int) -> bool:
 
 
 # --------------------------------------------------------------------------- HEAL (close the loop)
+def _brain_health() -> list[dict]:
+    """Probe the Claude CLI — Ace's reasoning. It's resolved off PATH as a symlink into a
+    versioned dir (~/.local/bin/claude -> .../versions/X); an auto-update or GC can dangle
+    it, and then EVERY brain turn fails (BrainUnavailable) with no detection. If `claude
+    --version` fails, try to re-point the symlink at the newest versions/* dir; else report
+    honestly (a dead brain is the worst silent failure there is)."""
+    import shutil
+
+    cli = shutil.which("claude") or os.path.expanduser("~/.local/bin/claude")
+    rc, out = _sh([cli, "--version"], timeout=15)
+    if rc == 0 and out.strip():
+        return []  # reasoning healthy
+    # broken — attempt to re-point a dangling ~/.local/bin/claude at the newest version
+    link = Path(os.path.expanduser("~/.local/bin/claude"))
+    try:
+        versions = sorted((link.resolve().parent.parent / "versions").glob("*/claude"),
+                          key=lambda p: p.name, reverse=True) if link.is_symlink() else []
+    except Exception:  # noqa: BLE001
+        versions = []
+    for cand in versions:
+        if cand.exists():
+            try:
+                link.unlink(missing_ok=True)
+                link.symlink_to(cand)
+                rc2, _ = _sh([str(link), "--version"], timeout=15)
+                if rc2 == 0:
+                    return [{"target": "brain", "fix": f"re-pointed dangling claude symlink -> {cand}",
+                             "verified": True}]
+            except Exception:  # noqa: BLE001
+                pass
+    return [{"target": "brain",
+             "fix": f"BRAIN DOWN — `claude` at {cli} not runnable (rc={rc}); reasoning is offline, "
+                    f"could not auto-repair. Reinstall/relink the Claude CLI.", "verified": False}]
+
+
 def heal() -> dict:
     """Close the detect->ACT loop the canary leaves open. Real repairs, each verified:
       1. install any ops/launchd plist that's in-repo but NOT installed (drift);
@@ -376,6 +412,9 @@ def heal() -> dict:
                             "verified": bool(after.get("pid"))})
     # 3. Sovereign down -> start it (com.utah.heal re-runs this whenever it dies = autonomy)
     actions += _ensure_sovereign()
+    # 4. brain (claude CLI) reachable? it's Ace's reasoning — a dangling symlink kills EVERY
+    # brain turn with zero detection. Probe + best-effort repair.
+    actions += _brain_health()
     fixed = sum(1 for a in actions if a.get("verified"))
     summary = (f"Healed {fixed}/{len(actions)} target(s): "
                + ("; ".join(f"{a['target']} -> {a['fix']}"
@@ -394,17 +433,26 @@ def _has_keepalive(label: str) -> bool:
 
 
 def _job_target_missing(label: str) -> bool:
-    """True if a launchd job points at a script file that no longer exists (an orphan that
-    exits 127 every schedule). Conservative: only flags a concrete file-path arg with a
-    script extension — never a `-m module` job we can't resolve to a file."""
+    """True if a launchd job points at a target that no longer exists — a missing script
+    FILE (exits 127), or a missing `-m module` (exits with ModuleNotFoundError and, under
+    KeepAlive, crash-loops forever, e.g. com.utah.engine-bridge -> utah.integrations.
+    engine_bridge which was deleted). Conservative: only flags a concrete file path with a
+    script extension, or an unimportable `-m` module."""
     rc, out = _sh(["/usr/libexec/PlistBuddy", "-c", "Print :ProgramArguments",
                    str(LAUNCHD / f"{label}.plist")])
     if rc != 0:
         return False
-    for line in out.splitlines():
-        a = line.strip()
+    args = [ln.strip() for ln in out.splitlines() if ln.strip() not in ("Array {", "}")]
+    for a in args:
         if a.startswith("/") and a.rsplit(".", 1)[-1] in ("sh", "py", "command") and not Path(a).exists():
             return True
+    if "-m" in args:
+        mod = args[args.index("-m") + 1] if args.index("-m") + 1 < len(args) else ""
+        if mod and "." in mod:  # a dotted module path we can resolve
+            chk = _sh([sys.executable, "-c",
+                       f"import importlib.util,sys; sys.exit(0 if importlib.util.find_spec({mod!r}) else 1)"])
+            if chk[0] == 1:  # find_spec returned None -> module gone
+                return True
     return False
 
 
@@ -536,8 +584,9 @@ _INTENTS: list[tuple[re.Pattern[str], str]] = [
                 r"have we (made|sold)|made any money)\b", re.I), "stripe"),
     (re.compile(r"\b(read|check|show|open|look at|go (in|into).*read)\b[^.]*\b(e-?mails?|inbox|messages?)\b|"
                 r"\bwhat('?s| is| are)\b[^.]*\b(e-?mails?|inbox)\b|\bmy e-?mails?\b", re.I), "email"),
-    (re.compile(r"\b(self[\s-]?heal|heal yourself|heal the system|fix (yourself|the daemon|the drift|the system)|"
-                r"reload the daemon|repair yourself|close the loop)\b|\bheal\b", re.I), "heal"),
+    (re.compile(r"\b(self[\s-]?heal|heal (yourself|the system|the daemon|the drift|the jobs|everything)|"
+                r"fix (yourself|the daemon|the drift|the system)|reload the daemon|repair yourself|"
+                r"close the loop)\b|^\s*heal( now| up| the system| yourself)?\s*[.!]?$", re.I), "heal"),
     (re.compile(r"\bdeploy workers?\b|\b(improve|work on|harden|fix)\b[^.]*\bapps?\b|"
                 r"\b(improve|work on|fix|harden)\s+(the\s+)?(leads|real ?estate|marketing|trading|sovereign)\b", re.I), "improve"),
     (re.compile(r"\b(worker|workers)\b[^.]*\b(status|up|running|health|alive|down|state)\b|"

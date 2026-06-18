@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  com.utah.heal — the AUTONOMOUS self-heal closer. Runs control.heal() with NO human in
+  the loop: reinstalls drifted/uninstalled launchd plists, reloads the daemon when source
+  is newer than the running daemon, restarts dead KeepAlive jobs, and restarts Sovereign
+  when it's down. This is what closes the canary's fires instead of filing a repair forever.
+
+  Two triggers:
+   * heartbeat — every 15 min (StartInterval) it sweeps and fixes whatever drifted.
+   * edge — canary.run_scheduled bumps ~/.utah/run/heal.trigger the instant it sees a
+     healable fire (drift/sovereign/deck), and WatchPaths fires one cycle immediately.
+
+  ONE bounded cycle per launch (no KeepAlive). Each run writes a receipt to
+  ~/.utah/activity/actions.jsonl. Pause: touch ~/.utah/run/heal.disabled (heal honors it).
+  Force now: launchctl kickstart -k gui/$(id -u)/com.utah.heal
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.utah.heal</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/michaelbarber/.utah/venv/bin/python</string>
+    <string>-m</string>
+    <string>utah.control</string>
+    <string>heal</string>
+  </array>
+  <key>WorkingDirectory</key>
+  <string>/Users/michaelbarber/.utah</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PYTHONPATH</key>
+    <string>/Users/michaelbarber/ProjectUtah</string>
+    <key>PYTHONUNBUFFERED</key>
+    <string>1</string>
+    <key>PATH</key>
+    <string>/Users/michaelbarber/.utah/venv/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+  </dict>
+  <key>WatchPaths</key>
+  <array>
+    <string>/Users/michaelbarber/.utah/run/heal.trigger</string>
+  </array>
+  <key>StartInterval</key>
+  <integer>900</integer>
+  <key>RunAtLoad</key>
+  <false/>
+  <key>ThrottleInterval</key>
+  <integer>120</integer>
+  <key>ProcessType</key>
+  <string>Background</string>
+  <key>StandardOutPath</key>
+  <string>/Users/michaelbarber/.utah/logs/heal.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/michaelbarber/.utah/logs/heal.err</string>
+</dict>
+</plist>
