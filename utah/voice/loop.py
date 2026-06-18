@@ -31,6 +31,12 @@ SAMPLE_RATE = vad.SAMPLE_RATE   # 16 kHz
 FRAME = vad.FRAME               # 512 samples = 32 ms (Silero-native)
 CHANNELS = 1
 MONITOR_S = 5.0                 # how often the level monitor logs observed mic RMS
+# Dedicated liveness heartbeat (independent of the diagnostic monitor). The supervisor kills
+# voice when the state heartbeat goes stale past VOICE_DEAF_RESTART_S (75s); writing it from a
+# trivial thread that does NO blocking work means a slow Postgres failures.record or a wedged
+# sd.query_devices in the monitor can never freeze the heartbeat and false-wedge a healthy loop.
+HEARTBEAT_S = 5.0               # re-stamp the liveness heartbeat this often (≫ several beats/75s)
+ALIVE_WINDOW_S = 20.0           # treat the loop as alive if the mic callback fired this recently
 SILENCE_ALERT_S = 30.0          # mic delivering TRUE silence (zeros) this long -> failure
 # Below this RAW RMS = the device is delivering zeros (deaf). A WEDGED/dead CoreAudio
 # handle delivers EXACT 0.0; a live 16-bit mic — even in a silent room — never floors
@@ -321,6 +327,23 @@ def _empty_wake_cooling(now: float, last_empty_at: float, cooldown: float) -> bo
     return cooldown > 0 and last_empty_at > 0 and (now - last_empty_at) < cooldown
 
 
+def _should_heartbeat(*, now: float, last_alive: float, busy: bool,
+                      alive_window_s: float) -> bool:
+    """Whether the loop should re-stamp its liveness heartbeat (pure, unit-tested).
+
+    Beat when the loop is legitimately BUSY in a turn (the mic is closed for brain+TTS, so no
+    callback frames arrive — a long turn must NOT look wedged to the supervisor) OR the audio
+    callback delivered a frame within *alive_window_s* (the device is feeding the loop, even on
+    a quiet room or device zeros — deafness is reported via the ``deaf`` flag, never by
+    withholding the heartbeat). Stop beating only when neither holds: a frozen CoreAudio handle
+    stops calling the callback entirely, so ``now - last_alive`` grows past the window and the
+    supervisor's stale-heartbeat probe correctly restarts the loop. That frozen-loop case is the
+    one thing this must never mask."""
+    if busy:
+        return True
+    return (now - last_alive) < alive_window_s
+
+
 def _should_reopen_stream(quiet_for_s: float, reopen_after_s: float,
                           reopen_count: int, max_reopens: int) -> bool:
     """Decide whether to reopen the mic stream IN-PROCESS (pure, unit-tested).
@@ -475,6 +498,9 @@ def run() -> None:
     # supervisor); it resets the moment real audio returns.
     _reopen_evt = threading.Event()   # set by the deaf clock or stale detector → hard reopen
     reopen_state = {"count": 0}       # in-process reopen attempts before escalating to restart
+    # Monotonic ts of the last mic-callback invocation — the heartbeat thread reads it to tell a
+    # live loop (callback firing, even on silence/zeros) from a frozen handle (callback stopped).
+    _alive = {"t": time.monotonic()}
     vstate = {"status": "starting", "listening": False, "speaking": False,
               "segments": 0, "last_transcript": None, "last_wake": None}
     armed_until = 0.0
@@ -485,6 +511,7 @@ def run() -> None:
         log.info("voice loop: high-pass filter ON (%.0f Hz) — strips desk/rumble noise", _HPF_HZ)
 
     def _cb(indata, frames, t, status):  # noqa: ANN001
+        _alive["t"] = time.monotonic()   # the device delivered a frame → loop is alive (even zeros)
         raw = bytes(indata)
         # ── Barge-in window: Ace is SPEAKING right now ──────────────────────
         # Keep LISTENING through playback so Michael can talk over Ace ("no time to
@@ -513,9 +540,35 @@ def run() -> None:
             level["max"] = r
         q.put(pcm)
 
+    def _heartbeat():
+        """Keep the supervisor's liveness heartbeat fresh independently of the diagnostic
+        monitor. The monitor does blocking work (Postgres failures.record, sd.query_devices)
+        that can stall or raise; if it were the ONLY heartbeat writer, a slow DB or a wedged
+        HAL query would freeze the heartbeat and the supervisor would restart a healthy loop
+        mid-turn. This thread does nothing but re-stamp state when the loop shows progress, so a
+        long turn or a slow/dead monitor never causes a false wedge — while a truly frozen loop
+        (callback stopped AND not in a turn) still ages out and is correctly restarted."""
+        while True:
+            time.sleep(HEARTBEAT_S)
+            try:
+                busy = processing.is_set() or tts.is_anything_playing()
+                if _should_heartbeat(now=time.monotonic(), last_alive=_alive["t"],
+                                     busy=busy, alive_window_s=ALIVE_WINDOW_S):
+                    state.write(**vstate)
+            except Exception:  # noqa: BLE001 — the heartbeat must NEVER die; that's the whole point
+                pass
+
     def _monitor():
         while True:
             time.sleep(MONITOR_S)
+            try:
+                _monitor_tick()
+            except Exception as exc:  # noqa: BLE001 — a raised diagnostic must not kill the
+                # monitor (a dead monitor stops deaf-detection); the heartbeat thread keeps a
+                # healthy loop alive regardless, so this degrades gracefully instead of wedging.
+                log.debug("voice monitor tick error (continuing): %s", exc)
+
+    def _monitor_tick():
             # The callback drops mic frames while WE process OR while ANY process is speaking
             # (echo guard). The monitor must skip those windows too, or it counts a correctly-
             # muted mic as "deaf" → false mic_silent. (The real deaf cause — a hung afplay
@@ -525,7 +578,7 @@ def run() -> None:
                 vstate["deaf"] = False           # intentionally muted, not deaf
                 vstate["mic_quiet_s"] = 0.0
                 state.write(**vstate)
-                continue
+                return                           # one tick = one call; (was `continue`)
             mx = level["max"]; level["max"] = 0.0
             log.debug("voice: audio level (max rms / %ds) = %.4f", MONITOR_S, mx)
             # Publish a DEAF heartbeat (B15): RAW-measured — the device delivering nothing,
@@ -575,6 +628,7 @@ def run() -> None:
                             ev["quiet_for_s"])
 
     threading.Thread(target=_monitor, daemon=True).start()
+    threading.Thread(target=_heartbeat, daemon=True).start()   # liveness heartbeat (turn-safe)
 
     def _warmup() -> None:
         """Pre-load Silero/Moonshine/Piper so the first real turn is not cold-start."""
