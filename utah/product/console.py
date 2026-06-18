@@ -430,10 +430,15 @@ def run_claude_streamed(task: str, *, cwd: str, on_line, timeout: float = 600.0,
     import subprocess
     import threading as _th
 
+    from utah import config
     if brain_cmd is None:
-        from utah import config
         brain_cmd = config.BRAIN_CMD
-    cmd = [brain_cmd, "-p", "--output-format", "stream-json",
+    # Pin --model (the full opus-4-8[1m] id) like the brain + selfcode paths. Without it this
+    # streamed coding terminal inherits the host CLI's default model — the bare `opus` alias from
+    # ~/.claude/settings.json (drops the 1M variant) and the 2026-06-13 Fable-flip kill-switch.
+    # Harmless to an injected fake brain_cmd in tests.
+    cmd = [brain_cmd, "-p", "--model", config.BRAIN_MODEL,
+           "--output-format", "stream-json",
            "--verbose", "--include-partial-messages",
            "--allowedTools", "Edit", "Write", "Read", "Bash"]
     try:

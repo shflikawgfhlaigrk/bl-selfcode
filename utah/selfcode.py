@@ -212,8 +212,14 @@ def _real_claude(task: str, *, cwd: str, timeout: int = CODE_TIMEOUT_S) -> None:
     # otherwise swallow a trailing prompt, leaving claude -p to hang on empty stdin until
     # the timeout (the live proof's 600s/300s hangs). With the prompt on stdin there is no
     # positional to swallow, so flag order can't break it. (Proven: pipe-in returns in ~2s.)
+    # Pin --model explicitly (config.BRAIN_MODEL = the full opus-4-8[1m] id): without it the
+    # coding harness inherits the host CLI's default model, which is the bare `opus` alias from
+    # ~/.claude/settings.json (drops the 1M variant) and would silently switch to Fable if the
+    # CLI default ever flips again (the 2026-06-13 kill-switch). --model goes BEFORE the variadic
+    # --allowedTools so the trailing-prompt-on-stdin invariant is preserved.
     proc = subprocess.run(
-        [config.BRAIN_CMD, "-p", "--allowedTools", "Edit", "Write", "Read", "Bash"],
+        [config.BRAIN_CMD, "-p", "--model", config.BRAIN_MODEL,
+         "--allowedTools", "Edit", "Write", "Read", "Bash"],
         input=task, cwd=cwd, capture_output=True, text=True, timeout=timeout,
     )
     if proc.returncode != 0:
