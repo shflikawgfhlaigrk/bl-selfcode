@@ -133,6 +133,16 @@ ENGINE_ARCHETYPE = {
 #: on NQ futures (CM.NQM6: OOS win 88%, +491 pts, n=25) — the robust winner the parameter
 #: sweep also found. Raise as the captured history deepens.
 EDGE_MIN_TRADES = int(os.environ.get("UTAH_EDGE_MIN_TRADES", "20"))
+
+#: The backtest edge-gate is OPT-IN, default OFF (2026-06-14, Michael's call). The gate
+#: (added 2026-06-13) throttled the live fleet to a single proven (engine, symbol) pair
+#: and effectively silenced the engines. The restored Apex-Prime fleet (the ~/debt
+#: engines: Bible, Apex, Perplexity, Barber, Context Alpha/Bravo) each carry their OWN
+#: quality gates — sniper consensus, regime guards, session router — so Utah no longer
+#: second-guesses them with a backtest re-gate. An INJECTED edge_fn still governs (the
+#: unit contract). Re-arm the live-path backtest gate with UTAH_EDGE_GATE=on.
+EDGE_GATE_ENABLED = os.environ.get("UTAH_EDGE_GATE", "off").strip().lower() in (
+    "1", "true", "on", "yes")
 MEANREV_CFG = {"lookback": 20, "z_enter": 2.0, "tgt_frac": 0.6, "stop_mult": 8.0,
                "win_floor": 0.87, "oos_frac": 0.4, "min_trades": EDGE_MIN_TRADES,
                "max_hold": 80}
@@ -572,7 +582,7 @@ def run(ledger, *, feed_fn=None, lookback: int = 20, engine: str = "breakout",
     # EDGE GATE: never bet without proven held-out edge on this symbol. Active when a
     # symbol is known (live path) or an edge_fn is injected (tests); skipped otherwise so
     # the pure-pipeline unit contract (fire on signal) is preserved.
-    if edge_fn is not None or symbol is not None:
+    if edge_fn is not None or (EDGE_GATE_ENABLED and symbol is not None):
         verdict = (edge_fn or (lambda e, s: edge_ok(e, s)))(engine, symbol)
         if not verdict.get("ok"):
             return {"fires": 0, "signal": sig, "suppressed": "no_edge",

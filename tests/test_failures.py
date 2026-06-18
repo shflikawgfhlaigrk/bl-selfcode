@@ -26,6 +26,40 @@ def test_record_then_recent_returns_it():
     assert "cli gone" in rows[0].detail
 
 
+def test_record_does_not_cascade_via_alert_side_effects():
+    """A failure recorded BY record()'s own alert/mirror side-effects must not fan back
+    into more recorded failures. Regression for the 2026-06-14 cascade: one
+    record('daemon','test') produced 249 rows (discord mirror → failed post →
+    webhook_post_failed → ...), poisoning the feed and turning every count-based test red
+    (which silently stalled the selfcode gate for ~28h). A re-entrant store proves the
+    guard: its insert re-enters record(), which must persist-only and never loop."""
+    store = FakeFailureStore()
+
+    class ReentrantStore:
+        """insert() re-enters failures.record once, simulating a side-effect that records."""
+        def __init__(self):
+            self.depth = 0
+            self.inserts = 0
+        def init_schema(self):
+            pass
+        def insert(self, source, kind, detail):
+            self.inserts += 1
+            self.depth += 1
+            if self.depth == 1:
+                failures.record("discord", "webhook_post_failed", "boom")  # re-entry
+            self.depth -= 1
+        def recent(self, limit):
+            return []
+        def count(self):
+            return self.inserts
+
+    rs = ReentrantStore()
+    failures.set_store(rs)
+    failures.record("daemon", "test", "x")          # must terminate, not cascade
+    # Exactly two inserts: the outer record + the single re-entrant one. No runaway.
+    assert rs.inserts == 2
+
+
 def test_record_silent_records_a_silent_kind():
     failures.set_store(FakeFailureStore())
     failures.record_silent("dispatch", "swallowed except-pass at X")

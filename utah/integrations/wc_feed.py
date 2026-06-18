@@ -560,14 +560,16 @@ class BarStream:
                         log.info("wc_feed suppressed: %s %s %s (%s)", eng, symbol, direction,
                                  "in_position" if state.get("open") else "cooldown")
                         continue
-                    # EDGE GATE: only fire where THIS engine currently proves held-out OOS
-                    # edge on THIS symbol — never a negative-expectancy bet (2026-06-12:
-                    # blind breakout = net −4,384 pts; the data's edge is meanrev on NQ).
-                    verdict = (self._edge_fn or (lambda e, s: trading.edge_ok(e, s)))(eng, symbol)
-                    if not verdict.get("ok"):
-                        log.info("wc_feed suppressed: %s %s %s (no_edge: %s)", eng, symbol,
-                                 direction, verdict.get("reason", ""))
-                        continue
+                    # EDGE GATE (OPT-IN, default OFF since 2026-06-14): an injected
+                    # _edge_fn always governs (unit contract); the live backtest re-gate
+                    # only runs when UTAH_EDGE_GATE=on. Off by default so the restored
+                    # fleet's own gates decide — Utah stopped silencing the engines.
+                    if self._edge_fn is not None or trading.EDGE_GATE_ENABLED:
+                        verdict = (self._edge_fn or (lambda e, s: trading.edge_ok(e, s)))(eng, symbol)
+                        if not verdict.get("ok"):
+                            log.info("wc_feed suppressed: %s %s %s (no_edge: %s)", eng, symbol,
+                                     direction, verdict.get("reason", ""))
+                            continue
                     ctx = trading._fire_context(closes, sig, lookback=self.lookback)
                     self.ledger.record_fire(eng, direction, entry=closes[-1],
                                             synthetic=False, symbol=symbol,

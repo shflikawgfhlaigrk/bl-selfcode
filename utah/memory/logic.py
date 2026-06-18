@@ -39,6 +39,29 @@ def passes_gate(sim: float, overlap: float) -> bool:
     return sim >= config.ANSWER_MIN_SIM and overlap >= config.ANSWER_MIN_OVERLAP
 
 
+_DIRECTIVE = re.compile(
+    r"(?:when\s|do not\s|don['’]t\s|never\s|always\s|"
+    r"if\s+(?:asked|you|the user|someone|the assistant)\b)",
+    re.I,
+)
+
+
+def is_directive(content: str) -> bool:
+    """True when *content* is a behavioral directive addressed to the assistant
+    ("When asked X, do Y", "Do not invent…", "Never state…", "Always retain…") rather
+    than a fact.
+
+    These rows are guidance about HOW to answer, not answers themselves. The answer gate
+    must keep them as CONTEXT for the brain and never serve them verbatim — otherwise a
+    question that lexically matches a directive's trigger ("how is trading doing today")
+    makes Ace recite the instruction ("pull from the trade log…") instead of following
+    it. Mirrors the gate's existing ``source == "turn"`` verbatim guard. Validated against
+    the live store: ~13% of durable 'fact' rows are mislabeled directives, zero of the
+    sampled matches were genuine facts.
+    """
+    return bool(_DIRECTIVE.match((content or "").lstrip()))
+
+
 def entity_grounds(query: str, content: str) -> bool | None:
     """Does the hit's entity actually appear in the query?
 

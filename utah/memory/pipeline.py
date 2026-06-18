@@ -12,6 +12,7 @@ from utah.memory.logic import (
     decide_write,
     entity_grounds,
     is_canspam_address_query,
+    is_directive,
     is_untrusted_canspam_content,
     lexical_overlap,
     passes_gate,
@@ -270,6 +271,13 @@ def answer(query: str, k: int = config.RECALL_K) -> tuple[str | None, list[Hit]]
     # now-indexed source code): that is exactly why a self/code question kept replaying an
     # old "I can't name it" turn. Only durable sources shortcut; a turn falls to the brain.
     if getattr(best, "source", "") == "turn":
+        return None, hits
+    # A DIRECTIVE ("When asked X, do Y", "Do not invent…", "Never state…") is guidance
+    # about HOW to answer, not an answer. Re-serving it verbatim makes Ace recite the
+    # instruction ("pull from the trade log…") instead of following it — the live "how is
+    # trading doing today" bug. Keep it as CONTEXT for the brain; same shape as the 'turn'
+    # guard above. (Many such rows are mislabeled source='fact' in the live store.)
+    if is_directive(best.content):
         return None, hits
     if not passes_gate(best.sim, lexical_overlap(query, best.content)):
         return None, hits

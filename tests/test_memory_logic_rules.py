@@ -12,11 +12,61 @@ from utah.memory.logic import (
     compute_decay,
     content_words,
     entity_grounds,
+    is_directive,
     lexical_overlap,
     recall_pool,
     rrf_fuse,
     should_archive,
 )
+
+
+# --- is_directive: behavioral guidance must never be served verbatim ----------------
+
+
+def test_is_directive_true_for_when_asked_guidance():
+    assert is_directive(
+        "When asked how the trading engines did today (P&L, trade count), pull from "
+        "the day's trade log rather than deflecting."
+    ) is True
+
+
+@pytest.mark.parametrize(
+    "content",
+    [
+        "Do not invent system-status specifics (agent counts, engine counts).",
+        "Don't claim a fire happened without a fresh verified reading.",
+        "Never invent weather readings. If no verified data is available, say so.",
+        "Always retain and reference the user's request from the prior turn.",
+        "When per-engine detail is missing, fetch directly from the engine ports.",
+        "If asked about open positions, report only live payload state.",
+    ],
+)
+def test_is_directive_true_for_imperative_guidance(content):
+    assert is_directive(content) is True
+
+
+@pytest.mark.parametrize(
+    "content",
+    [
+        "Michael prefers tea",
+        "Leads: 16,702 total. Probate cases: 340.",
+        "Mount Kilimanjaro is 5895 metres tall",
+        "Michael lives in Utah",
+        "The always-on mic transcribes room speech",  # 'always-on' is not 'always '
+        "Denver, Colorado: overcast, 62F",
+    ],
+)
+def test_is_directive_false_for_genuine_facts(content):
+    assert is_directive(content) is False
+
+
+def test_is_directive_handles_leading_whitespace_and_case():
+    assert is_directive("  never STATE trade counts from memory") is True
+
+
+def test_is_directive_empty_is_false():
+    assert is_directive("") is False
+    assert is_directive("   ") is False
 
 
 # --- entity_grounds: the tri-state wrong-entity guard ------------------------------
