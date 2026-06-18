@@ -56,21 +56,20 @@ def _stamp(ts: float) -> str:
     return time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(ts))
 
 
-def _log(action: str, *, ok: bool, summary: str, evidence=None, **extra) -> dict:
-    """Append one activity row. This IS the proof — the row is only written with the
-    real result in hand. Never raises (a dead ledger must not mask a real action)."""
-    ts = _now()
-    row = {
-        "id": f"{int(ts*1000):x}",
-        "ts": ts,
-        "at": _stamp(ts),
-        "action": action,
-        "ok": bool(ok),
-        "status": "done" if ok else "failed",
-        "summary": summary,
-        "evidence": evidence,
-        **extra,
-    }
+_id_counter = 0
+
+
+def _new_id(ts: float) -> str:
+    """A collision-proof row id: millisecond stamp + a process-local counter, so two
+    receipts opened in the same millisecond (rapid begin() calls) never share an id and
+    collapse into one in the panel."""
+    global _id_counter
+    _id_counter += 1
+    return f"{int(ts*1000):x}{_id_counter:x}"
+
+
+def _write_row(row: dict) -> dict:
+    """Append one ledger row. Never raises — a dead ledger must not mask a real action."""
     try:
         ACTIVITY_DIR.mkdir(parents=True, exist_ok=True)
         with LEDGER.open("a") as fh:
@@ -80,19 +79,123 @@ def _log(action: str, *, ok: bool, summary: str, evidence=None, **extra) -> dict
     return row
 
 
-def feed(n: int = 20) -> list[dict]:
-    """The last *n* activity rows — what Michael reads to SEE Ace actually did things."""
+def _log(action: str, *, ok: bool, summary: str, evidence=None, **extra) -> dict:
+    """Append one COMPLETED activity row. This IS the proof — the row is only written with
+    the real result in hand."""
+    ts = _now()
+    return _write_row({
+        "id": _new_id(ts),
+        "ts": ts,
+        "at": _stamp(ts),
+        "action": action,
+        "ok": bool(ok),
+        "status": "done" if ok else "failed",
+        "summary": summary,
+        "evidence": evidence,
+        **extra,
+    })
+
+
+# --- in-progress receipts: prove Ace is working RIGHT NOW (the live deck panel) --------
+def begin(action: str, summary: str = "", *, timeout: float | None = None, **extra) -> str:
+    """Open an in-progress receipt and return its id. Pair with ``end`` (and optional
+    ``beat`` heartbeats). Writes a ``running`` row carrying ``started`` + ``timeout`` so the
+    deck's proof panel can tick elapsed-seconds and show the timeout countdown — the
+    deploy-subagent view Michael asked for. The work is REAL; this only makes it visible
+    while it happens instead of only after it finishes."""
+    ts = _now()
+    rid = _new_id(ts)
+    _write_row({
+        "id": rid, "ts": ts, "at": _stamp(ts), "action": action,
+        "ok": None, "status": "running", "summary": summary or f"{action}…",
+        "started": ts, "timeout": timeout, "evidence": None, **extra,
+    })
+    return rid
+
+
+def beat(rec_id: str, note: str | None = None, **extra) -> None:
+    """Heartbeat/progress update for an open receipt — refreshes the row so the panel shows
+    the latest step and the elapsed clock stays proven-live. No-op-safe if the id is
+    unknown (records a fresh running row so progress is never silently lost)."""
+    ts = _now()
+    row = _latest(rec_id) or {"id": rec_id, "action": "?", "started": ts}
+    row.update({"ts": ts, "at": _stamp(ts), "status": "running", "ok": None})
+    if note is not None:
+        row["summary"] = note
+    row.update(extra)
+    _write_row(row)
+
+
+def end(rec_id: str, *, ok: bool, summary: str, evidence=None, **extra) -> dict:
+    """Close an open receipt with the REAL result, stamping ``duration`` (now - started).
+    The reader collapses the begin/beat/end rows (same id) to this terminal row."""
+    ts = _now()
+    row = _latest(rec_id) or {"id": rec_id, "action": "?", "started": ts}
+    started = float(row.get("started", ts))
+    row.update({
+        "ts": ts, "at": _stamp(ts), "ok": bool(ok),
+        "status": "done" if ok else "failed", "summary": summary,
+        "evidence": evidence, "duration": round(ts - started, 2), **extra,
+    })
+    return _write_row(row)
+
+
+def _all_rows(limit: int = 4000) -> list[dict]:
+    """Parsed ledger rows in file (chronological) order, capped to the last *limit*."""
     try:
-        lines = LEDGER.read_text().splitlines()
+        lines = LEDGER.read_text().splitlines()[-limit:]
     except Exception:  # noqa: BLE001
         return []
     out = []
-    for ln in lines[-n:]:
+    for ln in lines:
         try:
             out.append(json.loads(ln))
         except Exception:  # noqa: BLE001
             pass
     return out
+
+
+def _latest(rec_id: str) -> dict | None:
+    """The most recent physical row for *rec_id* (begin/beat all share one id)."""
+    found = None
+    for r in _all_rows():
+        if r.get("id") == rec_id:
+            found = r
+    return found
+
+
+def activity(n: int = 12, *, max_age: float = 3600.0, now: float | None = None) -> dict:
+    """Split the ledger into ``{active, recent}`` for the live proof panel. Groups rows by
+    id (begin/beat/end share one), keeps the latest per id. A row still ``running`` is
+    ACTIVE with server-computed ``elapsed`` + ``timeout``; one past 1.5x its timeout (or
+    ``max_age`` if it set none) is flagged ``stalled`` so a crashed ``begin()`` can't look
+    alive forever. ``recent`` is the finished rows, newest first, capped to *n*."""
+    now = _now() if now is None else now
+    latest: dict[str, dict] = {}
+    for r in _all_rows():
+        rid = r.get("id")
+        if rid is not None:
+            latest[rid] = r
+    active, recent = [], []
+    for r in latest.values():
+        if r.get("status") == "running":
+            started = float(r.get("started", r.get("ts", now)))
+            elapsed = max(0.0, now - started)
+            to = r.get("timeout")
+            stalled = elapsed > (to * 1.5 if to else max_age)
+            active.append({**r, "elapsed": round(elapsed, 1), "stalled": stalled})
+        else:
+            if r.get("started") is not None and "duration" not in r:
+                r = {**r, "duration": round(float(r.get("ts", now)) - float(r["started"]), 2)}
+            recent.append(r)
+    active.sort(key=lambda r: r.get("started", 0), reverse=True)
+    recent.sort(key=lambda r: r.get("ts", 0), reverse=True)
+    return {"active": active, "recent": recent[:n], "now": now}
+
+
+def feed(n: int = 20) -> list[dict]:
+    """The last *n* RAW activity rows — what Michael reads to SEE Ace actually did things."""
+    return _all_rows(limit=n)
 
 
 # --------------------------------------------------------------------------- helpers
@@ -335,11 +438,14 @@ def record_start(path: str | None = None) -> dict:
     try:
         proc = subprocess.Popen(["screencapture", "-v", out],
                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        pidfile.write_text(json.dumps({"pid": proc.pid, "path": out, "started": _now()}))
-        return _log("record_start", ok=True,
-                    summary=f"Recording the screen now (pid {proc.pid}). "
-                            f"Say 'stop recording' or hit Stop to finalize.",
-                    evidence={"pid": proc.pid, "path": out}, status="running")
+        summary = (f"Recording the screen now (pid {proc.pid}). "
+                   f"Say 'stop recording' or hit Stop to finalize.")
+        # An OPEN receipt — closed by record_stop via its id, so the recording shows as a
+        # live action while it runs and never lingers as a phantom 'running' row.
+        rid = begin("record_start", summary, timeout=None, evidence={"pid": proc.pid, "path": out})
+        pidfile.write_text(json.dumps({"pid": proc.pid, "path": out, "started": _now(), "rid": rid}))
+        return {"ok": True, "summary": summary, "status": "running", "id": rid,
+                "evidence": {"pid": proc.pid, "path": out}}
     except Exception as exc:  # noqa: BLE001
         return _log("record_start", ok=False,
                     summary=f"Couldn't start recording: {exc} "
@@ -367,11 +473,14 @@ def record_stop() -> dict:
     p = Path(info["path"])
     size = p.stat().st_size if p.exists() else 0
     ok = size > 0
-    return _log("record_stop", ok=ok,
-                summary=(f"Stopped recording — saved {size/1e6:.1f} MB to {info['path']}."
-                         if ok else "Stopped, but no video file was produced "
-                                    "(Screen Recording permission likely not granted)."),
-                evidence={"path": info["path"], "bytes": size})
+    summary = (f"Stopped recording — saved {size/1e6:.1f} MB to {info['path']}."
+               if ok else "Stopped, but no video file was produced "
+                          "(Screen Recording permission likely not granted).")
+    evidence = {"path": info["path"], "bytes": size}
+    rid = info.get("rid")
+    if rid:  # close the open record_start receipt (duration = recording length)
+        return end(rid, ok=ok, summary=summary, evidence=evidence)
+    return _log("record_stop", ok=ok, summary=summary, evidence=evidence)
 
 
 def _alive(pid: int) -> bool:
@@ -464,11 +573,15 @@ def heal() -> dict:
     # brain turn with zero detection. Probe + best-effort repair.
     actions += _brain_health()
     fixed = sum(1 for a in actions if a.get("verified"))
-    summary = (f"Healed {fixed}/{len(actions)} target(s): "
-               + ("; ".join(f"{a['target']} -> {a['fix']}"
-                            f"{' ✓' if a['verified'] else ''}" for a in actions)
-                  if actions else "nothing to heal — all jobs installed and running.")) \
-        if actions else "Nothing to heal — all launchd jobs installed and healthy."
+    if not actions:
+        # A no-op heal ran every few minutes; logging "nothing to heal" each time buries the
+        # REAL repairs in the proof feed. Return the honest result, but only write a receipt
+        # when heal actually DID something (a row = a real action, not a heartbeat).
+        return {"ok": True, "summary": "Nothing to heal — all launchd jobs installed and healthy.",
+                "evidence": {"actions": []}}
+    summary = ("Healed {}/{} target(s): ".format(fixed, len(actions))
+               + "; ".join(f"{a['target']} -> {a['fix']}{' ✓' if a['verified'] else ''}"
+                           for a in actions))
     return _log("heal", ok=True, summary=summary, evidence={"actions": actions})
 
 
@@ -714,6 +827,27 @@ def main(argv: list[str]) -> int:
         print("usage: python -m utah.control <%s> [args]" % "|".join(_CAPS))
         return 0
     cmd, rest = argv[0], argv[1:]
+    # in-progress receipt CLI (used by the long autonomous workers, e.g. improve.sh):
+    #   begin <action> [summary] [timeout]  -> prints the id (capture it for `end`)
+    #   beat  <id> [note]
+    #   end   <id> <ok:1|0> <summary...>
+    if cmd == "begin":
+        rid = begin(rest[0] if rest else "work",
+                    rest[1] if len(rest) > 1 else "",
+                    timeout=float(rest[2]) if len(rest) > 2 and rest[2] else None)
+        print(rid)
+        return 0
+    if cmd == "beat":
+        beat(rest[0], rest[1] if len(rest) > 1 else None)
+        return 0
+    if cmd == "end":
+        ok = (rest[1].lower() in ("1", "true", "ok", "yes")) if len(rest) > 1 else False
+        res = end(rest[0], ok=ok, summary=" ".join(rest[2:]) or ("done" if ok else "failed"))
+        print(json.dumps(res, default=str))
+        return 0 if ok else 1
+    if cmd == "activity":
+        print(json.dumps(activity(int(rest[0]) if rest else 12), indent=2, default=str))
+        return 0
     fn = _CAPS.get(cmd)
     if not fn:
         print(json.dumps({"ok": False, "summary": f"unknown capability {cmd!r}",

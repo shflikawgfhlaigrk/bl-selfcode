@@ -943,32 +943,71 @@ async def truth_page(request):
 
 _ACTIVITY_HTML = """<!doctype html><html lang=en><head><meta charset=utf-8>
 <meta name=viewport content="width=device-width,initial-scale=1">
-<title>Ace — Live Activity</title><style>
-:root{--bg:#08080c;--panel:#111119;--line:#1c1c26;--gold:#c9a24a;--txt:#e8e3d4;--mut:#7d7765;--ok:#33d17a;--err:#e2554b}
-*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--txt);font:13px/1.5 ui-monospace,Menlo,monospace}
-header{padding:14px 18px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:center}
+<title>Ace — Live Proof of Execution</title><style>
+:root{--bg:#08080c;--panel:#111119;--line:#1c1c26;--gold:#c9a24a;--txt:#e8e3d4;--mut:#7d7765;--ok:#33d17a;--err:#e2554b;--run:#4aa3ff}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--txt);font:13px/1.55 ui-monospace,Menlo,monospace}
+header{padding:14px 18px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:center;position:sticky;top:0;background:var(--bg);z-index:2}
 h1{margin:0;font-size:14px;letter-spacing:2px;text-transform:uppercase;color:var(--gold)}
 #meta{color:var(--mut)}button{background:var(--err);color:#fff;border:0;padding:7px 12px;border-radius:6px;cursor:pointer;font:inherit}
-.row{padding:9px 18px;border-bottom:1px solid var(--line);display:grid;grid-template-columns:150px 150px 1fr;gap:12px;align-items:start}
-.at{color:var(--mut)}.act{color:var(--gold)}.ok{color:var(--ok)}.no{color:var(--err)}.sum{color:var(--txt)}
-.empty{padding:40px;text-align:center;color:var(--mut)}
+.sec{padding:10px 18px 4px;color:var(--mut);text-transform:uppercase;letter-spacing:2px;font-size:11px}
+.empty{padding:34px;text-align:center;color:var(--mut)}
+.item{padding:8px 18px;border-bottom:1px solid var(--line)}
+.line{display:flex;align-items:center;gap:10px;white-space:nowrap}
+.mk{width:14px;text-align:center}.act{color:var(--gold)}
+.dots{flex:1;border-bottom:1px dotted #2a2a36;margin:0 4px;transform:translateY(-3px)}
+.st{text-transform:uppercase;font-size:11px;letter-spacing:1px}
+.st.run{color:var(--run)}.st.done{color:var(--ok)}.st.fail{color:var(--err)}.st.stall{color:var(--err)}
+.el{color:var(--txt);min-width:52px;text-align:right}.to{color:var(--mut);min-width:48px}
+.sub{color:var(--mut);padding-left:24px;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.bar{height:3px;background:#1a1a24;border-radius:2px;margin:6px 0 2px 24px;overflow:hidden}
+.bar>i{display:block;height:100%;background:var(--run);width:0;transition:width .3s linear}
+.bar.warn>i{background:var(--gold)}.bar.over>i{background:var(--err)}
+.dim{opacity:.5}.spin{display:inline-block;animation:s 1s steps(8) infinite;color:var(--run)}@keyframes s{to{transform:rotate(360deg)}}
+.ok{color:var(--ok)}.no{color:var(--err)}.at{color:var(--mut)}
 </style></head><body>
 <header><h1>● Ace — live proof of execution</h1>
 <div><span id=meta></span> &nbsp; <button onclick=stopRec()>Stop recording</button></div></header>
-<div id=feed class=empty>loading…</div>
+<div class=sec>Working now</div><div id=active class=empty>—</div>
+<div class=sec>Recently done</div><div id=recent class=empty>loading…</div>
 <script>
-async function tick(){
- try{const r=await fetch('/api/activity');const d=await r.json();const f=d.feed||[];
-  const el=document.getElementById('feed');
-  document.getElementById('meta').textContent=f.length+' actions';
-  if(!f.length){el.className='empty';el.textContent='No actions logged yet.';return}
-  el.className='';el.innerHTML=f.slice().reverse().map(x=>
-   `<div class=row><span class=at>${x.at||''}</span><span class=act>${x.action||''}</span>`+
-   `<span class=sum><b class=${x.ok?'ok':'no'}>${x.ok?'✓':'✗'}</b> ${(x.summary||'').replace(/</g,'&lt;')}</span></div>`).join('');
+let ST={active:[],recent:[],base:0};
+function fmt(s){s=Math.max(0,s);return s<99?s.toFixed(s<10?1:0)+'s':(s/60).toFixed(1)+'m'}
+function esc(t){return (t||'').replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]))}
+function renderActive(){
+  const el=document.getElementById('active');const A=ST.active;
+  if(!A.length){el.className='empty';el.textContent='Idle — nothing running right now.';return}
+  const dt=(Date.now()/1000)-ST.base;el.className='';
+  el.innerHTML=A.map(a=>{
+   const e=(a.elapsed||0)+dt, to=a.timeout, stall=a.stalled;
+   const st=stall?'<span class="st stall">STALLED</span>':'<span class="st run">RUNNING</span>';
+   const mk=stall?'<span class=mk>⚠</span>':'<span class="mk spin">◜</span>';
+   const toTxt=to?`<span class=to>⏱${fmt(to)}</span>`:'<span class=to></span>';
+   let bar='';if(to){const p=Math.min(100,e/to*100);const cl=p>90?'over':p>66?'warn':'';
+     bar=`<div class="bar ${cl}"><i style="width:${p}%"></i></div>`}
+   return `<div class="item ${stall?'dim':''}"><div class=line>${mk}<span class=act>${esc(a.action)}</span>`+
+     `<span class=dots></span>${st}<span class=el>${fmt(e)}</span>${toTxt}</div>`+
+     `<div class=sub>${esc(a.summary)}</div>${bar}</div>`}).join('');
+}
+function renderRecent(){
+  const el=document.getElementById('recent');const R=ST.recent;
+  if(!R.length){el.className='empty';el.textContent='No actions logged yet.';return}
+  el.className='';el.innerHTML=R.map(x=>{
+   const good=x.ok!==false&&x.status!=='failed';
+   const dur=(x.duration!=null)?`<span class=el>${fmt(x.duration)}</span>`:'<span class=el></span>';
+   return `<div class=item><div class=line><span class=mk>${good?'<b class=ok>✓</b>':'<b class=no>✗</b>'}</span>`+
+     `<span class=act>${esc(x.action)}</span><span class=dots></span>`+
+     `<span class="st ${good?'done':'fail'}">${good?'DONE':'FAILED'}</span>${dur}`+
+     `<span class=to></span></div><div class=sub>${esc(x.summary)}</div></div>`}).join('');
+}
+async function poll(){
+ try{const r=await fetch('/api/activity');const d=await r.json();
+  ST.active=d.active||[];ST.recent=d.recent||[];ST.base=Date.now()/1000;
+  document.getElementById('meta').textContent=`${ST.active.length} running · ${(d.total!=null?d.total:ST.recent.length)} done`;
+  renderActive();renderRecent();
  }catch(e){}
 }
-async function stopRec(){try{await fetch('/api/activity/stop-recording',{method:'POST'});tick()}catch(e){}}
-tick();setInterval(tick,3000);
+async function stopRec(){try{await fetch('/api/activity/stop-recording',{method:'POST'});poll()}catch(e){}}
+poll();setInterval(poll,1500);setInterval(renderActive,200);  // poll slow, tick the clock fast
 </script></body></html>"""
 
 
@@ -979,13 +1018,23 @@ async def activity_page(request):
 
 
 async def api_activity(request):
-    """JSON of the activity ledger (~/.utah/activity/actions.jsonl) for the live feed."""
+    """Live proof-of-execution state for the deck panel: ``active`` (running now, with
+    server-computed elapsed + timeout so the page can tick a clock) and ``recent`` (finished,
+    newest first, with real durations). ``feed`` is kept for any older consumer."""
     try:
         from utah import control
 
-        return JSONResponse({"feed": control.feed(80)})
+        act = control.activity(n=40)
+        return JSONResponse({
+            "active": act["active"],
+            "recent": act["recent"],
+            "now": act["now"],
+            "total": len(control.feed(500)),
+            "feed": act["recent"],  # back-compat: old page read .feed
+        })
     except Exception as exc:  # noqa: BLE001
-        return JSONResponse({"error": str(exc), "feed": []}, status_code=503)
+        return JSONResponse({"error": str(exc), "active": [], "recent": [], "feed": []},
+                            status_code=503)
 
 
 async def api_stop_recording(request):
