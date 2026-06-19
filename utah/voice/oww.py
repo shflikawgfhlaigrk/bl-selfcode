@@ -208,6 +208,14 @@ class OpenWakeWord:
             idx = self._chunks_seen * CHUNK_SAMPLES
             self._chunks_seen += 1
             scores = self._model.predict(chunk) or {}
+            # Surface near-wake scores below threshold at DEBUG — invaluable for tuning the
+            # threshold to a given voice/mic without guessing (2026-06-19: this is how the
+            # 0.82 threshold was found to be silently rejecting Michael's 0.71-0.74 "hey ace").
+            if scores and log.isEnabledFor(logging.DEBUG):
+                _bk = max(scores, key=lambda k: scores[k])
+                if float(scores[_bk]) > 0.3:
+                    log.debug("oww raw score: %s=%.2f (threshold=%.2f)",
+                              _bk, float(scores[_bk]), self.threshold)
             chunk_hits = []
             for k, c in scores.items():
                 try:

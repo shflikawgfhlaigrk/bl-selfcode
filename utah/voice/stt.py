@@ -14,8 +14,10 @@ import select
 import signal
 import subprocess
 import sys
+import tempfile
 import threading
 import time
+import wave
 from typing import Callable, Protocol
 
 from utah import config
@@ -474,6 +476,61 @@ def _is_dead(engine_name: str) -> bool:
     return time.monotonic() < _dead_until.get(engine_name, 0.0)
 
 
+# ── Engine self-test: PROVE death, never assume it ───────────────────────────
+# A loud post-wake segment that transcribes to "" does NOT mean the engine is dead.
+# Ambient noise, music, a TV, Ace's own echo bleeding into a long false-wake capture,
+# or a cough all produce loud audio with NO transcribable speech — and a perfectly
+# healthy engine correctly returns "" for them. The only unambiguous death signal is:
+# the engine fails to transcribe KNOWN-GOOD speech. ``engine_self_test`` synthesizes a
+# fixed phrase once (system ``say`` -> 16 kHz mono WAV, cached on disk) and asks the
+# CURRENT engine to transcribe it. True = engine demonstrably alive; False = engine
+# cannot transcribe known speech (the real 2026-06-18 silent-deaf failure: deps died
+# mid-run -> "" forever); None = probe could not be built (indeterminate -> the caller
+# must NOT flag dead, so a maybe-healthy engine is never churned on a hunch).
+_PROBE_PHRASE = "the quick brown fox jumps over the lazy dog"
+_PROBE_WAV: "str | bool | None" = False   # False = not yet built; None = build failed
+
+
+def _probe_wav() -> "str | None":
+    """Lazily build (and cache) a known-good 16 kHz mono speech WAV. None if it can't be
+    built on this host (no ``say``/``afconvert``)."""
+    global _PROBE_WAV
+    if _PROBE_WAV is not False:
+        return _PROBE_WAV  # type: ignore[return-value]
+    _PROBE_WAV = None
+    wav = os.path.join(tempfile.gettempdir(), "utah_stt_probe_16k.wav")
+    try:
+        if not (os.path.exists(wav) and os.path.getsize(wav) > 1000):
+            aiff = wav[:-4] + ".aiff"
+            if subprocess.run(["say", "-o", aiff, _PROBE_PHRASE],
+                              capture_output=True, timeout=15).returncode != 0:
+                return None
+            subprocess.run(["afconvert", "-f", "WAVE", "-d", "LEI16@16000", "-c", "1",
+                            aiff, wav], capture_output=True, timeout=15)
+        if os.path.exists(wav) and os.path.getsize(wav) > 1000:
+            _PROBE_WAV = wav
+    except Exception as exc:  # noqa: BLE001 — the self-test must never raise into the loop
+        log.debug("STT self-test probe build failed: %s", exc)
+    return _PROBE_WAV  # type: ignore[return-value]
+
+
+def engine_self_test(timeout: float = 20.0) -> "bool | None":
+    """True if the CURRENT engine transcribes a known-good speech clip, False if it cannot
+    (genuinely dead), None if the probe could not be built (indeterminate)."""
+    probe = _probe_wav()
+    if not probe:
+        return None
+    try:
+        out = get_stt().transcribe(probe)
+    except Exception as exc:  # noqa: BLE001
+        log.warning("STT self-test raised (%s) — engine treated as dead", exc)
+        return False
+    alive = bool(re.search(r"[a-z0-9]", (out or "").lower()))
+    log.info("STT self-test (%s): transcript=%r -> %s",
+             type(get_stt()).__name__, (out or "")[:60], "ALIVE" if alive else "DEAD")
+    return alive
+
+
 def _ordered_factories() -> list[tuple[str, "Callable[[], STT | None]"]]:
     """(name, factory) pairs best-first, honoring ``STT_ENGINE`` as the primary then
     the rest as fallbacks. Each factory returns ``None`` when that engine is not
@@ -571,4 +628,5 @@ def transcribe(wav_path: str) -> str:
 
 
 __all__ = ["STT", "MoonshineSTT", "MLXWhisperSTT", "SubprocessSTT", "WhisperCppSTT",
-           "clean_transcript", "get_stt", "set_stt", "transcribe", "flag_dead"]
+           "clean_transcript", "get_stt", "set_stt", "transcribe", "flag_dead",
+           "engine_self_test"]

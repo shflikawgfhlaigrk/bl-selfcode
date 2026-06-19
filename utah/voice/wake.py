@@ -35,6 +35,20 @@ _MISHEARD_IS = re.compile(
     r"^is\s+(what|how|who|when|where|why|tell|give|summarize|check|show|read)\b",
     re.IGNORECASE,
 )
+#: When openWakeWord has ALREADY confirmed "hey ace" (audio_wake=True) but the STT
+#: mangled the wake token so :func:`extract_command` can't find it ("KAs. What is the
+#: time?", "Hey, hey, what's... what is two plus two"), salvage the command. The tell
+#: is POSITION: a mangled wake leaves GARBLE BEFORE the command ("KAs. *What* is..."),
+#: whereas room speech that merely false-tripped Stage A STARTS with the command word
+#: ("*what's* the lead count" — the 2026-06-12 policy these tests guard). So salvage
+#: only when a STRONG command word appears with leading garble in front of it. Weak
+#: auxiliaries (is/are/do/can…) are excluded — they're far too common in room speech.
+_CMD_START = re.compile(
+    r"\b(what|what's|whats|how|who|whom|whose|when|where|why|which|"
+    r"tell|give|show|read|check|summarize|list|find|search|play|"
+    r"name|describe|explain|define|calculate|spell|remind)\b",
+    re.IGNORECASE,
+)
 _STRIP = " ,.:;!?-'’\t\n"
 
 
@@ -80,6 +94,13 @@ def resolve_command(transcript: str, *, audio_wake: bool = False,
     t = (transcript or "").strip()
     if not t:
         return ""  # bare audio wake — orb pulse only
+    # Stage A confirmed "hey ace"; the STT just mangled the wake token. Salvage the
+    # command ONLY when a strong command word has GARBLE BEFORE it — that leading garble
+    # is the mishedard wake. Room speech that merely false-tripped Stage A starts with
+    # the command word (no leading garble) and is still dropped (the ace-only policy).
+    cm = _CMD_START.search(t)
+    if cm and t[:cm.start()].strip(_STRIP):
+        return t[cm.start():].lstrip(_STRIP)
     return None
 
 

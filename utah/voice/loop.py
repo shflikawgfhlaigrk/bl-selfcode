@@ -79,7 +79,7 @@ MAX_INPROCESS_REOPENS = int(os.environ.get("UTAH_VOICE_MAX_REOPENS", "3"))
 # with UTAH_VOICE_AGC=0.
 _AGC_ON = os.environ.get("UTAH_VOICE_AGC", "1") == "1"
 _AGC_TARGET = float(os.environ.get("UTAH_VOICE_AGC_TARGET", "0.30"))   # target peak (0-1)
-_AGC_GATE = float(os.environ.get("UTAH_VOICE_AGC_GATE", "0.025"))      # below this peak = silence, no boost
+_AGC_GATE = float(os.environ.get("UTAH_VOICE_AGC_GATE", "0.025"))     # below this peak = silence, no boost (the per-block guard in GatedAGC.process stops floor-amplification; the gate stays low so moderate speech is still boosted enough for openWakeWord)
 _AGC_MAX_GAIN = float(os.environ.get("UTAH_VOICE_AGC_MAX_GAIN", "12.0"))
 
 # ── High-pass filter ────────────────────────────────────────────────────────
@@ -137,7 +137,7 @@ _STALE_FRAMES = int(os.environ.get("UTAH_VOICE_STALE_FRAMES", "40"))
 #: bare-wake ack turned the storm audible ("Yeah?" on loop). Real speech on this mic
 #: runs rms ≥0.03; 0.012 sits safely between hiss and voice. Silence cannot wake Ace.
 _WAKE_MIN_RMS = float(os.environ.get("UTAH_VOICE_WAKE_MIN_RMS", "0.012"))
-_WAKE_LOUD_WINDOW_S = float(os.environ.get("UTAH_VOICE_WAKE_LOUD_WINDOW_S", "2.0"))
+_WAKE_LOUD_WINDOW_S = float(os.environ.get("UTAH_VOICE_WAKE_LOUD_WINDOW_S", "4.0"))
 #: Empty-wake cooldown: after a wake produces no command (ambient/TV/echo false-fire that
 #: clears the loud-audio guard but isn't a real "hey ace"+command), suppress re-arming for
 #: this long so the model can't churn a 5.5s Whisper pass every few seconds (2026-06-13:
@@ -147,14 +147,15 @@ _WAKE_LOUD_WINDOW_S = float(os.environ.get("UTAH_VOICE_WAKE_LOUD_WINDOW_S", "2.0
 _EMPTY_WAKE_COOLDOWN_S = float(os.environ.get("UTAH_VOICE_EMPTY_WAKE_COOLDOWN", "12.0"))
 
 #: Dead-STT self-heal: how many consecutive LOUD (rms ≥ VOICE_SILENCE_RMS), post-wake
-#: segments may transcribe to "" before we conclude the STT ENGINE is dead — not the
-#: speaker — and rebuild it (:func:`utah.voice.stt.flag_dead`). Loud-but-empty means
-#: real audio reached a transcriber that produced nothing: a vanished model, an
-#: uninstalled package, a wedged server. This is the safety net for the 2026-06-18
-#: silent-deaf bug: the engine was chosen once at boot, its deps died mid-run, and the
-#: loop returned "" for every command forever with no recovery. 2 in a row (not 1) so a
-#: single cough/bang after a wake doesn't needlessly rebuild. Quiet empty segments are
-#: handled separately (the speaker, not the engine) and never count here.
+#: segments may transcribe to "" before we *self-test* the engine to decide if it is
+#: dead (:func:`utah.voice.stt.engine_self_test` → :func:`utah.voice.stt.flag_dead`).
+#: Loud-but-empty is NOT proof of death: ambient noise, music, a TV, or Ace's own echo
+#: produce loud audio with no transcribable speech, and a healthy engine correctly
+#: returns "". So a streak only triggers the known-good self-test; the engine is rebuilt
+#: ONLY if it also fails to transcribe a reference clip — the real 2026-06-18 silent-deaf
+#: bug (engine chosen at boot, deps died mid-run, "" for every command forever). 2 in a
+#: row (not 1) so a single cough/bang after a wake doesn't even run the test. Quiet empty
+#: segments are handled separately (the speaker, not the engine) and never count here.
 _STT_DEAD_STREAK = int(os.environ.get("UTAH_VOICE_STT_DEAD_STREAK", "2"))
 #: Don't rebuild the STT engine more than once per this window (rebuild re-spawns a
 #: model/server — cheap but not free; this damps thrash if nothing can transcribe).
@@ -234,8 +235,15 @@ class GatedAGC:
         if a.size == 0:
             return pcm
         peak = float(np.abs(a).max())
-        # fast attack (jump up to a louder peak), slow release (decay gently)
-        self._env = peak if peak > self._env else self._env * 0.92 + peak * 0.08
+        # Fast attack, FAST release (0.75). The boost holds across a CONTINUOUS phrase
+        # like "hey ace" — so openWakeWord sees one evenly-boosted utterance, not a
+        # fragmented one (a per-block gate dropped the quiet inter-syllable dips and
+        # made the wake model score the same "hey ace" 0.74 one time and <0.25 the
+        # next). But the envelope collapses within ~0.3s of silence, so the noise floor
+        # in the GAPS is not amplified — the slow-release (0.92) tail was what inflated
+        # a quiet room ~4x, defeated the VAD's end-of-speech (15s max-captures) and
+        # false-fired the wake on amplified hiss (measured 2026-06-19).
+        self._env = peak if peak > self._env else self._env * 0.75 + peak * 0.25
         if self._env < self._gate:         # silence/noise floor — do not amplify
             return pcm
         gain = min(self._target / self._env, self._max_gain)
@@ -722,25 +730,35 @@ def run() -> None:
                     return
                 if not text and segment_armed:
                     # Loud (rms ≥ VOICE_SILENCE_RMS), post-wake audio that transcribed to
-                    # NOTHING — real speech reached the engine and it produced "". A streak
-                    # of these means the ENGINE is dead (vanished model / uninstalled
-                    # package / wedged server), not the speaker. Rebuild onto a working
-                    # engine so voice can't stay stuck on a silent transcriber forever
-                    # (the 2026-06-18 silent-deaf bug: engine chosen at boot, deps died
-                    # mid-run, every command returned "" with no recovery).
+                    # NOTHING. This is NOT proof the engine is dead — it is the NORMAL
+                    # result for ambient noise / music / a TV / Ace's own echo on a long
+                    # false-wake capture / a cough: real energy, no transcribable speech,
+                    # and a healthy engine correctly returns "". A streak only earns a
+                    # *self-test*: ask the current engine to transcribe a known-good clip.
+                    # Flag it dead ONLY if it fails THAT (the real 2026-06-18 silent-deaf
+                    # bug: deps died mid-run → "" forever). Passing the self-test means the
+                    # audio had no speech — keep the engine. This kills the false-positive
+                    # death-spiral that churned the healthy whisper.cpp server into a
+                    # cooldown and flipped to mlx on plain no-speech audio.
                     stt_health["empty_loud_streak"] += 1
                     now = time.monotonic()
                     if (stt_health["empty_loud_streak"] >= _STT_DEAD_STREAK
                             and now - stt_health["last_heal"] > _STT_HEAL_COOLDOWN_S):
                         dead = type(stt.get_stt()).__name__
-                        log.error("voice: %d loud post-wake segments → EMPTY (rms=%.4f) — "
-                                  "STT engine %s looks dead; rebuilding a working one",
-                                  stt_health["empty_loud_streak"], seg_rms, dead)
-                        stt.flag_dead(dead)            # next transcribe re-selects, skipping it
+                        verdict = stt.engine_self_test()
                         stt_health["last_heal"] = now
                         stt_health["empty_loud_streak"] = 0
-                        vstate["stt_heals"] = vstate.get("stt_heals", 0) + 1
-                        state.write(**vstate)
+                        if verdict is False:
+                            log.error("voice: STT engine %s FAILED the known-good self-test "
+                                      "→ genuinely dead; rebuilding a working one", dead)
+                            stt.flag_dead(dead)        # next transcribe re-selects, skipping it
+                            vstate["stt_heals"] = vstate.get("stt_heals", 0) + 1
+                            state.write(**vstate)
+                        else:
+                            log.info("voice: %d loud empties but engine %s PASSES the "
+                                     "self-test (%s) — the audio had no speech, not a dead "
+                                     "engine; keeping it", _STT_DEAD_STREAK, dead,
+                                     "probe ok" if verdict else "probe unavailable")
                 if text and not _ECHO.allow(text):
                     log.info("voice: echo-dropped duplicate transcript")
                     return
@@ -841,7 +859,15 @@ def run() -> None:
                 _collect_start = 0.0
                 _collect_deadline = 0.0     # hard max (end of capture no matter what)
                 _last_speech_at = 0.0       # last frame with speech-level energy
-                _last_loud_at = 0.0
+                # Seed the storm-guard clock to NOW, not 0.0. The stream reopens after
+                # EVERY answered turn; a 0.0 reset made the guard think "no loud audio in
+                # 2s" and REJECT the user's very next "hey ace" right after Ace replied
+                # (the 2026-06-19 "first 2 worked then it failed" bug — the mic is muted
+                # during Ace's TTS so the clock never refreshes mid-conversation). The
+                # user just spoke a turn → they are present → let the immediate follow-up
+                # wake through. AGC-off already removed the amplified-hiss false-wakes this
+                # guard was built for, so the boot-time leniency window is negligible risk.
+                _last_loud_at = time.monotonic()
                 _button_barge_arm = False
                 _prev_frame = b""           # for the stale-buffer (frozen mic) detector
                 _stale_count = 0
