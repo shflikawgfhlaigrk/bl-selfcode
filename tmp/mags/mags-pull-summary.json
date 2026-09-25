@@ -1,0 +1,12 @@
+{
+  "pulled_at": "2026-07-12T05:17:03.364Z",
+  "product_count": 396,
+  "sku_variation_count": 3183,
+  "category_count": 233,
+  "sku_values_present": 3181,
+  "numeric_upc_like_sku_count": 50,
+  "merchant_id": "MLVTVMXRGXXP3",
+  "site_id": "817613422653856554",
+  "location_id_observed": "LCP2395Z8RW11",
+  "note": "Public Square Online API exposes SKU strings, Square product IDs, Square SKU variation IDs, prices, inventory and image/category data. No separate GTIN/UPC/barcode field was observed in public responses; sku is the barcode candidate."
+}
